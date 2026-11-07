@@ -24,8 +24,11 @@ val profilingBuildTypes = setOf("nonMinifiedRelease", "benchmarkRelease")
 val profilingServerUrl = providers.gradleProperty("iptv.profileServer").orElse("http://10.0.2.2:8791").get()
 
 // Same number for a local build and the CI build of one commit; later commits are always higher (KTD11).
+// -Piptv.versionCode= overrides it: dev.sh uses that to install over a newer build already on the stick.
 val commitCount = providers.exec { commandLine("git", "rev-list", "--count", "HEAD") }
     .standardOutput.asText.get().trim().toInt()
+val appVersion = providers.gradleProperty("iptv.versionCode").orNull?.toInt()
+    ?: (commitCount + providers.gradleProperty("iptv.versionOffset").get().toInt())
 
 android {
     namespace = "com.mohamed3on.iptv"
@@ -35,8 +38,8 @@ android {
         applicationId = "com.mohamed3on.iptv"
         minSdk = 30
         targetSdk = 36
-        versionCode = commitCount
-        versionName = "1.$commitCount"
+        versionCode = appVersion
+        versionName = "1.$appVersion"
         buildConfigField("String", "SERVER_URL", "\"$serverUrl\"")
         buildConfigField("String", "APP_TOKEN", "\"$appToken\"")
     }

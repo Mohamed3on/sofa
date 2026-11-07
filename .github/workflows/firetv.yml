@@ -66,7 +66,7 @@ jobs:
         run: |
           apk=app/build/outputs/apk/release/app-release.apk
           dm="$RUNNER_TEMP/app.dm"
-          code=$(git rev-list --count HEAD)
+          code=$(( $(git rev-list --count HEAD) + $(sed -n 's/^iptv.versionOffset=//p' gradle.properties) ))
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/app_deploy && chmod 600 ~/.ssh/app_deploy
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
