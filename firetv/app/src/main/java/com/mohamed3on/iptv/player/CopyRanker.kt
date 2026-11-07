@@ -1,7 +1,6 @@
 package com.mohamed3on.iptv.player
 
 import com.mohamed3on.iptv.data.KeyValueStore
-import com.mohamed3on.iptv.data.debridName
 import com.mohamed3on.iptv.player.Capacity.Source
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -137,7 +136,7 @@ fun rankCopies(
     val want = prefer?.takeIf { l -> copies.any { has(it, l) } }
     val ignore = Correction.IgnoreBandwidth in corrections
     val iptv = if (ignore) null else typicalMbps(Source.Iptv)
-    val rd = if (ignore) null else typicalMbps(Source.RealDebrid)
+    val rd = if (ignore) null else typicalMbps(Source.Debrid)
     val ranked = copies.map { judge(it, p, marks[it.id], originalLanguage, want?.let { l -> has(it, l) }, if (it.source == Source.Iptv) iptv else rd, it.id == pin, learnt) }.sortedWith(ORDER)
     val pick = ranked.firstOrNull()?.takeIf { it.pinned || it.support != Support.Wont }
     for (r in ranked) r.reason = reason(r, pick, want)
@@ -250,7 +249,7 @@ private fun versus(a: Ranked, b: Ranked, fit: Boolean = true): Int = when {
     a.bits != b.bits -> if (a.bits > b.bits) -4 else 4
     a.sound != b.sound -> if (a.sound > b.sound) -5 else 5
     a.subs != b.subs -> if (a.subs) -6 else 6
-    a.copy.source != b.copy.source -> if (a.copy.source == Source.RealDebrid) -7 else 7
+    a.copy.source != b.copy.source -> if (a.copy.source == Source.Debrid) -7 else 7
     a.copy.seeds != b.copy.seeds -> if (a.copy.seeds > b.copy.seeds) -8 else 8
     else -> 0
 }
@@ -311,7 +310,7 @@ private fun difference(k: Int, r: Ranked, p: Ranked): String = when (k) {
     4 -> if (r.tier != p.tier) "${tierName(r.tier)} picture vs ${tierName(p.tier)} (${rate(r, p)})" else rate(r, p)
     5 -> if (r.sound == 0) r.why else "${SOUNDS[r.sound]} vs ${SOUNDS[p.sound]}"
     6 -> if (r.subs) "English subtitles, the pick has none" else "no English subtitles"
-    7 -> if (r.copy.source == Source.Iptv) "same, on IPTV" else "same, on $debridName"
+    7 -> if (r.copy.source == Source.Iptv) "same, on IPTV" else "same, on Debrid"
     8 -> "same, ${r.copy.seeds} vs ${p.copy.seeds} seeders"
     else -> ""
 }
@@ -416,7 +415,7 @@ class CopyChoices(private val store: KeyValueStore, private val now: () -> Long 
         val at = now()
         marks.getOrPut(setup.fingerprint) { mutableMapOf() }[copy.id] =
             // A failed IPTV copy is tried again after a day: a busy or dead provider link can look like a bad file.
-            Mark(works, at, when { copy.source == Source.RealDebrid -> at + RD_MARK_MS; works -> Long.MAX_VALUE; else -> at + IPTV_FAIL_MS })
+            Mark(works, at, when { copy.source == Source.Debrid -> at + RD_MARK_MS; works -> Long.MAX_VALUE; else -> at + IPTV_FAIL_MS })
         write<Map<String, Map<String, Mark>>>(MARKS, marks)
     }
 

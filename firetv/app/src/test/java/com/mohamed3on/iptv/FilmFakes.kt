@@ -1,9 +1,9 @@
 package com.mohamed3on.iptv
 
 import com.mohamed3on.iptv.data.Debrid
-import com.mohamed3on.iptv.data.RdCandidate
-import com.mohamed3on.iptv.data.RdCheck
-import com.mohamed3on.iptv.data.RdStatus
+import com.mohamed3on.iptv.data.DebridCandidate
+import com.mohamed3on.iptv.data.DebridCheck
+import com.mohamed3on.iptv.data.DebridStatus
 import com.mohamed3on.iptv.player.Bandwidth
 import com.mohamed3on.iptv.player.Capacity
 import com.mohamed3on.iptv.player.FilmPlayer
@@ -67,19 +67,16 @@ internal class FakeFilm(private val scope: CoroutineScope, private val clock: ()
     fun end() = listener!!.onEnded()
 }
 
-/** Every Real-Debrid copy in the tests is in the account; links count up so a fresh one is visible. */
 /** The debrid has the torrents [ready] names (every one by default); links count up so a fresh one is visible. */
 internal class FakeDebrid(private val ready: (String) -> Boolean = { true }) : Debrid {
-    override val status = MutableStateFlow(RdStatus.Ok)
+    override val status = MutableStateFlow(DebridStatus("Fake"))
     var links = 0
     var checks = 0
-    override suspend fun inAccount(candidates: List<RdCandidate>) = check(candidates)
-    override suspend fun probe(c: RdCandidate, wait: Boolean): RdCheck? = null
-    override suspend fun check(candidates: List<RdCandidate>): Map<RdCandidate, RdCheck> {
+    override suspend fun check(candidates: List<DebridCandidate>): Map<DebridCandidate, DebridCheck> {
         checks++
-        return candidates.associateWith { if (ready(it.hash)) RdCheck.Ready(it.hash, "hoster/${it.hash}") else RdCheck.NotCached }
+        return candidates.associateWith { if (ready(it.hash)) DebridCheck.Ready(it.hash, "hoster/${it.hash}") else DebridCheck.NotCached }
     }
-    override suspend fun link(ready: RdCheck.Ready) = "https://rd.test/${ready.torrentId}/${++links}"
+    override suspend fun link(ready: DebridCheck.Ready) = "https://rd.test/${ready.torrentId}/${++links}"
 }
 
 internal class FakeBandwidth : Bandwidth {

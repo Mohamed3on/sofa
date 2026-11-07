@@ -171,7 +171,6 @@ import com.mohamed3on.iptv.data.SyncError
 import com.mohamed3on.iptv.data.groupLabel
 import com.mohamed3on.iptv.data.movieUrl
 import com.mohamed3on.iptv.data.posterUrl
-import com.mohamed3on.iptv.data.debridName
 import com.mohamed3on.iptv.graph
 import com.mohamed3on.iptv.player.Capacity
 import com.mohamed3on.iptv.system.Check
@@ -455,13 +454,13 @@ fun MoviesLayer(
     }
 
     // firetv/check.sh (system/Check): the browsing screen is shown (two frames: its rows build a frame late), the
-    // Real-Debrid account's state, and the screen an open target names, once the library is in.
+    // debrid account's state, and the screen an open target names, once the library is in.
     LaunchedEffect(library != null) {
         if (library == null) return@LaunchedEffect
         repeat(2) { withFrameNanos {} }
         Check.log("movies_shown", "from" to if (refreshed[0]) "box" else "disk")
     }
-    LaunchedEffect(Unit) { graph.debrid.status.collect { Check.log("rd", "status" to it) } }
+    LaunchedEffect(Unit) { graph.debrid.status.collect { Check.log("debrid", "service" to it.name, "status" to it.state) } }
     val check by Check.open.collectAsState()
     LaunchedEffect(check, library) {
         val target = check ?: return@LaunchedEffect
@@ -1887,7 +1886,7 @@ private fun Unavailable(focus: FocusRequester, onRetry: () -> Unit) {
 }
 
 /** Every source has answered and no copy plays here: the title stays, its page says so (R21). */
-private val Prepared.unavailable get() = plays == null && rdChecked && ranking != null && answer?.rdPending == false
+private val Prepared.unavailable get() = plays == null && debridChecked && ranking != null && answer?.debridPending == false
 
 /**
  * Where focus goes back to on a title page after a page its cast or More like this opened: the item [opened]
@@ -1975,7 +1974,7 @@ private fun FilmPage(
                     }
                     if (unavailable) {
                         Text("No copy available", style = Type.headline.copy(color = Palette.warning), modifier = Modifier.appear().padding(top = Space.s).focusRequester(noCopy).focusable())
-                        Text("Neither IPTV nor $debridName has one that plays here. It stays in the library for when one turns up.", style = Type.caption, modifier = Modifier.appear())
+                        Text("Neither IPTV nor ${debridName()} has one that plays here. It stays in the library for when one turns up.", style = Type.caption, modifier = Modifier.appear())
                     } else {
                         // The Plays line may run past the column, across the page's whole width.
                         if (!buttons) Box(Modifier.padding(top = Space.s).height(PLAYS_HEIGHT)) else PlaysLine(
@@ -2019,6 +2018,7 @@ private fun FilmPage(
 @Composable
 private fun PlaysLine(title: TitleId, fallback: List<String>?, modifier: Modifier = Modifier) {
     val films = LocalContext.current.graph.films
+    val service = debridName()
     val p by remember(title) { films.state(title) }.collectAsState()
     var late by remember { mutableStateOf(false) }
     LaunchedEffect(title) {
@@ -2027,9 +2027,9 @@ private fun PlaysLine(title: TitleId, fallback: List<String>?, modifier: Modifie
     }
     val copy = p.plays ?: p.takeIf { late }?.pickWithoutWaiting()?.copy
     val text = when {
-        copy != null -> copyLine(copy, p.answer)
+        copy != null -> copyLine(copy, p.answer, service)
         p.failed || (late && p.ranking == null) -> fallback?.joinToString(" · ")
-        p.rdChecked && p.ranking != null -> "no copy plays here right now"
+        p.debridChecked && p.ranking != null -> "no copy plays here right now"
         else -> null
     }
     // Shown as format chips; the source, bitrate and size stay in Versions.

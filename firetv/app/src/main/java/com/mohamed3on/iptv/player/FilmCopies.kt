@@ -2,10 +2,10 @@ package com.mohamed3on.iptv.player
 
 import com.mohamed3on.iptv.data.CopiesAnswer
 import com.mohamed3on.iptv.data.Debrid
-import com.mohamed3on.iptv.data.RdCandidate
-import com.mohamed3on.iptv.data.RdCheck
-import com.mohamed3on.iptv.data.RdError
-import com.mohamed3on.iptv.data.RdStatus
+import com.mohamed3on.iptv.data.DebridCandidate
+import com.mohamed3on.iptv.data.DebridCheck
+import com.mohamed3on.iptv.data.DebridError
+import com.mohamed3on.iptv.data.DebridState
 import com.mohamed3on.iptv.data.ServerCopy
 import com.mohamed3on.iptv.player.Capacity.Source
 import kotlinx.coroutines.CoroutineScope
@@ -21,7 +21,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 
 /** A title's copies as the box answered, mapped for the ranker and [FilmSession], with what Versions shows of each. */
-class TitleAnswer(val copies: TitleCopies, val rdPending: Boolean = false, val rdUnavailable: Boolean = false, val iptvUnavailable: Boolean = false, private val server: Map<String, ServerCopy> = emptyMap()) {
+class TitleAnswer(val copies: TitleCopies, val debridPending: Boolean = false, val debridUnavailable: Boolean = false, val iptvUnavailable: Boolean = false, private val server: Map<String, ServerCopy> = emptyMap()) {
     /** An IPTV copy's container ("mkv"). */
     fun ext(id: String): String? = server[id]?.ext
     /** A Real-Debrid copy's size in bytes; 0 unknown. */
@@ -32,21 +32,21 @@ class TitleAnswer(val copies: TitleCopies, val rdPending: Boolean = false, val r
 
 /**
  * A title's [CopyPlan] as it stands: its copies ranked for this setup, the debrid answers, and [plays], the copy
- * Play opens, once [rdChecked] (or there is nothing on a debrid). [failed] when the box could not answer: Play then
+ * Play opens, once [debridChecked] (or there is nothing on a debrid). [failed] when the box could not answer: Play then
  * starts the library's IPTV copy. [asked] once the box is asked no more.
  */
 data class Prepared(
     val answer: TitleAnswer? = null,
     val ranking: Ranking? = null,
-    val rd: Map<String, RdCheck> = emptyMap(),
-    val rdChecked: Boolean = false,
+    val debrid: Map<String, DebridCheck> = emptyMap(),
+    val debridChecked: Boolean = false,
     val plays: Copy? = null,
     val failed: Boolean = false,
     val asked: Boolean = false,
     /** The debrid premium has ended: its copies don't play. */
     val debridOff: Boolean = false,
     /** The last check ran out of time: copies it didn't answer are still worth a check of their own. */
-    val rdSlow: Boolean = false,
+    val debridSlow: Boolean = false,
 ) {
     /**
      * [c] can play as far as is known: IPTV's (unless [iptvBusy]), a debrid copy that is ready, or one not answered
@@ -54,8 +54,8 @@ data class Prepared(
      */
     fun playable(c: Copy, iptvBusy: Boolean = false): Boolean {
         if (c.source == Source.Iptv) return !iptvBusy
-        val torrent = answer?.copies?.rd?.get(c.id) ?: return false
-        return !debridOff && rd[c.id].let { it is RdCheck.Ready || it == null && (!rdChecked || rdSlow || torrent.cached) }
+        val torrent = answer?.copies?.debrid?.get(c.id) ?: return false
+        return !debridOff && debrid[c.id].let { it is DebridCheck.Ready || it == null && (!debridChecked || debridSlow || torrent.cached) }
     }
 
     /** What plays now (#14): the best copy not in [skip] that can play; a pin beats "won't play here". The one answer for the Plays line, Versions and Play. */
@@ -64,7 +64,7 @@ data class Prepared(
 
     /** What Play opens when the debrid check outlasts its wait (KTD13): the best that plays without the check. */
     fun pickWithoutWaiting(): Ranked? =
-        pick(ranking?.copies.orEmpty().filter { it.copy.source != Source.Iptv && rd[it.copy.id] !is RdCheck.Ready }.mapTo(HashSet()) { it.copy.id })
+        pick(ranking?.copies.orEmpty().filter { it.copy.source != Source.Iptv && debrid[it.copy.id] !is DebridCheck.Ready }.mapTo(HashSet()) { it.copy.id })
 }
 
 /**
@@ -89,7 +89,7 @@ class CopyPlan(
     private class Link(val at: Long, val ip: Any?, val url: Deferred<String?>)
 
     internal val made = now()
-    private val _state = MutableStateFlow(Prepared(debridOff = debrid.status.value == RdStatus.NotPremium))
+    private val _state = MutableStateFlow(Prepared(debridOff = debrid.status.value.state == DebridState.NotPremium))
     val state: StateFlow<Prepared> = _state
     @Volatile private var checking: Job? = null
     @Volatile private var fallback: Copy? = null
@@ -98,7 +98,7 @@ class CopyPlan(
     /** The box's answer: ranked, then the unchecked debrid copies are checked. */
     @Synchronized
     fun answered(a: TitleAnswer) {
-        _state.update { it.copy(answer = a, rdChecked = it.rdChecked || a.copies.rd.isEmpty()) }
+        _state.update { it.copy(answer = a, debridChecked = it.debridChecked || a.copies.debrid.isEmpty()) }
         rerank()
     }
 
@@ -131,7 +131,7 @@ class CopyPlan(
     /** The copies that can play now, ranked: IPTV's and the ready debrid ones (R1), for step-downs and offers. */
     fun usable(): Ranking {
         val p = _state.value
-        val copies = p.ranking?.copies.orEmpty().map { it.copy }.filter { it.source == Source.Iptv || p.rd[it.id] is RdCheck.Ready }
+        val copies = p.ranking?.copies.orEmpty().map { it.copy }.filter { it.source == Source.Iptv || p.debrid[it.id] is DebridCheck.Ready }
         return choices.rank(title, copies, p.answer?.copies?.originalLanguage, setup(), typical)
     }
 
@@ -139,13 +139,13 @@ class CopyPlan(
      * [copy]'s debrid answer for Play, checking first when it has none, with no time limit (Play bounds its own wait);
      * still unanswered, the first copy of a batch: the account refuses.
      */
-    suspend fun check(copy: Copy): RdCheck {
-        if (copy.id !in _state.value.rd) {
+    suspend fun check(copy: Copy): DebridCheck {
+        if (copy.id !in _state.value.debrid) {
             checking?.join()
-            if (copy.id !in _state.value.rd) startCheck(copy.id, capped = false)?.join()
-            _state.update { if (copy.id in it.rd) it else it.copy(rd = it.rd + (copy.id to RdCheck.NotCached)).settled() }
+            if (copy.id !in _state.value.debrid) startCheck(copy.id, capped = false)?.join()
+            _state.update { if (copy.id in it.debrid) it else it.copy(debrid = it.debrid + (copy.id to DebridCheck.NotCached)).settled() }
         }
-        return _state.value.rd.getValue(copy.id)
+        return _state.value.debrid.getValue(copy.id)
     }
 
     /**
@@ -156,18 +156,18 @@ class CopyPlan(
     private fun startCheck(also: String? = null, capped: Boolean = true): Job? {
         checking?.takeIf { it.isActive }?.let { return it }
         val p = _state.value
-        val torrents = p.answer?.copies?.rd ?: return null
+        val torrents = p.answer?.copies?.debrid ?: return null
         val ids = p.ranking?.copies.orEmpty()
-            .filter { it.copy.id in torrents && it.copy.id !in p.rd && (it.support != Support.Wont || it.pinned || it.copy.id == also) }.map { it.copy.id }
+            .filter { it.copy.id in torrents && it.copy.id !in p.debrid && (it.support != Support.Wont || it.pinned || it.copy.id == also) }.map { it.copy.id }
         if (ids.isEmpty()) {
-            if (!p.rdChecked) _state.update { it.copy(rdChecked = true).settled() }
+            if (!p.debridChecked) _state.update { it.copy(debridChecked = true).settled() }
             return null
         }
         return scope.launch {
             val ask = suspend { runCatching { debrid.check(ids.map(torrents::getValue)) }.getOrNull() ?: emptyMap() }
             val answers = if (capped) withTimeoutOrNull(CHECK_MS) { ask() } else ask()
             val byId = ids.mapNotNull { id -> answers?.get(torrents.getValue(id))?.let { id to it } }.toMap()
-            _state.update { it.copy(rd = it.rd + byId, rdChecked = true, rdSlow = answers == null).settled() }
+            _state.update { it.copy(debrid = it.debrid + byId, debridChecked = true, debridSlow = answers == null).settled() }
             prefetch()
         }.also { checking = it }
     }
@@ -179,15 +179,15 @@ class CopyPlan(
 
     /**
      * [copy]'s link: one fetched ahead, if under [LINK_MS] old and made on this IP (used once: a retry gets a fresh
-     * one), else a fresh one. Null when it isn't ready or can't be had; throws [RdError] when the debrid refuses for good.
+     * one), else a fresh one. Null when it isn't ready or can't be had; throws [DebridError] when the debrid refuses for good.
      */
     suspend fun link(copy: Copy): String? {
-        val ready = _state.value.rd[copy.id] as? RdCheck.Ready ?: return null
+        val ready = _state.value.debrid[copy.id] as? DebridCheck.Ready ?: return null
         links.remove(copy.id)?.takeIf { it.fresh() }?.url?.await()?.let { return it }
         repeat(2) {
             try {
                 return debrid.link(ready)
-            } catch (e: RdError) {
+            } catch (e: DebridError) {
                 if (e.permanent) throw e
             }
         }
@@ -198,7 +198,7 @@ class CopyPlan(
     @Synchronized
     fun prefetch(copies: List<Copy> = listOfNotNull(_state.value.plays)) {
         for (copy in copies) {
-            val ready = _state.value.rd[copy.id] as? RdCheck.Ready ?: continue
+            val ready = _state.value.debrid[copy.id] as? DebridCheck.Ready ?: continue
             if (links[copy.id]?.fresh() == true) continue
             links[copy.id] = Link(now(), ip(), scope.async { runCatching { debrid.link(ready) }.getOrNull()?.also { scope.launch { linked(it) } } })
         }
@@ -208,7 +208,7 @@ class CopyPlan(
     private fun Link.fresh() = now() - at < LINK_MS && ip == ip() && !(url.isCompleted && url.getCompleted() == null)
 
     /** Settles [Prepared.plays] once the check is in; kept as it was while one runs. */
-    private fun Prepared.settled(): Prepared = if (ranking == null || !rdChecked) this else copy(plays = pick()?.copy)
+    private fun Prepared.settled(): Prepared = if (ranking == null || !debridChecked) this else copy(plays = pick()?.copy)
 
     companion object {
         const val CHECK_MS = 4_000L
@@ -238,7 +238,7 @@ class FilmCopies(
     private val held = java.util.Collections.synchronizedSet(java.util.Collections.newSetFromMap(java.util.WeakHashMap<CopyPlan, Boolean>()))
 
     init {
-        scope.launch { debrid.status.collect { s -> synchronized(held) { held.toList() }.forEach { it.debridOff(s == RdStatus.NotPremium) } } }
+        scope.launch { debrid.status.collect { s -> synchronized(held) { held.toList() }.forEach { it.debridOff(s.state == DebridState.NotPremium) } } }
     }
 
     /** [title]'s plan: a recent one kept, else a new one, asking the box now. */
@@ -274,7 +274,7 @@ class FilmCopies(
                     return
                 }
                 plan.answered(a)
-                if (!a.rdPending || i == ASKS - 1) return
+                if (!a.debridPending || i == ASKS - 1) return
                 delay(REASK_MS)
             }
         } finally {
@@ -294,10 +294,10 @@ class FilmCopies(
 fun answerOf(a: CopiesAnswer): TitleAnswer {
     val server = a.copies.associateBy(::copyId)
     val copies = server.map { (id, s) -> copyOf(id, s) }
-    val rd = server.filterValues { it.src == "rd" }.mapValues { (_, s) -> RdCandidate(s.hash, s.file, s.filename, s.cached) }
+    val rd = server.filterValues { it.src == "rd" }.mapValues { (_, s) -> DebridCandidate(s.hash, s.file, s.filename, s.cached) }
     return TitleAnswer(
         TitleCopies(copies, rd, a.originalLanguage.ifEmpty { null }, a.intro.takeIf { it.size == 2 }?.let { it[0]..it[1] }),
-        rdPending = a.sources.rd == "pending", rdUnavailable = a.sources.rd == "unavailable", iptvUnavailable = a.sources.iptv == "unavailable",
+        debridPending = a.sources.rd == "pending", debridUnavailable = a.sources.rd == "unavailable", iptvUnavailable = a.sources.iptv == "unavailable",
         server = server,
     )
 }
@@ -306,7 +306,7 @@ private fun copyId(s: ServerCopy) = if (s.src == "rd") "rd:${s.hash}" + (s.file?
 
 private fun copyOf(id: String, s: ServerCopy) = Copy(
     id = id,
-    source = if (s.src == "rd") Source.RealDebrid else Source.Iptv,
+    source = if (s.src == "rd") Source.Debrid else Source.Iptv,
     resolution = s.res,
     hdr = s.hdr.map { HDR[it] ?: it.uppercase() },
     dvProfile = s.dvProfile,

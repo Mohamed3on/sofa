@@ -3,9 +3,9 @@ package com.mohamed3on.iptv
 import com.mohamed3on.iptv.data.CopiesAnswer
 import com.mohamed3on.iptv.data.CopySources
 import com.mohamed3on.iptv.data.Debrid
-import com.mohamed3on.iptv.data.RdCandidate
-import com.mohamed3on.iptv.data.RdCheck
-import com.mohamed3on.iptv.data.RdStatus
+import com.mohamed3on.iptv.data.DebridCandidate
+import com.mohamed3on.iptv.data.DebridCheck
+import com.mohamed3on.iptv.data.DebridState
 import com.mohamed3on.iptv.data.ServerCopy
 import com.mohamed3on.iptv.player.Capacity
 import com.mohamed3on.iptv.player.CopyChoices
@@ -38,7 +38,7 @@ class FilmCopiesTest {
         assertEquals(listOf("DV", "HDR10"), dv.hdr)
         assertEquals("dtshd" to "mpeg2video", dv.audio to dv.codec)
         assertEquals(true, dv.englishSubs)
-        assertEquals(RdCandidate("aa", 2, null, cached = true), a.copies.rd["rd:aa:2"])
+        assertEquals(DebridCandidate("aa", 2, null, cached = true), a.copies.debrid["rd:aa:2"])
         assertEquals("mp4", a.ext("iptv:7"))
     }
 

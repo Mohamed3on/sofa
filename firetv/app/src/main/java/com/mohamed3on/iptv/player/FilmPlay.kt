@@ -8,7 +8,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.mohamed3on.iptv.AppGraph
 import com.mohamed3on.iptv.data.Episode
 import com.mohamed3on.iptv.data.Movie
-import com.mohamed3on.iptv.data.RdStatus
+import com.mohamed3on.iptv.data.DebridState
 import com.mohamed3on.iptv.data.ResumeStore
 import com.mohamed3on.iptv.data.TitleId
 import com.mohamed3on.iptv.data.WatchedStore
@@ -66,8 +66,8 @@ class FilmPlay(
     private val onClose: () -> Unit,
     /** Each new IP (network or VPN): a debrid link is tied to the old one (KTD2). */
     private val ipChanges: Flow<Any?> = emptyFlow(),
-    /** Emits when the debrid premium has ended, for the notice. */
-    private val premiumEnded: Flow<Unit> = emptyFlow(),
+    /** Emits the service whose premium has ended, for the notice. */
+    private val premiumEnded: Flow<String> = emptyFlow(),
     /** What else the play holds (decoder, subtitles, meter), let go after the session. */
     private val release: () -> Unit = {},
 ) {
@@ -83,7 +83,7 @@ class FilmPlay(
     /** Plays from [from]; [fallback] is the library's IPTV copy, for when the box can't say what else there is. */
     fun start(from: Place, fallback: Copy?) {
         jobs.launch { ipChanges.collect { session.ipChanged() } }
-        jobs.launch { premiumEnded.collect { session.inform(Notice.PremiumEnded) } }
+        jobs.launch { premiumEnded.collect { session.inform(Notice.PremiumEnded(it)) } }
         jobs.launch {
             session.state.map { it.phase }.distinctUntilChanged().collect {
                 when (it) {
@@ -245,8 +245,8 @@ fun openFilmPlay(
         scope, onEnded, onClose,
         ipChanges = graph.route.effective.drop(1),
         premiumEnded = flow {
-            graph.debrid.status.first { it == RdStatus.NotPremium }
-            if (graph.premiumEndedShown.compareAndSet(false, true)) emit(Unit)
+            val lapsed = graph.debrid.status.first { it.state == DebridState.NotPremium }
+            if (graph.premiumEndedShown.compareAndSet(false, true)) emit(lapsed.name)
         },
         release = {
             parts.cancel()

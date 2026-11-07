@@ -31,7 +31,7 @@ class CapacityTest {
         listOf(30f, 35f, 40f, 80f, 90f).forEach { capacity.record(listOf(Burst(evening, Iptv, it))) }
         assertEquals(40f, capacity.typicalMbps(Iptv, evening)!!, 0.01f)
         assertNull(capacity.typicalMbps(Iptv, day))
-        assertNull(capacity.typicalMbps(Capacity.Source.RealDebrid, evening))
+        assertNull(capacity.typicalMbps(Capacity.Source.Debrid, evening))
         vpnOn = true
         assertNull(capacity.typicalMbps(Iptv, evening)) // the VPN has its own history
         capacity.record(listOf(Burst(evening, Iptv, 11f)))

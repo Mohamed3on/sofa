@@ -392,7 +392,7 @@ internal fun MoviePlayback(
                 audioState,
                 subtitleState,
                 fetchedState,
-                version = filmState.copy?.let { copyLine(it, prepared.answer) },
+                version = filmState.copy?.let { copyLine(it, prepared.answer, debridName()) },
                 onSubtitle = {
                     fetched.select(null)
                     subtitles.select(it)
@@ -697,7 +697,8 @@ private val SUBTITLE_BOTTOM = 56.dp
 @Composable
 private fun NoticeCorner(state: StateFlow<FilmState>, modifier: Modifier) {
     val film by state.collectAsState()
-    val now = film.notice?.let(::noticeText) ?: if (film.trial) NoticeText("Trying this version · Back returns to the last one") else null
+    val service = debridName()
+    val now = film.notice?.let { noticeText(it, service) } ?: if (film.trial) NoticeText("Trying this version · Back returns to the last one") else null
     val shown = animateFloatAsState(if (now != null) 1f else 0f, Motion.panel(), label = "notice")
     val kept = remember { arrayOfNulls<NoticeText>(1) }
     if (now != null) kept[0] = now
@@ -722,21 +723,21 @@ private fun NoticeCorner(state: StateFlow<FilmState>, modifier: Modifier) {
 
 private class NoticeText(val text: String, val action: String? = null)
 
-/** "Real-Debrid · 4K · HDR10": enough to tell copies apart in a line. */
-private fun short(c: Copy) = (listOf(sourceName(c.source)) + copyLabels(c).take(2)).joinToString(" · ")
+/** "TorBox · 4K · HDR10": enough to tell copies apart in a line. */
+private fun short(c: Copy, service: String) = (listOf(sourceName(c.source, service)) + copyLabels(c).take(2)).joinToString(" · ")
 
-private fun noticeText(n: Notice) = when (n) {
+private fun noticeText(n: Notice, service: String) = when (n) {
     is Notice.Offer -> when (n.kind) {
-        OfferKind.Better -> NoticeText("Better version ready: ${short(n.copy)}", "Switch")
-        OfferKind.Untested -> NoticeText("Untested here: ${short(n.copy)}", "Try it")
-        OfferKind.Lighter -> NoticeText("Stalling. Lighter version: ${short(n.copy)}", "Switch")
+        OfferKind.Better -> NoticeText("Better version ready: ${short(n.copy, service)}", "Switch")
+        OfferKind.Untested -> NoticeText("Untested here: ${short(n.copy, service)}", "Try it")
+        OfferKind.Lighter -> NoticeText("Stalling. Lighter version: ${short(n.copy, service)}", "Switch")
     }
-    is Notice.SteppedDown -> NoticeText("Stalls: now on ${short(n.copy)} · Versions can reverse it")
+    is Notice.SteppedDown -> NoticeText("Stalls: now on ${short(n.copy, service)} · Versions can reverse it")
     is Notice.PinCleared -> NoticeText("Your pinned version won’t play here, so it’s unpinned")
-    is Notice.TrialResult -> NoticeText(if (n.works) "${short(n.copy)} works here" else "${short(n.copy)} didn’t play here · back to the last version")
+    is Notice.TrialResult -> NoticeText(if (n.works) "${short(n.copy, service)} works here" else "${short(n.copy, service)} didn’t play here · back to the last version")
     is Notice.Subtitles -> NoticeText("${fetchedName(n.language)} subtitles from OpenSubtitles · timing in Options")
     is Notice.SkipIntro -> NoticeText("Intro", "Skip")
-    Notice.PremiumEnded -> NoticeText("TorBox premium has ended — renew at torbox.app")
+    is Notice.PremiumEnded -> NoticeText("${n.service} premium has ended")
 }
 
 private val NOTICE_WIDTH = 420.dp

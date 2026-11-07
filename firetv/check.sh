@@ -66,8 +66,8 @@ l=$(event "title:$FILM" ' plays ' 10); t=$(event "title:$FILM" title_shown 1)
 row "Title Plays (ms)" "$(val ms "$l")" $PLAYS_MS "$FILM shown $(val ms "$t") ms · $(val src "$l")"
 sleep 1; row "Title open worst frame" "$(worst)" $WORST_MS
 
-# Play to first frame: an IPTV pick, then a Real-Debrid pick, and the heap while it plays.
-for p in "$IPTV_FILM Iptv" "$FILM RealDebrid"; do
+# Play to first frame: an IPTV pick, then a debrid pick, and the heap while it plays.
+for p in "$IPTV_FILM Iptv" "$FILM Debrid"; do
   set -- $p
   open "play:$1"
   l=$(event "play:$1" first_frame 20); src=$(val src "$l")
@@ -79,7 +79,7 @@ done
 sleep 5; table+=$(printf '%-26s %8s' "Java heap playing" "$(heap)")$'\n'
 
 sh input keyevent 3 # HOME: the film and the live channel stop
-extra=$(sh logcat -d -s IptvCheck:I | tr -d '\r' | grep -E ' (notice|rd) ' | sed -E 's/.*IptvCheck: //; s/ ms=[0-9]+//' | sort -u | tr '\n' ';' || true)
+extra=$(sh logcat -d -s IptvCheck:I | tr -d '\r' | grep -E ' (notice|debrid) ' | sed -E 's/.*IptvCheck: //; s/ ms=[0-9]+//' | sort -u | tr '\n' ';' || true)
 printf '%s' "$table"
 [[ -n $extra ]] && echo "events: $extra"
 echo "$((SECONDS - started)) s, $fails failed"

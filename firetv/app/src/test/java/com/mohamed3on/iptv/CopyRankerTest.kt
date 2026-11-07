@@ -1,7 +1,7 @@
 package com.mohamed3on.iptv
 
 import com.mohamed3on.iptv.player.Capacity.Source.Iptv
-import com.mohamed3on.iptv.player.Capacity.Source.RealDebrid
+import com.mohamed3on.iptv.player.Capacity.Source.Debrid
 import com.mohamed3on.iptv.player.Copy
 import com.mohamed3on.iptv.player.CopyChoices
 import com.mohamed3on.iptv.player.Correction
@@ -25,8 +25,8 @@ class CopyRankerTest {
     )
     private val oled = hdr10Tv.copy(displayName = "LG OLED", hdr = hdr10Tv.hdr + Hdr.DolbyVision)
 
-    private val dvRemux = Copy("rd:dv", RealDebrid, 2160, listOf("DV"), dvProfile = 8, codec = "hevc", audio = "eac3", channels = 6, atmos = true, mbps = 60f)
-    private val hdr10Web = Copy("rd:web", RealDebrid, 2160, listOf("HDR10"), codec = "hevc", audio = "eac3", channels = 6, atmos = true, mbps = 25f)
+    private val dvRemux = Copy("rd:dv", Debrid, 2160, listOf("DV"), dvProfile = 8, codec = "hevc", audio = "eac3", channels = 6, atmos = true, mbps = 60f)
+    private val hdr10Web = Copy("rd:web", Debrid, 2160, listOf("HDR10"), codec = "hevc", audio = "eac3", channels = 6, atmos = true, mbps = 25f)
     private val iptv1080 = Copy("iptv:1", Iptv, 1080, codec = "h264", audio = "aac", channels = 2, mbps = 6f)
 
     private fun rank(copies: List<Copy>, setup: SetupProfile = hdr10Tv, original: String? = "en", typical: Float? = null) =
@@ -40,8 +40,8 @@ class CopyRankerTest {
     }
 
     @Test fun aStarvedHdr10PlusRipLosesToAFullHdr10Remux() {
-        val rip = Copy("rd:rip", RealDebrid, 2160, listOf("DV", "HDR10+", "HDR10"), codec = "hevc", audio = "ac3", channels = 6, mbps = 4f)
-        val remux = Copy("rd:remux", RealDebrid, 2160, listOf("HDR10"), codec = "hevc", audio = "eac3", channels = 6, mbps = 72f)
+        val rip = Copy("rd:rip", Debrid, 2160, listOf("DV", "HDR10+", "HDR10"), codec = "hevc", audio = "ac3", channels = 6, mbps = 4f)
+        val remux = Copy("rd:remux", Debrid, 2160, listOf("HDR10"), codec = "hevc", audio = "eac3", channels = 6, mbps = 72f)
         assertEquals(remux, rank(listOf(rip, remux)).pick?.copy)
     }
 

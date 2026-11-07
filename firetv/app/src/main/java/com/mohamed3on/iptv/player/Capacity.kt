@@ -27,7 +27,8 @@ class Capacity(
     /** Whether the stick's VPN is on now: VPN sessions are learnt and read apart from the home line's. */
     private val vpn: () -> Boolean = { false },
 ) {
-    enum class Source { Iptv, RealDebrid }
+    /** [key] names its saved samples: the debrid's keep the name they were learnt under. */
+    enum class Source(val key: String) { Iptv("Iptv"), Debrid("RealDebrid") }
 
     /** Local hours: night 01–09, day 09–18, evening peak 18–01. */
     enum class Band { Night, Day, Evening }
@@ -46,7 +47,7 @@ class Capacity(
             median(rates).also { put(bucket.first, bucket.second, (samples(bucket.first, bucket.second) + it).takeLast(KEEP)) }
         }
 
-    private fun key(source: Source, band: Band) = "capacity.${source.name}.${band.name}" + if (vpn()) ".vpn" else ""
+    private fun key(source: Source, band: Band) = "capacity.${source.key}.${band.name}" + if (vpn()) ".vpn" else ""
     private fun samples(source: Source, band: Band) = store.get(key(source, band))?.split(',')?.mapNotNull(String::toFloatOrNull).orEmpty()
     private fun put(source: Source, band: Band, mbps: List<Float>) = store.put(key(source, band), mbps.joinToString(","))
 

@@ -1,10 +1,10 @@
 package com.mohamed3on.iptv.player
 
 import com.mohamed3on.iptv.data.Debrid
-import com.mohamed3on.iptv.data.RdCandidate
-import com.mohamed3on.iptv.data.RdCheck
-import com.mohamed3on.iptv.data.RdError
-import com.mohamed3on.iptv.data.RdStatus
+import com.mohamed3on.iptv.data.DebridCandidate
+import com.mohamed3on.iptv.data.DebridCheck
+import com.mohamed3on.iptv.data.DebridError
+import com.mohamed3on.iptv.data.DebridState
 import com.mohamed3on.iptv.player.Capacity.Source
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -47,8 +47,8 @@ interface FilmPlayer {
     }
 }
 
-/** A title's copies as discovery returns them; [rd] is each Real-Debrid copy's torrent, by copy id; [originalLanguage] when known; an episode's [intro] (ms) when known. */
-class TitleCopies(val copies: List<Copy>, val rd: Map<String, RdCandidate> = emptyMap(), val originalLanguage: String? = null, val intro: LongRange? = null)
+/** A title's copies as discovery returns them; [debrid] is each debrid copy's torrent, by copy id; [originalLanguage] when known; an episode's [intro] (ms) when known. */
+class TitleCopies(val copies: List<Copy>, val debrid: Map<String, DebridCandidate> = emptyMap(), val originalLanguage: String? = null, val intro: LongRange? = null)
 
 enum class FilmPhase { Stopped, Loading, Starting, Playing, Ended, Unavailable }
 
@@ -65,8 +65,8 @@ sealed interface Notice {
     data class TrialResult(val copy: Copy, val works: Boolean) : Notice
     /** Subtitles in [language] ("en", "ar") came from OpenSubtitles and show (R30). */
     data class Subtitles(val language: String) : Notice
-    /** Real-Debrid's premium ended: its copies are skipped (shown once an app session). */
-    data object PremiumEnded : Notice
+    /** The [service]'s premium ended: its copies are skipped (shown once an app session). */
+    data class PremiumEnded(val service: String) : Notice
     /** The intro plays; ▲ jumps to its [end] (R33). Goes once playback leaves it. */
     data class SkipIntro(val end: Long) : Notice
 }
@@ -87,8 +87,8 @@ data class FilmState(
     val copy: Copy? = null,
     /** Every copy best first, for Versions; null until copies arrive. */
     val ranking: Ranking? = null,
-    /** Real-Debrid answers by copy id; a Real-Debrid copy without one is unchecked. */
-    val rd: Map<String, RdCheck> = emptyMap(),
+    /** Debrid answers by copy id; a debrid copy without one is unchecked. */
+    val debrid: Map<String, DebridCheck> = emptyMap(),
     /** The copy plays as a trial: Back in its first 30 s returns to the previous one (R28). */
     val trial: Boolean = false,
     val notice: Notice? = null,
@@ -258,14 +258,14 @@ class FilmSession(
         val at = pausedAt ?: return player.play()
         pausedAt = null
         val copy = current
-        if (copy?.source == Source.RealDebrid && phase == FilmPhase.Playing && (stale || now() - at > PAUSE_MS)) reopen(copy, player.place) else player.play()
+        if (copy?.source == Source.Debrid && phase == FilmPhase.Playing && (stale || now() - at > PAUSE_MS)) reopen(copy, player.place) else player.play()
         stale = false
     }
 
     /** The network or VPN changed: a Real-Debrid link is tied to the old IP, so it is fetched afresh (KTD2). */
     fun ipChanged() {
         val copy = current ?: return
-        if (copy.source != Source.RealDebrid || phase != FilmPhase.Playing) return
+        if (copy.source != Source.Debrid || phase != FilmPhase.Playing) return
         if (pausedAt != null) stale = true else reopen(copy, player.place)
     }
 
@@ -315,26 +315,26 @@ class FilmSession(
         ready(copy) ?: return null
         return try {
             plan.link(copy)
-        } catch (e: RdError) {
+        } catch (e: DebridError) {
             null.also { fault(copy) }
         }
     }
 
-    private suspend fun ready(copy: Copy): RdCheck.Ready? {
-        if (copy.id !in plan.state.value.rd) {
+    private suspend fun ready(copy: Copy): DebridCheck.Ready? {
+        if (copy.id !in plan.state.value.debrid) {
             // While an IPTV copy could play instead, the debrid gets no longer than copies do, and at the start only
             // what is left of Play's wait (KTD13).
             val other = !iptvBusy && plan.state.value.ranking?.copies.orEmpty().any { it.copy.source == Source.Iptv && it.copy.id !in tried }
             if (other) withTimeoutOrNull(if (current == null) startBy - now() else WAIT_MS) { plan.check(copy) } else plan.check(copy)
         }
         faults(plan.state.value)
-        return plan.state.value.rd[copy.id] as? RdCheck.Ready
+        return plan.state.value.debrid[copy.id] as? DebridCheck.Ready
     }
 
     /** Copies the debrid refused for good, the title page's check included: marked once (KTD7), a pin on one cleared. */
     private fun faults(p: Prepared) {
         for (r in p.ranking?.copies.orEmpty()) {
-            if ((p.rd[r.copy.id] as? RdCheck.Failed)?.error?.permanent == true && faulted.add(r.copy.id)) fault(r.copy)
+            if ((p.debrid[r.copy.id] as? DebridCheck.Failed)?.error?.permanent == true && faulted.add(r.copy.id)) fault(r.copy)
         }
     }
 
@@ -567,7 +567,7 @@ class FilmSession(
 
     private fun publish() {
         val p = plan.state.value
-        _state.value = FilmState(phase, current, p.ranking, p.rd, trial, notices.firstOrNull())
+        _state.value = FilmState(phase, current, p.ranking, p.debrid, trial, notices.firstOrNull())
     }
 
     companion object {

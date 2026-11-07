@@ -40,10 +40,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Text
-import com.mohamed3on.iptv.data.RdCheck
-import com.mohamed3on.iptv.data.debridName
+import com.mohamed3on.iptv.data.DebridCheck
 import com.mohamed3on.iptv.system.Check
-import com.mohamed3on.iptv.data.RdStatus
+import com.mohamed3on.iptv.data.DebridState
 import com.mohamed3on.iptv.graph
 import com.mohamed3on.iptv.player.Capacity.Source
 import com.mohamed3on.iptv.player.Copy
@@ -67,11 +66,11 @@ import com.mohamed3on.iptv.ui.theme.FitText
 import com.mohamed3on.iptv.ui.theme.Type
 import kotlin.math.roundToInt
 
-/** What Versions lists: a title's ranking, Real-Debrid's answers, the box's answer (sizes, names) and the copy playing, if any. */
+/** What Versions lists: a title's ranking, the debrid's answers, the box's answer (sizes, names) and the copy playing, if any. */
 /** A title's [Prepared] copy plan for Versions, and the copy [playing] in the player. */
 class VersionsData(val prepared: Prepared, val playing: String? = null) {
     val ranking get() = prepared.ranking
-    val rd get() = prepared.rd
+    val debrid get() = prepared.debrid
     val answer get() = prepared.answer
     val failed get() = prepared.failed
 }
@@ -79,10 +78,10 @@ class VersionsData(val prepared: Prepared, val playing: String? = null) {
 /** How a copy stands here, in the order Versions groups them (R11). */
 private enum class Standing(private val label: String) {
     Plays("Plays here"), Untested("Untested here"), NotReady("Not ready on %s"), Wont("Won’t play here");
-    val heading get() = label.format(debridName)
+    fun heading(service: String) = label.format(service)
 }
 
-/** A cached Real-Debrid copy not checked yet stands with the copies that play: it likely does. */
+/** A cached debrid copy not checked yet stands with the copies that play: it likely does. */
 private fun standing(r: Ranked, data: VersionsData) = when {
     r.support == Support.Wont -> Standing.Wont
     !data.prepared.playable(r.copy) -> Standing.NotReady
@@ -116,7 +115,7 @@ internal fun Versions(title: String, data: VersionsData, first: FocusRequester, 
     var corrections by remember(setup) { mutableStateOf(choices.corrections(setup)) }
     var learnt by remember(setup, data.ranking) { mutableStateOf(choices.learnt(setup)) }
     val ranking = data.ranking
-    val rows = remember(ranking, data.rd) {
+    val rows = remember(ranking, data.debrid) {
         ranking?.copies.orEmpty().map { it to standing(it, data) }.sortedBy { it.second.ordinal }
     }
     // A spread first: each group's best copy of each kind (so 1080p and SDR show beside the 4K remuxes); "Show all" has the rest.
@@ -153,7 +152,7 @@ internal fun Versions(title: String, data: VersionsData, first: FocusRequester, 
             }
         }
         shown.forEachIndexed { i, (r, s) ->
-            if (i == 0 || shown[i - 1].second != s) item(key = "h${s.name}") { Heading(s.heading) }
+            if (i == 0 || shown[i - 1].second != s) item(key = "h${s.name}") { Heading(s.heading(debridStatus.name)) }
             item(key = r.copy.id) {
                 VersionRow(r, ranking!!.reasonFor(r, plays), data, focus = if (i == 0) first else if (r.copy.id == firstMore) more else null, onClick = { onChoose(r.copy) }, undo = r.pinned || r.mark != null, onMenu = {
                     cleared = r.copy.id
@@ -171,7 +170,7 @@ internal fun Versions(title: String, data: VersionsData, first: FocusRequester, 
             Column(Modifier.padding(start = Space.l, end = Space.l, top = Space.l), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                 Text("Why this pick", style = Type.headline)
                 Text(setupLine(setup.hdr, setup.passthrough, setup.maxChannels), style = Type.caption)
-                Text(bandwidthLine(graph.capacity::typicalMbps), style = Type.caption)
+                Text(bandwidthLine(graph.capacity::typicalMbps, debridStatus.name), style = Type.caption)
             }
         }
         item(key = "corrections") { Heading("Corrections") }
@@ -212,7 +211,7 @@ internal fun Versions(title: String, data: VersionsData, first: FocusRequester, 
             }
         }
         item(key = "sources") { Heading("Sources") }
-        item(key = "rd") { PanelRow(debridName, rdStatus(debridStatus, data.answer)) {} }
+        item(key = "rd") { PanelRow(debridStatus.name, stateText(debridStatus.state, data.answer)) {} }
         item(key = "iptv") { PanelRow("IPTV", if (data.answer?.iptvUnavailable == true) "Unavailable" else "Ready") {} }
     }
 }
@@ -272,11 +271,12 @@ private fun Heading(text: String) {
 @Composable
 private fun VersionRow(r: Ranked, reason: String, data: VersionsData, focus: FocusRequester?, onClick: () -> Unit, undo: Boolean, onMenu: () -> Unit, modifier: Modifier = Modifier) {
     val c = r.copy
+    val service = debridName()
     var focused by remember { mutableStateOf(false) }
     // ☰ undoes a pin or mark; on another copy, while focused, it says the copy doesn’t play here (a black screen, say).
     val status = listOfNotNull(
         reason.ifEmpty { null },
-        rdState(c, data.rd),
+        debridState(c, data.debrid, service),
         if (undo) "☰ to undo" else if (focused) "☰ if it doesn’t play" else null,
     ).joinToString(" · ")
     Column(
@@ -302,7 +302,7 @@ private fun VersionRow(r: Ranked, reason: String, data: VersionsData, focus: Foc
         }
         if (status.isNotEmpty()) FitText(status, style = Type.caption.copy(color = Palette.textSecondary), active = focused)
         FitText(
-            listOfNotNull(sourceName(c.source), sizeLabel(data.answer?.size(c.id) ?: 0), data.answer?.name(c.id)?.ifEmpty { null }).joinToString(" · "),
+            listOfNotNull(sourceName(c.source, service), sizeLabel(data.answer?.size(c.id) ?: 0), data.answer?.name(c.id)?.ifEmpty { null }).joinToString(" · "),
             style = Type.caption,
             active = focused,
         )
@@ -322,7 +322,11 @@ internal fun Modifier.scrollbar(state: LazyListState): Modifier = drawWithConten
     drawRoundRect(Palette.accent, topLeft = Offset(size.width - w, top), size = Size(w, h), cornerRadius = CornerRadius(w / 2))
 }
 
-internal fun sourceName(source: Source) = if (source == Source.RealDebrid) debridName else "IPTV"
+/** The serving debrid's name, for labels: "TorBox", "Real-Debrid", or "Debrid" while both serve. */
+@Composable
+internal fun debridName() = LocalContext.current.graph.debrid.status.collectAsState().value.name
+
+internal fun sourceName(source: Source, service: String) = if (source == Source.Debrid) service else "IPTV"
 
 /** "4K", "HDR10", "HEVC", "E-AC3 5.1 Atmos", "DE", "18 Mbps": what is known of a copy. */
 internal fun copyLabels(c: Copy): List<String> = listOfNotNull(
@@ -349,32 +353,32 @@ internal fun sizeLabel(bytes: Long): String? = when {
 }
 
 /** The copy as the title page and Options name it: "Real-Debrid · 4K · HDR10 · E-AC3 5.1 · 14.2 GB". */
-internal fun copyLine(c: Copy, answer: TitleAnswer?): String =
-    (listOf(sourceName(c.source)) + (copyLabels(c) - setOfNotNull(VIDEO[c.codec])) + listOfNotNull(sizeLabel(answer?.size(c.id) ?: 0))).joinToString(" · ")
+internal fun copyLine(c: Copy, answer: TitleAnswer?, service: String): String =
+    (listOf(sourceName(c.source, service)) + (copyLabels(c) - setOfNotNull(VIDEO[c.codec])) + listOfNotNull(sizeLabel(answer?.size(c.id) ?: 0))).joinToString(" · ")
 
 /** What a glance at the copy needs, as chips: picture, HDR, sound, and languages other than plain English ("4K", "Dolby Vision 8", "DTS-HD 5.1"). */
 internal fun formatLabels(c: Copy): List<String> = copyLabels(c).filter { it != VIDEO[c.codec] && it != "EN" && !it.endsWith(" Mbps") }
 
-/** Only a Real-Debrid copy that failed its check says so; a ready or not-yet-checked one reads as plain Real-Debrid. */
-private fun rdState(c: Copy, rd: Map<String, RdCheck>): String? {
-    if (c.source != Source.RealDebrid) return null
-    return when (val r = rd[c.id]) {
-        is RdCheck.Ready, null -> null
-        RdCheck.NotCached -> "not cached"
-        is RdCheck.Failed -> if (r.error.permanent) "refused by $debridName" else "check failed"
+/** Only a debrid copy that failed its check says so; a ready or not-yet-checked one reads as the plain service name. */
+private fun debridState(c: Copy, checks: Map<String, DebridCheck>, service: String): String? {
+    if (c.source != Source.Debrid) return null
+    return when (val r = checks[c.id]) {
+        is DebridCheck.Ready, null -> null
+        DebridCheck.NotCached -> "not cached"
+        is DebridCheck.Failed -> if (r.error.permanent) "refused by $service" else "check failed"
     }
 }
 
-private fun rdStatus(status: RdStatus, answer: TitleAnswer?) = when (status) {
-    RdStatus.NoToken -> "No key on the box"
-    RdStatus.TokenInvalid -> "Key refused"
-    RdStatus.RateLimited -> "Busy, adds paused"
-    RdStatus.TooManyDownloads -> "Too many downloads"
-    RdStatus.Denied -> "Refused (account or IP)"
-    RdStatus.NotPremium -> "Premium ended"
-    RdStatus.Ok -> when {
-        answer?.rdPending == true -> "Searching…"
-        answer?.rdUnavailable == true -> "Search unavailable"
+private fun stateText(state: DebridState, answer: TitleAnswer?) = when (state) {
+    DebridState.NoToken -> "No key on the box"
+    DebridState.TokenInvalid -> "Key refused"
+    DebridState.RateLimited -> "Busy, adds paused"
+    DebridState.TooManyDownloads -> "Too many downloads"
+    DebridState.Denied -> "Refused (account or IP)"
+    DebridState.NotPremium -> "Premium ended"
+    DebridState.Ok -> when {
+        answer?.debridPending == true -> "Searching…"
+        answer?.debridUnavailable == true -> "Search unavailable"
         else -> "Ready"
     }
 }
@@ -387,9 +391,9 @@ private fun setupLine(hdr: Set<Hdr>, passthrough: Set<Passthrough>, channels: In
 ).joinToString(" · ")
 
 /** "Typical IPTV 40 Mbps · Real-Debrid not measured yet": the bandwidth the ranking used, this hour. */
-private fun bandwidthLine(typical: (Source, Long) -> Float?): String {
+private fun bandwidthLine(typical: (Source, Long) -> Float?, service: String): String {
     val now = System.currentTimeMillis()
-    return "Typical " + Source.entries.joinToString(" · ") { s -> "${sourceName(s)} " + (typical(s, now)?.let { "${it.roundToInt()} Mbps" } ?: "not measured yet") }
+    return "Typical " + Source.entries.joinToString(" · ") { s -> "${sourceName(s, service)} " + (typical(s, now)?.let { "${it.roundToInt()} Mbps" } ?: "not measured yet") }
 }
 
 private val VIDEO = mapOf("hevc" to "HEVC", "h264" to "H.264", "av1" to "AV1", "vp9" to "VP9", "mpeg2video" to "MPEG-2", "vc1" to "VC-1")

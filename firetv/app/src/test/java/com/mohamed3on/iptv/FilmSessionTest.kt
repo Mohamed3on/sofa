@@ -1,11 +1,11 @@
 package com.mohamed3on.iptv
 
-import com.mohamed3on.iptv.data.RdCandidate
-import com.mohamed3on.iptv.data.RdCheck
-import com.mohamed3on.iptv.data.RdStatus
+import com.mohamed3on.iptv.data.DebridCandidate
+import com.mohamed3on.iptv.data.DebridCheck
+import com.mohamed3on.iptv.data.DebridState
 import com.mohamed3on.iptv.player.Capacity
 import com.mohamed3on.iptv.player.Capacity.Source.Iptv
-import com.mohamed3on.iptv.player.Capacity.Source.RealDebrid
+import com.mohamed3on.iptv.player.Capacity.Source.Debrid
 import com.mohamed3on.iptv.player.Copy
 import com.mohamed3on.iptv.player.CopyChoices
 import com.mohamed3on.iptv.player.CopyPlan
@@ -45,10 +45,10 @@ class FilmSessionTest {
     )
     private val dvTv = tv.copy(displayName = "OLED", hdr = tv.hdr + Hdr.DolbyVision)
 
-    private val rd4k = Copy("rd:a", RealDebrid, 2160, listOf("HDR10"), codec = "hevc", audio = "eac3", channels = 6, mbps = 25f)
+    private val rd4k = Copy("rd:a", Debrid, 2160, listOf("HDR10"), codec = "hevc", audio = "eac3", channels = 6, mbps = 25f)
     private val iptv1080 = Copy("iptv:1", Iptv, 1080, codec = "h264", audio = "aac", channels = 2, mbps = 6f)
     /** Dolby Vision of unknown profile: untested (KTD6). */
-    private val dv = Copy("rd:dv", RealDebrid, 2160, listOf("DV"), codec = "hevc", audio = "eac3", channels = 6, mbps = 40f)
+    private val dv = Copy("rd:dv", Debrid, 2160, listOf("DV"), codec = "hevc", audio = "eac3", channels = 6, mbps = 40f)
     private val iptvHdr = Copy("iptv:hdr", Iptv, 2160, listOf("HDR10"), codec = "hevc", audio = "eac3", channels = 6, mbps = 20f)
 
     private class Rig(val session: FilmSession, val plan: CopyPlan, val player: FakeFilm, val debrid: FakeDebrid, val choices: CopyChoices, val net: FakeBandwidth) {
@@ -69,7 +69,7 @@ class FilmSessionTest {
     }
 
     private fun titleCopies(vararg copies: Copy) =
-        TitleCopies(copies.toList(), copies.filter { it.source == RealDebrid }.associate { it.id to RdCandidate(it.id, null) }, originalLanguage = "en")
+        TitleCopies(copies.toList(), copies.filter { it.source == Debrid }.associate { it.id to DebridCandidate(it.id, null) }, originalLanguage = "en")
 
     /** The box answers with [copies]. */
     private fun answer(r: Rig, vararg copies: Copy) = r.plan.answered(TitleAnswer(titleCopies(*copies)))
@@ -149,7 +149,7 @@ class FilmSessionTest {
     @Test fun aBusyProviderMovesOnWithNoMark() = runTest {
         val r = rig()
         r.player.respond = { if ("iptv.test" in it) StreamFailure.Http(458) else null }
-        play(r, iptvHdr, Copy("rd:b", RealDebrid, 1080, codec = "h264", mbps = 8f))
+        play(r, iptvHdr, Copy("rd:b", Debrid, 1080, codec = "h264", mbps = 8f))
         assertEquals("rd:b", r.state.copy?.id)
         assertTrue(r.choices.marks(tv).isEmpty())
     }
@@ -290,15 +290,15 @@ class FilmSessionTest {
         assertEquals(iptv1080, r.state.copy)
         advance(3_000)
         assertEquals(listOf(rd4k, iptv1080), r.state.ranking?.copies?.map { it.copy })
-        assertTrue(r.state.rd[rd4k.id] is RdCheck.Ready)
+        assertTrue(r.state.debrid[rd4k.id] is DebridCheck.Ready)
     }
 
     // #14: the title page's Plays line, Versions and Play read one plan: what it names is what opens, after one debrid check.
     @Test fun thePlaysLineNamesWhatPlayOpens() = runTest {
         val r = rig(debrid = FakeDebrid(ready = { it != "rd:gone" }))
         val gone = rd4k.copy(id = "rd:gone") // flagged cached, but the debrid no longer has it
-        val rd1080 = Copy("rd:b", RealDebrid, 1080, codec = "hevc", audio = "eac3", channels = 6, mbps = 8f)
-        val torrents = mapOf(gone.id to RdCandidate(gone.id, null, cached = true), rd1080.id to RdCandidate(rd1080.id, null))
+        val rd1080 = Copy("rd:b", Debrid, 1080, codec = "hevc", audio = "eac3", channels = 6, mbps = 8f)
+        val torrents = mapOf(gone.id to DebridCandidate(gone.id, null, cached = true), rd1080.id to DebridCandidate(rd1080.id, null))
         r.plan.answered(TitleAnswer(TitleCopies(listOf(gone, rd1080, iptv1080), torrents, originalLanguage = "en")))
         runCurrent()
         val plays = r.plan.state.value.plays

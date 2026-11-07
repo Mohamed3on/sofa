@@ -123,12 +123,12 @@ class AppGraph(context: Context) {
      */
     val debrid by lazy {
         Debrids(
-            TorBox(http, { sync.torboxToken }).also { scope.launch { it.readAccount() } },
-            RealDebrid(http, { sync.realDebridToken }, onInfringing = ::refused).also { scope.launch { it.readAccount() } },
+            TorBox(http, { sync.torboxToken }, scope = scope),
+            RealDebrid(http, { sync.realDebridToken }, onInfringing = ::refused, scope = scope),
             scope,
         )
     }
-    /** "TorBox premium has ended" shows once an app session, once both debrids are down. */
+    /** "<service> premium has ended" shows once an app session, once both debrids are down. */
     val premiumEndedShown = java.util.concurrent.atomic.AtomicBoolean()
     /** Each title's copies, ranked and checked ahead of Play. Touch [setup] on the main thread first. */
     val films by lazy { FilmCopies(sync::copies, debrid, copyChoices, capacity, { setup.profile.value }, scope, ip = { vpnActive.value }, linked = filmHeads::fetch) }
