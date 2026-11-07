@@ -235,7 +235,8 @@ export async function titleCopies(title: string, iptv: Promise<IptvCopy[]>, wait
     const now = Date.now()
     const known = new Set(copies.map((c) => c.hash))
     return [...copies, ...extra.copies.filter((c) => !known.has(c.hash))]
-      .filter((c) => !(now - (refused[c.hash] ?? 0) < INFRINGING_MS))
+      // Real-Debrid's refusal only rules a copy out when it is the one service: TorBox serves those (Finding Nemo's 4K Arabic dub).
+      .filter((c) => process.env.TORBOX_TOKEN || !(now - (refused[c.hash] ?? 0) < INFRINGING_MS))
       // A full disc ("COMPLETE.BLURAY", BDMV, ISO) is a folder of disc files, not one video the stick can stream.
       .filter((c) => !DISC.test(`${c.name} ${c.filename ?? ''}`))
       .map((c) => ({ ...c, kbps: t.runtime > 0 ? Math.round((c.size * 8) / (t.runtime * 60) / 1000) : 0 }))
