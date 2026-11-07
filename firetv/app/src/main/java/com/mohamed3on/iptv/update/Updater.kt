@@ -9,6 +9,7 @@ import android.net.Uri
 import android.provider.Settings
 import android.util.Log
 import com.mohamed3on.iptv.BuildConfig
+import com.mohamed3on.iptv.data.SofaServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,8 +19,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
 import java.security.DigestInputStream
 import java.security.MessageDigest
@@ -45,9 +44,7 @@ private val json = Json { ignoreUnknownKeys = true }
  */
 class Updater(
     private val context: Context,
-    private val client: OkHttpClient,
-    private val baseUrl: String,
-    private val token: String,
+    private val server: SofaServer,
     private val scope: CoroutineScope,
     private val installed: Long = BuildConfig.VERSION_CODE.toLong(),
     private val dir: File = context.cacheDir,
@@ -71,7 +68,7 @@ class Updater(
     private fun fetch() {
         val apk = File(dir, "update.apk")
         val dm = File(dir, DM)
-        val manifest = get("version") { json.decodeFromString<Manifest>(it.string()) } ?: return
+        val manifest = server.get("version") { json.decodeFromString<Manifest>(it.string()) }.getOrThrow()
         Log.i(TAG, "server ${manifest.versionCode}, installed $installed")
         if (manifest.versionCode <= installed) {
             apk.delete() // an update that is now installed
@@ -84,7 +81,7 @@ class Updater(
         val tmp = File(dir, "update-download.apk")
         try {
             val digest = MessageDigest.getInstance("SHA-256")
-            get("apk") { body -> DigestInputStream(body.byteStream(), digest).use { input -> tmp.outputStream().use { input.copyTo(it) } } } ?: return
+            server.get("apk") { body -> DigestInputStream(body.byteStream(), digest).use { input -> tmp.outputStream().use { input.copyTo(it) } } }.getOrThrow()
             val hex = digest.digest().joinToString("") { "%02x".format(it) }
             if (!hex.equals(manifest.sha256, ignoreCase = true)) {
                 Log.w(TAG, "download failed its checksum")
@@ -111,16 +108,10 @@ class Updater(
     /** Downloads [kind] to [to] when it matches [sha256]; false (and nothing left behind) otherwise. */
     private fun download(kind: String, to: File, sha256: String): Boolean {
         val digest = MessageDigest.getInstance("SHA-256")
-        get(kind) { body -> DigestInputStream(body.byteStream(), digest).use { input -> to.outputStream().use { input.copyTo(it) } } } ?: return false
+        server.get(kind) { body -> DigestInputStream(body.byteStream(), digest).use { input -> to.outputStream().use { input.copyTo(it) } } }.getOrElse { return false }
         val hex = digest.digest().joinToString("") { "%02x".format(it) }
         return hex.equals(sha256, ignoreCase = true).also { if (!it) to.delete() }
     }
-
-    /** Runs [read] on a 200 body; null on any other status. */
-    private fun <T> get(kind: String, read: (okhttp3.ResponseBody) -> T): T? =
-        client.newCall(Request.Builder().url("$baseUrl/api/app/$kind?t=$token").build()).execute().use { res ->
-            if (res.isSuccessful) read(res.body) else null
-        }
 
     /**
      * The row was picked. Without the install permission, opens this app's unknown-sources setting

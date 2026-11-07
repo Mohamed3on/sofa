@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
  * the history synced again ([resync]), like [Watchlist]. A change that fails is undone.
  */
 class Marks(
-    private val sync: FeedSync,
+    private val sync: TitlesClient,
     private val films: WatchedStore,
     private val episodes: WatchedStore,
     private val scope: CoroutineScope,

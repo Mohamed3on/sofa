@@ -7,7 +7,9 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
-import com.mohamed3on.iptv.data.FeedSync
+import com.mohamed3on.iptv.data.LiveSync
+import com.mohamed3on.iptv.data.SofaServer
+import com.mohamed3on.iptv.data.TitlesClient
 import com.mohamed3on.iptv.data.Lineup
 import com.mohamed3on.iptv.data.PrefsStore
 import com.mohamed3on.iptv.data.Route
@@ -56,13 +58,13 @@ class App : Application(), SingletonImageLoader.Factory {
             // The movie library is read once the first tune has had the stick to itself, so Movies opens at once.
             delay(5.seconds)
             launch { graph.trakt.flush() } // plays finished while the box was out of reach
-            graph.sync.library.loadCached()
-            graph.sync.library.sync(LIBRARY_CHECK)
-            graph.sync.history.loadCached()
+            graph.titles.library.loadCached()
+            graph.titles.library.sync(LIBRARY_CHECK)
+            graph.titles.history.loadCached()
             graph.syncHistory()
-            graph.sync.movies.loadCached()
+            graph.titles.movies.loadCached()
             withContext(Dispatchers.Main) { graph.setup } // its callbacks land on the main thread too
-            graph.migration.run(graph.sync::titleIds)
+            graph.migration.run(graph.titles::titleIds)
         }
         graph.scope.launch { VoiceFix.onceThisBoot(this@App) }
     }
@@ -103,20 +105,25 @@ class AppGraph(context: Context) {
     /** Typical film bandwidth per source, hour band and route (VPN on or off). */
     val capacity = Capacity(prefs, vpn = { vpnActive.value })
     /** The Trakt watchlist with the owner's own changes applied at once (title page button, ☰ on a card). */
-    val watchlist by lazy { Watchlist(sync, scope) }
+    val watchlist by lazy { Watchlist(titles, scope) }
     /** Watched marks and ratings, the owner's changes shown at once and written to Trakt (☰ on title pages and episodes). */
-    val marks by lazy { Marks(sync, watchedMovies, watchedEpisodes, scope) { syncHistory(Duration.ZERO) } }
+    val marks by lazy { Marks(titles, watchedMovies, watchedEpisodes, scope) { syncHistory(Duration.ZERO) } }
     /** Movies & Shows searches that led to a title, offered under an empty search box. */
     val recentSearches = RecentSearches(prefs)
     /** Marks, corrections and pins the copy ranker reads. */
     val copyChoices = CopyChoices(prefs)
-    val sync = FeedSync(http, BuildConfig.SERVER_URL, BuildConfig.APP_TOKEN, context.filesDir, prefs, onEpisodes = migration::adoptEpisodes)
+    /** Every call to the box goes through this. */
+    val server = SofaServer(http, BuildConfig.SERVER_URL, BuildConfig.APP_TOKEN)
+    /** Channels and guide. */
+    val sync = LiveSync(server, context.filesDir, prefs)
+    /** Films and shows: the library, history, title pages, copies, subtitles, marks and the watchlist. */
+    val titles = TitlesClient(server, context.filesDir, prefs, onEpisodes = migration::adoptEpisodes)
     /** What the TV, stick and soundbar can show and play; built off the launch path. */
     val setup by lazy { Setup(context) }
     /** Events the server keeps for the stick (/api/app/events). */
-    val telemetry by lazy { Telemetry(http, BuildConfig.SERVER_URL, BuildConfig.APP_TOKEN, scope) }
+    val telemetry by lazy { Telemetry(server, scope) }
     /** Trakt through the box: the Options sign-in and finished plays, queued until logged. */
-    val trakt by lazy { TraktSync(http, BuildConfig.SERVER_URL, BuildConfig.APP_TOKEN, prefs, scope) }
+    val trakt by lazy { TraktSync(server, prefs, scope) }
     /**
      * TorBox and Real-Debrid, whichever has the copy ([Debrids]), each from the stick's own IP; one instance, so
      * account lists and answers are shared.
@@ -131,14 +138,14 @@ class AppGraph(context: Context) {
     /** "<service> premium has ended" shows once an app session, once both debrids are down. */
     val premiumEndedShown = java.util.concurrent.atomic.AtomicBoolean()
     /** Each title's copies, ranked and checked ahead of Play. Touch [setup] on the main thread first. */
-    val films by lazy { FilmCopies(sync::copies, debrid, copyChoices, capacity, { setup.profile.value }, scope, ip = { vpnActive.value }, linked = filmHeads::fetch) }
+    val films by lazy { FilmCopies(titles::copies, debrid, copyChoices, capacity, { setup.profile.value }, scope, ip = { vpnActive.value }, linked = filmHeads::fetch) }
     /** The head and index of a Real-Debrid file whose link was fetched ahead, served to the film player from memory. */
     val filmHeads by lazy { FilmHeads(http) }
 
     /** The owner's history from the box, telling it the shows finished here in the last 6 months ("tv:N:sSeE@ms"). */
-    suspend fun syncHistory(maxAge: Duration = LIBRARY_CHECK) = sync.history.sync(maxAge, followed.entries.value
+    suspend fun syncHistory(maxAge: Duration = LIBRARY_CHECK) = titles.history.sync(maxAge, followed.entries.value
         .filter { it.episode != null && System.currentTimeMillis() - it.at < 183.days.inWholeMilliseconds }
-        .joinToString(",") { "${it.episode}@${it.at}" }.let { if (it.isEmpty()) "" else "&shows=$it" })
+        .joinToString(",") { "${it.episode}@${it.at}" }.let { if (it.isEmpty()) "" else "shows=$it" })
     private val refusedHashes = mutableSetOf<String>()
 
     /** A torrent Real-Debrid refused goes to the box (one post for a burst), which drops it from every title's copies. */
@@ -146,8 +153,8 @@ class AppGraph(context: Context) {
         if (synchronized(refusedHashes) { !refusedHashes.add(hash) || refusedHashes.size > 1 }) return
         scope.launch {
             delay(2_000)
-            sync.rdInfringing(synchronized(refusedHashes) { refusedHashes.toList().also { refusedHashes.clear() } })
+            titles.rdInfringing(synchronized(refusedHashes) { refusedHashes.toList().also { refusedHashes.clear() } })
         }
     }
-    val updater = Updater(context, http, BuildConfig.SERVER_URL, BuildConfig.APP_TOKEN, scope)
+    val updater = Updater(context, server, scope)
 }

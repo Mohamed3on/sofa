@@ -15,7 +15,7 @@ import kotlin.time.Duration
  * The Watchlist as the stick shows it: the box's history (Trakt's, then Letterboxd's), with the owner's own adds and
  * removals applied at once (optimistic) until the box's next history has them. [toggle] writes through the box to Trakt.
  */
-class Watchlist(private val sync: FeedSync, private val scope: CoroutineScope) {
+class Watchlist(private val sync: TitlesClient, private val scope: CoroutineScope) {
     /** Changes not yet in the box's history: title id → on the watchlist or not. */
     private val pending = MutableStateFlow<Map<TitleId, Boolean>>(emptyMap())
 

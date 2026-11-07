@@ -4,10 +4,6 @@ import android.provider.Settings
 import com.mohamed3on.iptv.update.Updater
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
-import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
-import okhttp3.OkHttpClient
-import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -26,21 +22,20 @@ import java.security.MessageDigest
 @RunWith(RobolectricTestRunner::class)
 class UpdaterTest {
     @get:Rule val tmp = TemporaryFolder()
-    private val server = MockWebServer()
+    private val box = FakeSofa()
     private val app = RuntimeEnvironment.getApplication()
     private val apk = "fake apk bytes".toByteArray()
     private val dm = "fake profile".toByteArray()
     private lateinit var dir: File
 
     @Before fun setUp() {
-        server.start()
         dir = tmp.newFolder("cache")
     }
 
-    @After fun tearDown() = server.close()
+    @After fun tearDown() = box.close()
 
     private fun updater(packageName: String = app.packageName) = Updater(
-        app, OkHttpClient(), server.url("/").toString().trimEnd('/'), "tok", TestScope(),
+        app, box.client, TestScope(),
         installed = 100, dir = dir, packageOf = { packageName },
     )
 
@@ -48,9 +43,9 @@ class UpdaterTest {
 
     private fun serve(versionCode: Int, sha256: String = sha(apk), withApk: Boolean = true, dmSha256: String? = null) {
         val dmField = dmSha256?.let { ""","dmSha256":"$it"""" } ?: ""
-        server.enqueue(MockResponse.Builder().code(200).body("""{"versionCode":$versionCode,"versionName":"1.$versionCode","sha256":"$sha256"$dmField}""").build())
-        if (withApk) server.enqueue(MockResponse.Builder().code(200).body(Buffer().write(apk)).build())
-        if (dmSha256 != null) server.enqueue(MockResponse.Builder().code(200).body(Buffer().write(dm)).build())
+        box.reply(body = """{"versionCode":$versionCode,"versionName":"1.$versionCode","sha256":"$sha256"$dmField}""")
+        if (withApk) box.reply(apk)
+        if (dmSha256 != null) box.reply(dm)
     }
 
     @Test fun theProfileComesAlongWhenItVerifies() = runTest {
@@ -102,9 +97,9 @@ class UpdaterTest {
         u.check()
         serve(99, withApk = false)
         u.check()
-        server.enqueue(MockResponse.Builder().code(404).build())
+        box.reply(404)
         u.check()
         assertNull(u.ready.value)
-        assertEquals(3, server.requestCount) // never fetched an APK
+        assertEquals(3, box.requests) // never fetched an APK
     }
 }

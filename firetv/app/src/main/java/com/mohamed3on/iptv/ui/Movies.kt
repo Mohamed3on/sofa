@@ -315,10 +315,10 @@ fun MoviesLayer(
     onClose: () -> Unit,
 ) {
     val graph = LocalContext.current.graph
-    val sync = graph.sync.library
+    val sync = graph.titles.library
     /** Where a title was left: films and shows keep separate places (a show's names its episode). */
     fun storeOf(title: TitleId) = if (title.isShow) graph.showResume else graph.resume
-    val history by graph.sync.history.items.collectAsState()
+    val history by graph.titles.history.items.collectAsState()
     // Watched marks: the stick's own, Trakt's, Letterboxd's and IMDb's together (U16).
     val watched by graph.marks.watched.collectAsState()
     val library by sync.items.collectAsState()
@@ -343,7 +343,7 @@ fun MoviesLayer(
         failed = null
         // The history too: from disk at once, then asked again beside the library.
         launch {
-            graph.sync.history.loadCached()
+            graph.titles.history.loadCached()
             graph.syncHistory()
         }
         // The copy on disk shows at once; the box is asked whether it changed (a 304 when not), on every open.
@@ -353,8 +353,8 @@ fun MoviesLayer(
         Check.log("movies_refreshed", "ok" to (error == null))
         if (sync.items.value == null) failed = error ?: SyncError.Malformed
         // The provider's films: Play's IPTV copy when the box can't list a film's copies (KTD13).
-        graph.sync.movies.loadCached()
-        graph.sync.movies.sync(12.hours)
+        graph.titles.movies.loadCached()
+        graph.titles.movies.sync(12.hours)
     }
     // Back on the rows from a title page or a film, the box is asked again too, so scores TrueScore just learnt show.
     val browsing = open && playing == null && pages.isEmpty()
@@ -364,7 +364,7 @@ fun MoviesLayer(
         pages.add(page)
     }
     // Old marks move to title ids at launch; if that failed (offline), opening Movies tries again.
-    LaunchedEffect(Unit) { graph.migration.run(graph.sync::titleIds) }
+    LaunchedEffect(Unit) { graph.migration.run(graph.titles::titleIds) }
     // The setup reader is built on the main thread (its callbacks land there) before copies are ranked off it.
     remember { graph.setup }
     // While an episode plays, the next one is prepared, so Next episode and the end of this one start at once (KTD13).
@@ -417,7 +417,7 @@ fun MoviesLayer(
     }
 
     /** The library's IPTV copy of a film: its own provider id, else the provider's film list's (none for a title it lacks). */
-    fun fallbackOf(movie: Movie) = libraryCopy(movie.id.takeIf { it > 0 } ?: graph.sync.movies.items.value?.findTitle(movie.titleId)?.id ?: 0)
+    fun fallbackOf(movie: Movie) = libraryCopy(movie.id.takeIf { it > 0 } ?: graph.titles.movies.items.value?.findTitle(movie.titleId)?.id ?: 0)
 
     /** A film from its saved place, or from the start. */
     fun playFilm(movie: Movie, fromStart: Boolean) =
@@ -431,7 +431,7 @@ fun MoviesLayer(
     fun resumeTitle(movie: Movie, fromStart: Boolean) {
         if (!movie.titleId.isShow) return playFilm(movie, fromStart)
         scope.launch {
-            val eps = graph.sync.showOf(movie).getOrNull()?.episodes?.takeIf { it.isNotEmpty() }
+            val eps = graph.titles.showOf(movie).getOrNull()?.episodes?.takeIf { it.isNotEmpty() }
             val seen = graph.marks.watched.value
             val place = graph.showResume.find(movie.titleId) ?: nextUp.firstOrNull { it.show.titleId == movie.titleId }?.place()
             if (eps == null) push(LibraryPage.Title(movie)) else playEpisode(movie, eps, upNextIndex(eps, place, seen), fromStart)
@@ -948,7 +948,7 @@ private fun rememberRested(focused: State<Movie?>): Movie? {
  */
 @Composable
 private fun rememberInfo(movie: Movie?, fresh: Boolean = false): MovieInfo? {
-    val sync = LocalContext.current.graph.sync
+    val sync = LocalContext.current.graph.titles
     val peek = movie?.let(sync::peekInfo)
     return produceState(peek, movie?.titleId, movie?.id) {
         val m = movie ?: return@produceState
@@ -1765,7 +1765,7 @@ private fun PosterCard(movie: Movie, progress: Float?, watched: Boolean = false,
             remember(rt) { if (rt >= 60) "${rt / 60}h %02d".format(Locale.ROOT, rt % 60).removeSuffix(" 00") else "${rt}m" }, style = CHIP_TEXT, maxLines = 1,
             modifier = Modifier.align(Alignment.BottomEnd).padding(Space.xs).background(CHIP_GROUND, CHIP_SHAPE).padding(horizontal = Space.xs + 2.dp, vertical = 1.dp),
         )
-        val learnt = movie.lib?.takeIf { !it.known }?.let { LocalContext.current.graph.sync.scores[movie.titleId] }
+        val learnt = movie.lib?.takeIf { !it.known }?.let { LocalContext.current.graph.titles.scores.collectAsState().value[movie.titleId] }
         val chip = remember(movie.lib, learnt) { movie.lib?.let { cardChip(learnt ?: it) } }
         if (chip != null) Text(
             chip, style = CHIP_TEXT, maxLines = 1,
@@ -1799,7 +1799,7 @@ private fun SearchGrid(
 ) {
     var found by remember { mutableStateOf<List<Movie>?>(null) }
     val graph = LocalContext.current.graph
-    val sync = graph.sync
+    val sync = graph.titles
     val recent by graph.recentSearches.all.collectAsState()
     // Runs once typing pauses (the box keeps each answer, and so does the app); the last results stay
     // meanwhile. Offline, the library's own titles.
@@ -1953,7 +1953,7 @@ private fun FilmPage(
     }
     val started = resume != null && resume.pos > 0
     // The provider's own copy, named on the Plays line when the box can't answer.
-    val iptv = film.id > 0 || graph.sync.movies.items.value?.findTitle(film.titleId) != null
+    val iptv = film.id > 0 || graph.titles.movies.items.value?.findTitle(film.titleId) != null
     val onMenu = if (!versions && !marking && graph.marks.canMark(film.titleId)) ({ marking = true }) else null
     TitleFrame(backdropOf(film, info), hidden, onBack, onFocus = { hasFocus = it }, onMenu = onMenu) {
         TitleScroll(
@@ -2332,7 +2332,7 @@ private fun ExtrasSection(scrollTo: (Float) -> Unit, content: @Composable () -> 
  */
 @Composable
 private fun PersonPage(person: Person, watched: Set<TitleId>, active: Boolean, hidden: Boolean, onOpen: (Movie) -> Unit, onBack: () -> Unit) {
-    val sync = LocalContext.current.graph.sync
+    val sync = LocalContext.current.graph.titles
     var titles by remember { mutableStateOf(sync.peekPerson(person.id)) }
     var failed by remember { mutableStateOf(false) }
     var attempt by remember { mutableStateOf(0) }
@@ -2426,7 +2426,7 @@ private fun ShowPage(
     onPlay: (List<Episode>, Int, fromStart: Boolean) -> Unit, onOpen: (Movie) -> Unit, onPerson: (Person) -> Unit, onBack: () -> Unit,
 ) {
     val graph = LocalContext.current.graph
-    val sync = graph.sync
+    val sync = graph.titles
     // The stick's marks with the box's (U16).
     val seen = watched
     val ratings by graph.marks.ratings.collectAsState()

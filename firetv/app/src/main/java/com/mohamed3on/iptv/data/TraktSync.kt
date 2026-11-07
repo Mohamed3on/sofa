@@ -13,10 +13,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
  * Trakt's sign-in as the box reports it (GET /api/app/trakt): off, waiting (with [code] to enter at [url]),
@@ -35,9 +31,7 @@ data class FinishedPlay(val title: TitleId, val at: Long)
  * so a play finished offline, or before Trakt is signed in, goes later. Sends run on [scope], off the player.
  */
 class TraktSync(
-    private val http: OkHttpClient,
-    private val baseUrl: String,
-    private val token: String,
+    private val server: SofaServer,
     private val store: KeyValueStore,
     private val scope: CoroutineScope,
     private val now: () -> Long = System::currentTimeMillis,
@@ -67,33 +61,25 @@ class TraktSync(
     suspend fun flush() = sending.withLock {
         withContext(Dispatchers.IO) {
             for (p in pending()) {
-                val body = buildJsonObject { put("title", p.title); put("at", p.at) }.toString()
-                val code = runCatching { call("trakt-history", body) {} }.getOrNull()
-                if (code == null || (code !in 200..299 && code != 400)) return@withContext
+                val sent = server.post("trakt-history", buildJsonObject { put("title", p.title); put("at", p.at) }) {}
+                // Logged, or refused for good (400): either way it leaves the queue.
+                if (sent.isFailure && sent.exceptionOrNull() != SyncError.Rejected(400)) return@withContext
                 synchronized(this@TraktSync) { save(pending() - p) }
             }
         }
     }
 
     /** Asks the box for the sign-in state. */
-    suspend fun refresh() = withContext(Dispatchers.IO) { runCatching { call("trakt", null) { _status.value = json.decodeFromString(it) } } }
+    suspend fun refresh() = withContext(Dispatchers.IO) { server.get("trakt", ::status).onSuccess { _status.value = it } }
 
     /** Connects (a new code), cancels the code or disconnects ([action]); the answer is the new state. */
     suspend fun act(action: String) = withContext(Dispatchers.IO) {
-        runCatching { call("trakt", buildJsonObject { put("action", action) }.toString()) { _status.value = json.decodeFromString(it) } }
+        server.post("trakt", buildJsonObject { put("action", action) }, ::status).onSuccess { _status.value = it }
         // Signed in: whatever finished meanwhile goes now.
         if (_status.value?.state == "on") flush()
     }
 
-    /** GET (or POST [body] to) /api/app/[route]; [onBody] gets a successful answer's text. Returns the status code. */
-    private fun call(route: String, body: String?, onBody: (String) -> Unit): Int {
-        val request = Request.Builder().url("$baseUrl/api/app/$route?t=$token")
-            .apply { if (body != null) post(body.toRequestBody(JSON)) }.build()
-        return http.newCall(request).execute().use {
-            if (it.isSuccessful) onBody(it.body.string())
-            it.code
-        }
-    }
+    private fun status(body: okhttp3.ResponseBody) = json.decodeFromString<TraktStatus>(body.string())
 
     private fun pending(): List<FinishedPlay> =
         store.get(KEY)?.let { runCatching { json.decodeFromString<List<FinishedPlay>>(it) }.getOrNull() } ?: emptyList()
@@ -105,7 +91,6 @@ class TraktSync(
         private const val CAP = 500
         private const val RETRY_MS = 10 * 60_000L
         private val LOGGABLE = Regex("""movie:\d+|tv:\d+:s\d+e\d+""")
-        private val JSON = "application/json".toMediaType()
         private val json = Json { ignoreUnknownKeys = true }
     }
 }

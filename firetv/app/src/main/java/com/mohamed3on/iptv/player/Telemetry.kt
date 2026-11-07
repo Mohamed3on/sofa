@@ -11,14 +11,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.mohamed3on.iptv.data.SofaServer
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import kotlin.math.roundToInt
 
 /** What the playing stream really is, measured from it: the banner's badges come from this. */
@@ -48,9 +46,7 @@ fun liveQuality(exo: ExoPlayer, fps: Float?): LiveQuality? {
  * is dropped, never retried, and nothing here can affect playback. No URLs are logged.
  */
 class Telemetry(
-    private val http: OkHttpClient,
-    private val baseUrl: String,
-    private val token: String,
+    private val server: SofaServer,
     private val scope: CoroutineScope,
     private val now: () -> Long = SystemClock::elapsedRealtime,
 ) {
@@ -133,13 +129,13 @@ class Telemetry(
             put("id", feed.id); put("name", feed.name); put("w", q.width); put("h", q.height)
             put("fps", fps); put("codec", q.codec); put("atmos", q.atmos); put("surround", q.surround)
         }
-        post("quality", body.toString()) { if ("\"stored\":true" in it) onStored() }
+        post("quality", body) { if ("\"stored\":true" in it) onStored() }
     }
 
     /** Sends [feed]'s measured bitrate (Mbps) once per app run; the server keeps a recent median per feed. */
     fun reportBitrate(feed: Channel, mbps: Float) {
         if (!bitrateReported.add(feed.id)) return
-        post("bitrate", buildJsonObject { put("id", feed.id); put("mbps", mbps) }.toString())
+        post("bitrate", buildJsonObject { put("id", feed.id); put("mbps", mbps) })
     }
 
     private fun record(type: String, fields: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit) {
@@ -153,17 +149,11 @@ class Telemetry(
 
     private fun flush() {
         val batch = synchronized(queue) { queue.toList().also { queue.clear() } }
-        if (batch.isNotEmpty()) post("events", JsonArray(batch).toString())
+        if (batch.isNotEmpty()) post("events", JsonArray(batch))
     }
 
-    private fun post(route: String, json: String, onReply: (String) -> Unit = {}) {
-        scope.launch(Dispatchers.IO) {
-            runCatching {
-                http.newCall(
-                    Request.Builder().url("$baseUrl/api/app/$route?t=$token").post(json.toRequestBody(JSON)).build(),
-                ).execute().use { if (it.isSuccessful) onReply(it.body.string()) }
-            }
-        }
+    private fun post(route: String, body: JsonElement, onReply: (String) -> Unit = {}) {
+        scope.launch(Dispatchers.IO) { server.post(route, body) { it.string() }.onSuccess(onReply) }
     }
 
     private fun Phase.problem(): String? = when (this) {
@@ -175,7 +165,6 @@ class Telemetry(
     }
 
     private companion object {
-        val JSON = "application/json".toMediaType()
         const val FLUSH_MS = 60_000L
         const val BATCH = 20
         const val MAX_QUEUE = 200

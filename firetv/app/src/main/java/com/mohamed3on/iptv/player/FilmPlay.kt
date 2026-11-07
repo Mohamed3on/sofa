@@ -201,7 +201,7 @@ fun openFilmPlay(
     val setup = graph.setup
     val plan = graph.films.plan(title)
     val session = FilmSession(title, plan, film, graph.copyChoices, { setup.profile.value }, meter, iptvUrl, scope, System::currentTimeMillis, graph.telemetry::film)
-    val fetched = SubtitleFetch(exo, graph.http, graph.sync, scope, { plan.state.value.answer?.copies?.originalLanguage }) {
+    val fetched = SubtitleFetch(exo, graph.http, graph.titles, scope, { plan.state.value.answer?.copies?.originalLanguage }) {
         session.inform(Notice.Subtitles(it.lang))
     }
     // The display follows the copy playing: it keeps its mode while the next copy opens, and goes back once the play ends.
@@ -245,7 +245,7 @@ fun openFilmPlay(
             session.state.first { it.phase == FilmPhase.Playing }
             delay(FILM_READING_MS) // past the first frames, so the formats have settled
             val id = session.state.value.copy?.takeIf { it.source == Capacity.Source.Iptv }?.id?.removePrefix("iptv:")?.toIntOrNull() ?: return@launch
-            filmReading(exo, fileBytes.get())?.let { graph.sync.reportFilmQuality(id, it) }
+            filmReading(exo, fileBytes.get())?.let { graph.titles.reportFilmQuality(id, it) }
         }
     }
     play = FilmPlay(

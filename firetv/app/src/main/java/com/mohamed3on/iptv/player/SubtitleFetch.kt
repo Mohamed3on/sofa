@@ -3,7 +3,7 @@ package com.mohamed3on.iptv.player
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
-import com.mohamed3on.iptv.data.FeedSync
+import com.mohamed3on.iptv.data.TitlesClient
 import com.mohamed3on.iptv.data.FoundSubtitle
 import com.mohamed3on.iptv.data.TitleId
 import kotlinx.coroutines.CoroutineScope
@@ -62,7 +62,7 @@ fun osHash(head: ByteArray, tail: ByteArray, size: Long): String {
 class SubtitleFetch(
     private val player: Player,
     private val http: OkHttpClient,
-    private val sync: FeedSync,
+    private val sync: TitlesClient,
     private val scope: CoroutineScope,
     /** The film's original language (ISO 639-1) when its audio track doesn't say. */
     private val original: () -> String?,
