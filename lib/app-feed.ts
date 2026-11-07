@@ -40,8 +40,6 @@ export interface AppFeed {
   realDebrid?: string
   /** The TorBox API token (TORBOX_TOKEN), when set: the stick uses TorBox instead, every call its own. */
   torbox?: string
-  /** The owner's Letterboxd session cookies (LETTERBOXD_COOKIE), when set: the stick logs films there in a WebView, Cloudflare passing only a real browser. */
-  letterboxd?: string
   channels: AppChannel[]
 }
 

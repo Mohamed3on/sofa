@@ -43,7 +43,7 @@ export async function channels() {
   const cfg = configFromEnv()
   const backup = backupConfigFromEnv()
   const feed = buildAppFeed(cfg, withCompetitionGroups(await withBackupFeeds(await fetchCuratedChannels(cfg, false), backup)), backup, process.env.REAL_DEBRID_TOKEN, process.env.TORBOX_TOKEN)
-  return { ...feed, ...(process.env.LETTERBOXD_COOKIE && { letterboxd: process.env.LETTERBOXD_COOKIE }) }
+  return feed
 }
 
 export async function guide() {
