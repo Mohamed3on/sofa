@@ -238,6 +238,7 @@ Quiet until focused; the press is felt on the same frame as the key.
 - **Page button** (title pages and Up next): a Night Glass pill with a 1dp lit edge at rest; focus fills it solid text-primary with ink text and scales it 1.06, so the one thing OK will press reads from across the room. Same 0.96 press. The primary action (Resume or Play) is focused on arrival.
 
 ### Chips and Badges
+- **Watched line** (film and show pages): the cards' check disc at 18dp and a body line, "Watched 15 Dec 2024", "Watched twice · last 3 Nov", a show's "Last watched yesterday", plain "Watched" when no day is known. It shares the progress slot under the meta line (after the time left and its bar on a part-way rewatch), so the page gains no row for it.
 - **Quality badges:** one quiet caption line joined with " · " ("4K · 50fps · Atmos"), no capsules, so they never compete with the name.
 - **Live mark and info pills:** caption text in its status colour on a 16% tint of that colour, 6dp radius, 6 x 1dp padding. Drawn in one canvas from cached text layouts because rows show them by the dozen.
 - **Picture tier:** the same pill, and the word alone on a card's corner: Reference in green, Great in text-primary, OK in text-secondary, Soft in amber. Never the accent: a tier is a quality, not a state.

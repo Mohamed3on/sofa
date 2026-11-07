@@ -155,6 +155,9 @@ import androidx.compose.ui.text.withStyle
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import com.mohamed3on.iptv.data.Seen
+import java.time.ZoneId
+import java.time.Instant
 import com.mohamed3on.iptv.data.Resume
 import com.mohamed3on.iptv.data.RowLayout
 import com.mohamed3on.iptv.data.TitleId
@@ -1875,9 +1878,14 @@ private fun FilmPage(
                     PageTitle(film.title.title, info, Modifier.glide())
                     // The tier is the copy's that plays, on the Plays line.
                     MetaLine(film, info, modifier = Modifier.glide())
-                    if (started && resume!!.dur > 0) Row(Modifier.glide(), horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
-                        Text(leftLabel(resume.dur - resume.pos), style = Type.headline, maxLines = 1)
-                        ProgressLine({ resume.pos.toFloat() / resume.dur }, Modifier.width(PROGRESS_WIDTH))
+                    // Where you are in it, then when you last saw it: one line, the progress first while a rewatch is part-way.
+                    val seenLine = watchedLabel(film.titleId, show = false)
+                    if ((started && resume!!.dur > 0) || seenLine != null) Row(Modifier.glide(), horizontalArrangement = Arrangement.spacedBy(Space.l), verticalAlignment = Alignment.CenterVertically) {
+                        if (started && resume!!.dur > 0) {
+                            Text(leftLabel(resume.dur - resume.pos), style = Type.headline, maxLines = 1)
+                            ProgressLine({ resume.pos.toFloat() / resume.dur }, Modifier.width(PROGRESS_WIDTH))
+                        }
+                        seenLine?.let { WatchedLine(it) }
                     }
                     info?.plot?.ifBlank { null }?.let { ScrollText(it, style = Type.prose, lines = if (unavailable) 8 else 10, modifier = Modifier.widthIn(max = PROSE_WIDTH).appear()) }
                     // The provider's facts name people only as text; TMDB's are the row below.
@@ -2385,6 +2393,7 @@ private fun ShowPage(
                         val seasons = episodes?.map { it.season }?.distinct()?.size
                         MetaLine(show, info ?: data?.info, extra = seasons?.let { if (it == 1) "1 season" else "$it seasons" }, modifier = Modifier.glide())
                         remember(info) { info?.let(::showStatus) }?.let { FitText(it, style = Type.body, active = true, modifier = Modifier.glide().appear()) }
+                        watchedLabel(show.titleId, show = true)?.let { WatchedLine(it, Modifier.glide()) }
                         (info?.plot?.ifBlank { null } ?: data?.plot?.ifBlank { null })?.let { ScrollText(it, style = Type.prose, lines = 10, modifier = Modifier.widthIn(max = PROSE_WIDTH).glide().appear()) }
                         if (info?.people.isNullOrEmpty()) data?.cast?.ifBlank { null }?.let { Text("Starring $it", style = Type.caption, maxLines = 2, modifier = Modifier.glide().appear()) }
                         val next = target?.let { episodes[it] }
@@ -2544,6 +2553,46 @@ private fun EpisodePlays(title: TitleId) {
 }
 
 private val GENERIC_EPISODE = Regex("""(?i)episode\s*\d+""")
+
+/**
+ * When the owner last watched [title] (/api/app/history's seen), or null when they haven't: "Watched 3 Nov", "Watched twice ·
+ * last 15 Dec 2024", "Watched yesterday"; a [show] by its latest episode ("Last watched 3 Nov"); "Watched" alone when only
+ * the Letterboxd diary or a dateless log knows. Every date the stick's local day.
+ */
+@Composable
+private fun watchedLabel(title: TitleId, show: Boolean): String? {
+    val graph = LocalContext.current.graph
+    val marked = title in graph.marks.watched.collectAsState().value
+    val seen = graph.titles.history.items.collectAsState().value?.seen?.get(title)
+    if (!marked && seen == null) return null
+    return remember(seen, marked) { seenText(seen, show) }
+}
+
+internal fun seenText(seen: Seen?, show: Boolean, today: LocalDate = LocalDate.now()): String {
+    val day = seen?.at?.takeIf { it > 0 }?.let { Instant.ofEpochSecond(it).atZone(ZoneId.systemDefault()).toLocalDate() }
+    val on = when {
+        day == null -> null
+        day == today -> "today"
+        day == today.minusDays(1) -> "yesterday"
+        day.year == today.year -> day.format(DateTimeFormatter.ofPattern("d MMM", Locale.UK))
+        else -> day.format(DateTimeFormatter.ofPattern("d MMM yyyy", Locale.UK))
+    }
+    val plays = seen?.plays ?: 1
+    return when {
+        show -> on?.let { "Last watched $it" } ?: "Watched"
+        plays > 1 -> (if (plays == 2) "Watched twice" else "Watched $plays times") + (on?.let { " · last $it" } ?: "")
+        else -> on?.let { "Watched $it" } ?: "Watched"
+    }
+}
+
+/** The watched line: the cards' check disc, at the line's height, and [text]. */
+@Composable
+private fun WatchedLine(text: String, modifier: Modifier = Modifier) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
+        WatchedMark(Modifier.size(18.dp))
+        Text(text, style = Type.body, maxLines = 1)
+    }
+}
 
 /** A watched film's corner mark: a check on an accent disc. */
 @Composable
