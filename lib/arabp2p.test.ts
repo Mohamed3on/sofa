@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { allowance, detail, filmFile, isFilm, listingRows, pickFilm, readTorrent, searchRows, uploadNames, wanted, type Row } from './arabp2p'
+import { allowance, detail, episodeOf, filmFile, isFilm, listingRows, namesSeason, pickFilm, readTorrent, searchRows, uploadNames, wanted, type Row } from './arabp2p'
 
 test('a search row is the film only by its whole name, without a sequel number, in its year', () => {
   const toyStory = ['حكاية لعبة', 'Toy Story']
@@ -79,4 +79,18 @@ test('a dubbed upload is matched to its TMDB film by its names and year, or to n
   // A translated name takes the first animated film of its year; live action and other years never.
   expect(pickFilm([film(4, 'Ice Age: Collision Course', '2016')], 'العصر الجليدي', '2016')).toBe(4)
   expect(pickFilm([film(5, 'Night', '2024'), film(6, 'Night', '2021', false)], 'Night', '2021')).toBe(0)
+})
+
+test("a show's file is its episode only when named for the show; an upload names its seasons", () => {
+  const bluey = ['بلوي', 'Bluey']
+  expect(episodeOf('Bluey.S01/Bluey.S01E05.1080p.DSNP.WEB-DL.mkv', bluey)).toEqual([1, 5])
+  expect(episodeOf('Bluey.2018.S02E10.mkv', bluey)).toEqual([2, 10])
+  expect(episodeOf('S03E01.mp4', bluey)).toEqual([3, 1])
+  expect(episodeOf('Bluey.Compilations.S01E01.Outdoor.Adventures.mkv', bluey)).toBeNull()
+  expect(episodeOf('Bluey.S01E05.nfo', bluey)).toBeNull()
+  expect(episodeOf('تيمون وبومبا الجزء 3 الحلقة 05.mp4', ['تيمون وبومبا'])).toEqual([3, 5])
+  expect(namesSeason('[استعادة] بلوي [مدبلج][مترجم] Bluey.2018.S01-02-03.1080p', 3)).toBe(true)
+  expect(namesSeason('[استعادة] بلوي [مدبلج][مترجم] Bluey.2018.S01-02-03.1080p', 4)).toBe(false)
+  expect(namesSeason('بلوي [م2][مدبلج][1080p]', 2)).toBe(true)
+  expect(namesSeason('Bluey [كامل][مدبلج][1080p]', 4)).toBe(true)
 })

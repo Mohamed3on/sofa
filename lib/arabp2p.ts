@@ -1,6 +1,6 @@
 // ArabP2P (arabp2p.net), a private Arabic tracker, as a third torrent source for films Torrentio barely covers:
 // Arabic-dubbed animated films (its "مدبلج" categories; Egyptian dubs first) and Arabic films (its Arabic-film
-// listing, looked up by TMDB id). Only copies TorBox already holds are offered, so nothing is downloaded from
+// listing, looked up by TMDB id), and the episodes of Arabic-dubbed animated shows (their season packs). Only copies TorBox already holds are offered, so nothing is downloaded from
 // the tracker's peers and nothing has to seed.
 //
 // The tracker is touchy, so everything here is slow and kept:
@@ -35,6 +35,8 @@ const TORBOX_MS = 2 * 3600_000
 export interface Row { id: string; title: string; size: number; seeds: number; dub: boolean; egyptian: boolean; link: string }
 /** What a torrent holds: its hash and the video file to play (index in the torrent's file list). */
 interface Held { hash: string; file: number; filename: string; size: number }
+/** What a show's torrent holds: its hash and each episode's file ("1:5" → index, name, bytes). */
+interface Pack { hash: string; eps: Record<string, [number, string, number]> }
 interface Store {
   films: Record<string, { at: number; ar: string; rows: Row[] }>
   /** By torrent id; `none` when it holds no single film (a pack, or no video). */
@@ -52,6 +54,9 @@ interface Store {
   bare?: Record<string, 1>
   /** The dubbed films' TMDB vote counts: the best-known are hashed first, as TorBox most likely holds them. */
   votes?: Record<string, number>
+  /** Dubbed shows' rows by TMDB id, like films'; their torrents by id, `none` when no file is one of the show's episodes. */
+  shows?: Record<string, { at: number; ar: string; rows: Row[] }>
+  packs?: Record<string, Pack | { none: true }>
 }
 const storeFile = () => process.env.ARABP2P_CACHE_FILE ?? fileURLToPath(new URL('../.cache/arabp2p.json', import.meta.url))
 // One copy in memory (only the server writes the file; the library build only reads it), saved whole after each change.
@@ -157,9 +162,36 @@ export function readTorrent(buf: Uint8Array): { hash: string; files: { name: str
   }
 }
 
+const VIDEO = /\.(mkv|mp4|avi|m4v|ts|mov|wmv)$/i
+
+/**
+ * The season and episode a show's file is ("Bluey.S01E05.1080p.mkv", "تيمون وبومبا الجزء 3 الحلقة 5.mp4"), when
+ * what comes before is one of the show's [names] (a year and brackets aside) or nothing: a spin-off's file
+ * ("Bluey.Compilations.S01E01") is no episode of the show.
+ */
+export function episodeOf(file: string, names: string[]): [number, number] | null {
+  const base = digits(file.split('/').pop() ?? '')
+  if (!VIDEO.test(base)) return null
+  const m = base.match(/^(.*?)(?<![a-z])s(\d{1,2})[ ._-]?e(\d{1,3})(?!\d)/i) ?? base.match(/^(.*?)(?:الموسم|الجزء)\s*(\d{1,2})\D*?الحلقة\s*(\d{1,3})(?!\d)/)
+  if (!m) return null
+  const before = norm(m[1].replace(/\[[^\]]*\]|\([^)]*\)/g, ' ').replace(/(?<!\d)(?:19|20)\d\d(?!\d)/g, ' '))
+  return !before || names.some((n) => norm(n) === before) ? [Number(m[2]), Number(m[3])] : null
+}
+
+/** The episodes in a show's torrent: each one's biggest file. */
+export function packEpisodes(files: { name: string; size: number }[], names: string[]): Pack['eps'] {
+  const eps: Pack['eps'] = {}
+  files.forEach((f, i) => {
+    const ep = episodeOf(f.name, names)
+    const key = ep && `${ep[0]}:${ep[1]}`
+    if (key && !(eps[key]?.[2] >= f.size)) eps[key] = [i, f.name.split('/').pop()!, f.size]
+  })
+  return eps
+}
+
 /** The one video a torrent holds for a film; null for a pack (several big videos) or none. */
 export function filmFile(files: { name: string; size: number }[]): { file: number; filename: string; size: number } | null {
-  const videos = files.map((f, file) => ({ ...f, file })).filter((f) => /\.(mkv|mp4|avi|m4v|ts|mov|wmv)$/i.test(f.name))
+  const videos = files.map((f, file) => ({ ...f, file })).filter((f) => VIDEO.test(f.name))
   const big = videos.reduce((a, f) => (f.size > a.size ? f : a), { name: '', size: 0, file: -1 })
   if (big.file < 0 || videos.filter((f) => f.size > big.size / 3).length > 1) return null
   return { file: big.file, filename: big.name, size: big.size }
@@ -269,6 +301,16 @@ export function allowance(s: Pick<Store, 'downloads' | 'fullUntil'>, dub: boolea
 
 /** A torrent's hash and film file: the detail page's magnet if it shows one, else its .torrent (when the allowance has room beyond [keep]). */
 async function resolve(row: Row, dub: boolean, keep = 0): Promise<void> {
+  const held = await fetchHash(row, dub, keep)
+  if (!held) return
+  const s = await db()
+  const f = filmFile(held.files)
+  s.torrents[row.id] = f ? { hash: held.hash, ...f } : { none: true }
+  await save()
+}
+
+/** A torrent's hash and files: the detail page's magnet if it shows one, else its .torrent (when the allowance has room beyond [keep]); null without. */
+async function fetchHash(row: Row, dub: boolean, keep: number): Promise<{ hash: string; files: { name: string; size: number }[] } | null> {
   const s = await db()
   const d = s.bare?.[row.id] ? { files: [] } : detail(await page(`index.php?page=torrent-details&id=${row.id}`))
   let held: { hash: string; files: { name: string; size: number }[] } | null = d.hash ? { hash: d.hash, files: d.files } : null
@@ -277,7 +319,7 @@ async function resolve(row: Row, dub: boolean, keep = 0): Promise<void> {
       ;(s.bare ??= {})[row.id] = 1
       await save()
     }
-    if (allowance(s, dub) <= keep) return
+    if (allowance(s, dub) <= keep) return null
     const r = await request(row.link, { headers: { referer: `${BASE}index.php?page=torrent-details&id=${row.id}` } })
     const buf = new Uint8Array(await r.arrayBuffer())
     held = readTorrent(buf)
@@ -288,13 +330,13 @@ async function resolve(row: Row, dub: boolean, keep = 0): Promise<void> {
         const mine = s.downloads.filter((t) => Date.now() - t < DAY_MS)
         s.fullUntil = mine.length ? Math.min(...mine) + DAY_MS : Date.now() + 6 * 3600_000
       } else loggedIn = false
-      return void save()
+      await save()
+      return null
     }
     s.downloads = [...s.downloads.filter((t) => Date.now() - t < DAY_MS), Date.now()]
+    await save()
   }
-  const f = filmFile(held.files)
-  s.torrents[row.id] = f ? { hash: held.hash, ...f } : { none: true }
-  await save()
+  return held
 }
 
 /**
@@ -530,4 +572,87 @@ export async function arabp2pCopies(tmdb: string, t: TmdbTitle): Promise<{ copie
     }
   })
   return { copies, pending: jobs.has(tmdb) }
+}
+
+// --- Dubbed shows ------------------------------------------------------------------------------------------
+
+/** Whether a show's upload names [season]: "S02", "S01-02-03", "[م2]", "الموسم 2"; one naming no season (a complete pack) does too. */
+export function namesSeason(title: string, season: number): boolean {
+  const t = digits(title)
+  const named = [...t.matchAll(/(?<![a-z])s(\d{1,2})((?:[ ._-]+(?:s)?\d{1,2}(?!\d))*)(?!\d|e\d)/gi)].flatMap((m) => [m[1], ...(m[2].match(/\d+/g) ?? [])])
+    .concat([...t.matchAll(/(?:\[م|الموسم\s*|الجزء\s*)(\d{1,2})(?!\d)/g)].map((m) => m[1])).map(Number)
+  return !named.length || named.includes(season)
+}
+
+/** A show's rows worth a hash for [season], best first: those naming it, then Egyptian dubs, resolution and seeds. */
+function wantedPacks(rows: Row[], season: number, packs: Store['packs'] = {}): Row[] {
+  const res = (r: Row) => parseRelease(r.title).res
+  return rows.filter((r) => !(packs[r.id] && 'none' in packs[r.id]!))
+    .sort((a, b) => Number(namesSeason(b.title, season)) - Number(namesSeason(a.title, season)) || Number(b.egyptian) - Number(a.egyptian) || res(b) - res(a) || b.seeds - a.seeds)
+    .slice(0, PER_FILM)
+}
+
+const showJobs = new Map<string, Promise<void>>()
+/** Brings a show's rows (its dubbed uploads, by name) and [season]'s packs up to date, in the background. */
+function refreshShow(tmdb: string, t: TmdbTitle, season: number): Promise<void> {
+  let job = showJobs.get(tmdb)
+  if (!job) {
+    job = (async () => {
+      const s = await db()
+      const shows = (s.shows ??= {})
+      const packs = (s.packs ??= {})
+      let show = shows[tmdb]
+      const ar = show?.ar ?? await tmdbGet<{ name?: string }>(`tv/${tmdb}?language=ar`).then((r) => r.name ?? '', () => '')
+      const names = [...new Set([ar, t.name, t.originalTitle].filter(Boolean))]
+      if (stale(show)) {
+        const rows = new Map<string, Row>()
+        for (const q of names.slice(0, 2)) {
+          const html = await page(`index.php?page=torrents&search=${encodeURIComponent(q)}&category=0&active=0&internel=0&order=3&by=2`)
+          for (const r of searchRows(html)) if (r.dub && names.some((n) => ` ${norm(r.title)} `.includes(` ${norm(n)} `))) rows.set(r.id, r)
+        }
+        show = shows[tmdb] = { at: Date.now(), ar, rows: [...rows.values()] }
+        await save()
+      }
+      for (const r of wantedPacks(show!.rows, season, packs)) {
+        if (packs[r.id]) continue
+        const held = await fetchHash(r, true, 0)
+        if (!held) continue
+        const eps = packEpisodes(held.files, names)
+        packs[r.id] = Object.keys(eps).length ? { hash: held.hash, eps } : { none: true }
+        await save()
+      }
+    })()
+      .catch((e) => void (e instanceof Paused || console.warn(`arabp2p: tv ${tmdb} failed (${e instanceof Error ? e.message : e})`)))
+      .finally(() => showJobs.delete(tmdb))
+    showJobs.set(tmdb, job)
+  }
+  return job
+}
+
+/**
+ * An episode's ArabP2P copies TorBox holds, for an animated show (its Arabic dubs, from known packs; the tracker
+ * is never waited on). `pending` while the show's lookup runs.
+ */
+export async function arabp2pEpisodeCopies(tmdb: string, t: TmdbTitle, season: number, episode: number): Promise<{ copies: Omit<RdCopy, 'kbps'>[]; pending: boolean }> {
+  if (!process.env.ARABP2P_USER || !process.env.ARABP2P_PASS || !t.genres.includes('Animation')) return { copies: [], pending: false }
+  const s = await db()
+  const rows = s.shows?.[tmdb]?.rows ?? []
+  const due = stale(s.shows?.[tmdb]) || wantedPacks(rows, season, s.packs).some((r) => !s.packs?.[r.id] && (!s.bare?.[r.id] || allowance(s, true) > 0))
+  if (Date.now() >= pausedUntil && due) refreshShow(tmdb, t, season)
+  const known = rows.flatMap((row) => {
+    const p = s.packs?.[row.id]
+    const ep = p && 'eps' in p ? p.eps[`${season}:${episode}`] : undefined
+    return p && 'hash' in p && ep ? [{ row, hash: p.hash, ep }] : []
+  })
+  const held = await onTorBox([...new Set(known.map((k) => k.hash))], s)
+  const copies = known.filter((k) => held.has(k.hash)).map(({ row, hash, ep: [file, filename, size] }) => {
+    const a = parseRelease(`${row.title}\n${filename}`)
+    return {
+      src: 'rd' as const, hash, file, filename, name: row.title, size, seeds: row.seeds,
+      ...(process.env.TORBOX_TOKEN && { cached: true as const }),
+      ...a,
+      langs: [...new Set(['ar', ...(row.egyptian ? ['arz'] : []), ...a.langs])],
+    }
+  })
+  return { copies, pending: showJobs.has(tmdb) }
 }

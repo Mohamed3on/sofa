@@ -2,10 +2,10 @@
 // torrents Torrentio knows (Real-Debrid candidates; the stick checks which are cached). The box
 // describes, the stick ranks. IPTV copies never wait on Torrentio: it gets a short budget, after which
 // the answer says `sources.rd: 'pending'` and the lookup carries on into the cache for the next ask.
-// Arabic films and Arabic-dubbed animated films also get ArabP2P's copies that TorBox holds (arabp2p.ts).
+// Arabic films, Arabic-dubbed animated films and animated shows' episodes also get ArabP2P's copies that TorBox holds (arabp2p.ts).
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { arabp2pCopies } from './arabp2p.js'
+import { arabp2pCopies, arabp2pEpisodeCopies } from './arabp2p.js'
 import { writeAtomic } from './fs.js'
 import { getJson } from './http.js'
 import { introFor, type Intro } from './intros.js'
@@ -228,7 +228,7 @@ export async function titleCopies(title: string, iptv: Promise<IptvCopy[]>, wait
     if (!t.imdb) return []
     const [copies, extra, refused] = await Promise.all([
       torrentio(p.season != null ? `series/${t.imdb}:${p.season}:${p.episode}` : `movie/${t.imdb}`),
-      p.kind === 'movie' ? arabp2pCopies(p.tmdb, t) : { copies: [], pending: false },
+      p.kind === 'movie' ? arabp2pCopies(p.tmdb, t) : p.season != null ? arabp2pEpisodeCopies(p.tmdb, t, p.season, p.episode!) : { copies: [], pending: false },
       infringing(),
     ])
     arabp2pPending = extra.pending
