@@ -4,6 +4,7 @@
 // the provider's daily series snapshot (seriesCatalogue in provider.ts); a show's episodes are
 // fetched when it's opened.
 import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { writeAtomic } from './fs.js'
 import { apiGet, claims4K, plainCategory, readName, seriesCatalogue, type SeriesCatalogue, type SeriesEntry, type XtreamConfig } from './provider.js'
 import { categoryLabels, claimedPicture, measuredStream, pictureTier, probedPicture, streamLabels, type Measured, type ProbedStream } from './quality-labels.js'
@@ -239,7 +240,7 @@ async function filmText(cfg: XtreamConfig, vodId: number, titleId: string, info:
 
 // Films the app measured while they played (resolution, codec, HDR, frame rate, audio), by VOD id:
 // a film's quality is then known rather than claimed, for every viewer. Kept on the box.
-const MEASURED = new URL('../.cache/vod-measured.json', import.meta.url)
+const MEASURED = fileURLToPath(new URL('../.cache/vod-measured.json', import.meta.url))
 let measured: Promise<Record<string, Measured>> | null = null
 export function measuredFilms(): Promise<Record<string, Measured>> {
   measured ??= readFile(MEASURED, 'utf8').then((t) => JSON.parse(t) as Record<string, Measured>).catch(() => ({}))
