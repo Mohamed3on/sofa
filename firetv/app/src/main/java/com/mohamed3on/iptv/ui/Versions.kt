@@ -92,8 +92,11 @@ private fun standing(r: Ranked, data: VersionsData) = when {
     else -> Standing.Plays
 }
 
-/** What tells copies apart at a glance: resolution, HDR kind, sound (Atmos, surround, stereo) and languages. */
-private fun kind(c: Copy) = listOf(c.resolution, c.hdr.firstOrNull(), if (c.atmos) 2 else if (c.channels >= 6) 1 else 0, c.languages)
+/** What tells copies apart at a glance: resolution, HDR kind, sound (Atmos, surround, stereo) and whether it speaks the title's language. */
+private fun kind(r: Ranked) = r.copy.let { c -> listOf(c.resolution, c.hdr.firstOrNull(), if (c.atmos) 2 else if (c.channels >= 6) 1 else 0, r.original) }
+
+/** Copies a group shows before "Show all". */
+private const val SPREAD = 4
 
 /**
  * Every copy of [title], grouped by how it stands on this setup, each with its labels, picture tier,
@@ -119,8 +122,12 @@ internal fun Versions(title: String, data: VersionsData, first: FocusRequester, 
             .map { it to standing(it, data).takeIf { _ -> ranking?.language == null || it.original } }
             .sortedBy { it.second?.ordinal ?: Int.MAX_VALUE }
     }
-    // A spread first: each group's best copy of each kind (so 1080p and SDR show beside the 4K remuxes); "Show all" has the rest.
-    val spread = remember(rows) { rows.distinctBy { (r, s) -> s to kind(r.copy) }.mapTo(HashSet()) { it.first.copy.id } }
+    // A spread first: each group's best copy of each kind (so 1080p and SDR show beside the 4K remuxes), SPREAD at most,
+    // and the copy pinned or playing; "Show all" has the rest.
+    val spread = remember(rows) {
+        rows.distinctBy { (r, s) -> s to kind(r) }.groupBy { it.second }.values.flatMap { it.take(SPREAD) }.mapTo(HashSet()) { it.first.copy.id } +
+            rows.filter { (r, _) -> r.pinned || r.copy.id == data.playing }.map { it.first.copy.id }
+    }
     // Reasons are worded against the copy Play opens, as the Plays line names it: the best one that can play.
     val plays = data.prepared.pick()?.copy?.id
     val state = rememberLazyListState()
