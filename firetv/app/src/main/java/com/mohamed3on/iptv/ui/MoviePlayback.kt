@@ -387,6 +387,7 @@ internal fun MoviePlayback(
             val subtitleState by subtitles.state.collectAsState()
             val filmState by session.state.collectAsState()
             val prepared by opened.plan.state.collectAsState()
+            var dubFirst by remember { mutableStateOf(graph.copyChoices.dubFirst) }
             MoviePanel(
                 audioState,
                 subtitleState,
@@ -400,6 +401,14 @@ internal fun MoviePlayback(
                 onShift = fetched::shift,
                 open = panel,
                 onAudio = { audio.select(it) },
+                dubFirst = dubFirst,
+                onDubFirst = {
+                    dubFirst = !dubFirst
+                    graph.copyChoices.dubFirst = dubFirst
+                    opened.plan.rerank()
+                    // On: the Arabic track now, when this file has one.
+                    if (dubFirst) audioState.options.firstOrNull { it.language == "ar" }?.let(audio::select)
+                },
                 onFromStart = {
                     panel = false
                     target = null
@@ -503,13 +512,13 @@ private enum class PanelPage { Main, Version, Audio, Subtitles }
 
 /**
  * Menu while a movie plays: the version playing ([versions], R11), audio track (when there is a choice),
- * subtitles (when there are any), a show's Next episode and Play from beginning.
+ * subtitles (when there are any), Arabic dub first (the owner's setting, every title), a show's Next episode and Play from beginning.
  */
 @Composable
 private fun MoviePanel(
     audio: AudioState, subtitles: SubtitleState, fetched: SubtitleFetch.State, version: String?, onSubtitle: (SubtitleOption?) -> Unit,
     onFetched: (FoundSubtitle) -> Unit, onShift: (Long) -> Unit, open: Boolean,
-    onAudio: (com.mohamed3on.iptv.player.AudioOption) -> Unit, onFromStart: () -> Unit, onNext: (() -> Unit)?, modifier: Modifier,
+    onAudio: (com.mohamed3on.iptv.player.AudioOption) -> Unit, dubFirst: Boolean, onDubFirst: () -> Unit, onFromStart: () -> Unit, onNext: (() -> Unit)?, modifier: Modifier,
     versions: @Composable ColumnScope.(first: FocusRequester) -> Unit,
 ) {
     val stay by rememberUpdatedState(open)
@@ -555,6 +564,7 @@ private fun MoviePanel(
                     fetched.selected?.let { "${fetchedName(it.lang)} · OpenSubtitles" } ?: subtitles.selected?.let(::subtitleName) ?: if (searching) "Searching…" else "Off",
                     focus = take(),
                 ) { page = PanelPage.Subtitles }
+                PanelRow("Arabic dub first", if (dubFirst) "On" else "Off", focus = take(), onClick = onDubFirst)
                 if (onNext != null) PanelRow("Next episode", focus = take(), onClick = onNext)
                 PanelRow("Play from beginning", focus = take(), onClick = onFromStart)
             }

@@ -91,6 +91,8 @@ class Ranking internal constructor(
     val fallback: Ranked?,
     /** R10: the best working copy that only the bandwidth ruled out. */
     val heavier: Ranked?,
+    /** Copies with Arabic audio count as the title's language (the owner's "Arabic dub first"). */
+    private val arabic: Boolean = false,
 ) {
     /**
      * [r]'s reason worded against [plays], the copy Play opens, when that isn't [pick]
@@ -98,7 +100,7 @@ class Ranking internal constructor(
      */
     fun reasonFor(r: Ranked, plays: String?): String {
         val p = copies.firstOrNull { it.copy.id == plays }?.takeIf { it !== pick } ?: return r.reason
-        return reason(r, p)
+        return reason(r, p, arabic)
     }
 
     /** R9: the best-ranked working copy lighter than [current], for a step-down. */
@@ -110,7 +112,8 @@ class Ranking internal constructor(
 
 /**
  * Ranks a title's [copies] for [setup] (U6): language, then support, then bandwidth, picture, sound,
- * English subtitles for a foreign film, and Real-Debrid on a tie (KTD15); a [pin] beats all of it.
+ * English subtitles for a foreign film, and Real-Debrid on a tie (KTD15); a [pin] beats all of it. With [dubFirst], a title
+ * that has a copy with Arabic audio takes those copies as its language instead.
  * [marks] are this setup's, by copy id; [typicalMbps] is per source, null when unknown (optimistic). Audio the
  * setup doesn't report passing is taken to play: a release name lists only its headline track, and a remux often
  * carries a Dolby one too. Audio it [learnt] doesn't play (the audio's correction, when) only ranks the copy's sound
@@ -125,14 +128,16 @@ fun rankCopies(
     corrections: Set<Correction> = emptySet(),
     pin: String? = null,
     learnt: Map<Correction, Long> = emptyMap(),
+    dubFirst: Boolean = false,
 ): Ranking {
     val p = setup.corrected(corrections)
+    val arabic = dubFirst && copies.any { "ar" in it.languages }
     val ignore = Correction.IgnoreBandwidth in corrections
     val iptv = if (ignore) null else typicalMbps(Source.Iptv)
     val rd = if (ignore) null else typicalMbps(Source.RealDebrid)
-    val ranked = copies.map { judge(it, p, marks[it.id], originalLanguage, if (it.source == Source.Iptv) iptv else rd, it.id == pin, learnt) }.sortedWith(ORDER)
+    val ranked = copies.map { judge(it, p, marks[it.id], originalLanguage, arabic, if (it.source == Source.Iptv) iptv else rd, it.id == pin, learnt) }.sortedWith(ORDER)
     val pick = ranked.firstOrNull()?.takeIf { it.pinned || it.support != Support.Wont }
-    for (r in ranked) r.reason = reason(r, pick)
+    for (r in ranked) r.reason = reason(r, pick, arabic)
     val working = pick?.takeIf { it.support == Support.Works && !it.pinned }
     return Ranking(
         ranked, pick,
@@ -141,6 +146,7 @@ fun rankCopies(
         heavier = working?.takeIf { it.fits }?.let { w ->
             ranked.firstOrNull { it.support == Support.Works && it.original == w.original && !it.fits && versus(it, w, fit = false) < 0 }
         },
+        arabic,
     )
 }
 
@@ -159,7 +165,7 @@ fun audioFamily(audio: String): Correction? = when (audio) {
     else -> null
 }
 
-private fun judge(c: Copy, p: SetupProfile, mark: Mark?, language: String?, typical: Float?, pinned: Boolean, learnt: Map<Correction, Long>): Ranked {
+private fun judge(c: Copy, p: SetupProfile, mark: Mark?, language: String?, arabic: Boolean, typical: Float?, pinned: Boolean, learnt: Map<Correction, Long>): Ranked {
     // Profile 7 plays as its HDR10 base layer (MoviePlayer's Dv7AsHevc): the stick decodes no profile 7 Dolby Vision.
     val dv = "DV" in c.hdr && c.dvProfile != 7
     val hdr10 = "HDR10" in c.hdr || "HDR10+" in c.hdr || c.dvProfile == 7
@@ -190,7 +196,7 @@ private fun judge(c: Copy, p: SetupProfile, mark: Mark?, language: String?, typi
     val atmos = c.atmos && (c.audio != "eac3" || Passthrough.EAc3Joc in p.passthrough)
     return Ranked(
         c, support, mark,
-        original = language == null || c.languages.isEmpty() || language in c.languages || "multi" in c.languages,
+        original = if (arabic) "ar" in c.languages else language == null || c.languages.isEmpty() || language in c.languages || "multi" in c.languages,
         fits = typical == null || c.mbps <= 0f || c.mbps <= typical,
         pinned = pinned, why = why, typical = typical,
         dvMissing = dv && Hdr.DolbyVision !in p.hdr,
@@ -256,10 +262,10 @@ private val ORDER = Comparator<Ranked> { a, b ->
     }
 }
 
-private fun reason(r: Ranked, pick: Ranked?): String = when {
+private fun reason(r: Ranked, pick: Ranked?, arabic: Boolean): String = when {
     r === pick -> if (r.pinned) "Your choice" else r.why.ifEmpty { "best for this setup" }
     pick == null || r.support == Support.Wont -> r.why
-    !r.original && pick.original -> "dub"
+    !r.original && pick.original -> if (arabic) "no Arabic audio" else "dub"
     r.support == Support.Unsure -> r.why
     // Every reason reads this copy against the pick ("1080p vs 4K"); a copy that beats a pinned pick says so.
     else -> versus(r, pick).let { k ->
@@ -333,9 +339,14 @@ class CopyChoices(private val store: KeyValueStore, private val now: () -> Long 
     private val pins: MutableMap<String, String> by lazy { read<Map<String, String>>(PINS).orEmpty().toMutableMap() }
     private val learnt: MutableMap<String, Map<Correction, Long>> by lazy { read<Map<String, Map<Correction, Long>>>(LEARNT).orEmpty().toMutableMap() }
 
-    /** Ranks [copies] of [titleId] for [setup] with this setup's marks, corrections and learnt audio, and the title's pin. */
+    /** Ranks [copies] of [titleId] for [setup] with this setup's marks, corrections and learnt audio, the title's pin and [dubFirst]. */
     fun rank(titleId: String, copies: List<Copy>, originalLanguage: String?, setup: SetupProfile, typicalMbps: (Source) -> Float?) =
-        rankCopies(copies, originalLanguage, setup, typicalMbps, marks(setup), corrections(setup), pin(titleId), learnt(setup))
+        rankCopies(copies, originalLanguage, setup, typicalMbps, marks(setup), corrections(setup), pin(titleId), learnt(setup), dubFirst)
+
+    /** The owner's "Arabic dub first" (Options): every title's copies with Arabic audio rank first and play in Arabic. */
+    var dubFirst: Boolean
+        @Synchronized get() = store.get(DUB_FIRST) == "1"
+        @Synchronized set(on) = store.put(DUB_FIRST, if (on) "1" else null)
 
     /** The audio [setup] was found not to play (no track of a file could), by the correction that would pass it, with when. */
     @Synchronized fun learnt(setup: SetupProfile): Map<Correction, Long> = learnt[setup.fingerprint].orEmpty()
@@ -390,6 +401,7 @@ class CopyChoices(private val store: KeyValueStore, private val now: () -> Long 
         const val CORRECTIONS = "copies.corrections"
         const val PINS = "copies.pins"
         const val LEARNT = "copies.learnt"
+        const val DUB_FIRST = "copies.dubFirst"
         const val RD_MARK_MS = 30L * 24 * 3_600_000
         const val IPTV_FAIL_MS = 24L * 3_600_000
         val json = Json { ignoreUnknownKeys = true }

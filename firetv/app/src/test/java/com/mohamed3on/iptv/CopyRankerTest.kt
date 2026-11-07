@@ -64,6 +64,15 @@ class CopyRankerTest {
         assertEquals("dub", r.copies.first { it.copy == french }.reason)
     }
 
+    @Test fun arabicDubFirstBeatsABetterOriginalOnlyWhenThereIsADub() {
+        val dub = iptv1080.copy(languages = listOf("ar", "multi"))
+        val r = rankCopies(listOf(hdr10Web, dub), "en", hdr10Tv, { null }, dubFirst = true)
+        assertEquals(dub, r.pick?.copy)
+        assertEquals("no Arabic audio", r.copies.first { it.copy == hdr10Web }.reason)
+        // No Arabic copy: the usual ranking.
+        assertEquals(hdr10Web, rankCopies(listOf(hdr10Web, iptv1080), "en", hdr10Tv, { null }, dubFirst = true).pick?.copy)
+    }
+
     @Test fun ae7ATrueHdCorrectionOverridesWhatThatSetupLearnt() {
         val trueHd = hdr10Web.copy(id = "rd:truehd", audio = "truehd", channels = 8, mbps = 60f)
         val copies = listOf(trueHd, hdr10Web)

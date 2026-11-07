@@ -345,9 +345,10 @@ class FilmSession(
     }
 
     private fun open(copy: Copy, url: String, at: Place) {
-        // No language chosen yet: the film's own (R2), not the dub a multi-language file flags as default.
-        val originalLanguage = plan.state.value.answer?.copies?.originalLanguage
-        val place = if (at.audio == null && originalLanguage != null) at.copy(audio = originalLanguage) else at
+        // No language chosen yet: the film's own (R2), not the dub a multi-language file flags as default; Arabic
+        // when the owner put Arabic dubs first and the copy has it.
+        val language = if (choices.dubFirst && "ar" in copy.languages) "ar" else plan.state.value.answer?.copies?.originalLanguage
+        val place = if (at.audio == null && language != null) at.copy(audio = language) else at
         current = copy
         openPlace = place
         attempt = true
