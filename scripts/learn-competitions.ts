@@ -9,8 +9,8 @@
 // regexes decide uncached titles instead.
 // Usage: bun scripts/learn-competitions.ts   (PLAYLIST_TOKEN, TYPESAFE_API_KEY from env /
 //        .env.local; EPG_ENDPOINT overrides the local server)
-import { COMP_SOURCE, couldBeLiveMatch, jevCompetitions, learnedCompetitions, learnedFile } from '../api/_lib.js'
-import { jevTokens } from '../api/_jev.js'
+import { COMP_SOURCE, couldBeLiveMatch, jevCompetitions, learnedCompetitions, learnedFile } from '../lib/curation.js'
+import { jevTokens } from '../lib/jev.js'
 
 const endpoint = process.env.EPG_ENDPOINT ?? 'http://127.0.0.1:8790/api/epg'
 const token = process.env.PLAYLIST_TOKEN

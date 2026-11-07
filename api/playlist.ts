@@ -3,8 +3,8 @@
 // Add &vpn=1 for a copy whose streams use the provider's VPN-only front, for watching with
 // a VPN on (the normal fronts block VPN IPs, and the VPN front blocks everyone else).
 // With a backup provider configured (XTREAM2_*), its feeds follow provider A's as spares.
-import { buildM3U, fetchCuratedChannels, withBackupFeeds, withCompetitionGroups } from './_lib.js'
-import { backupConfigFromEnv, configFromEnv, guideUrl, VPN_HOST } from './_provider.js'
+import { buildM3U, fetchCuratedChannels, withBackupFeeds, withCompetitionGroups } from '../lib/curation.js'
+import { backupConfigFromEnv, configFromEnv, guideUrl, VPN_HOST } from '../lib/provider.js'
 
 export default async function handler(req: Request): Promise<Response> {
   const cfg = configFromEnv()

@@ -25,7 +25,7 @@
 // every reading carries the day it was taken (`at`), and refresh first re-probes readings
 // older than STALE_DAYS (in playlist order), REPLACING them with what the feed shows now. A
 // below-marker result is chased back up by the gap pass on later runs; PPV/event feeds
-// are floored at their marker by realRes in api/_lib.ts, so an idle re-probe can't bury them.
+// are floored at their marker by realRes in lib/curation.ts, so an idle re-probe can't bury them.
 // A re-probe with NO signal proves nothing (dead feed, or a refused connection): the
 // reading stays due, and `tried` only moves it to the back of the queue so dead feeds
 // don't eat every night's budget.
@@ -43,11 +43,11 @@
 // run takes a predictable bite and the monotonic cache keeps the progress.
 //
 // Usage: bun scripts/probe-quality.ts [concurrency] [refresh] [mins=N]  (creds from env/.env.local)
-import { EVENT_ONLY, fetchCuratedChannels, saneFps, withCompetitionGroups } from '../api/_lib.js'
-import { configFromEnv, connectionSlots as slotsOf, streamUrl } from '../api/_provider.js'
-import { writeAtomic } from '../api/_fs.ts'
+import { EVENT_ONLY, fetchCuratedChannels, saneFps, withCompetitionGroups } from '../lib/curation.js'
+import { configFromEnv, connectionSlots as slotsOf, streamUrl } from '../lib/provider.js'
+import { writeAtomic } from '../lib/fs.ts'
 // better() keeps the cache monotonic in refresh mode; the app's readings (/api/app/quality) share these rules.
-import { allReadings, better, keepMbps, STALE_DAYS, type Meta, type Readings } from '../api/_quality.ts'
+import { allReadings, better, keepMbps, STALE_DAYS, type Meta, type Readings } from '../lib/quality.ts'
 
 const cfg = configFromEnv()
 const requestedConcurrency = Number(Bun.argv[2]) || 1

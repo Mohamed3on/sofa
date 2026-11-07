@@ -53,8 +53,8 @@ A deploy never touches `.cache/`. Every push to `master` deploys (`.github/workf
 - `/api/app/channels`: groups, channels, feed families, quality badges and both provider fronts, as JSON.
 - `/api/app/guide`: the guide as a gzip SQLite file.
 - `/api/app/version`, `/api/app/apk` and `/api/app/dm`: the latest build and its dex metadata (the baseline profile, which the stick compiles at install), served from `/opt/sofa/app/` (deploys never touch it).
-- `/api/app/movies`: the on-demand library (4K movies, UFC replays), read from the daily VOD snapshot (`.cache/vod.json`, `api/_provider.ts`), so the app never adds a pull of the 74 MB catalogue.
-- `POST /api/app/quality`: what the app measured on a stream it played (resolution, frame rate, codec, Atmos), merged into the quality cache with the probe's rules (`api/_quality.ts`).
+- `/api/app/movies`: the on-demand library (4K movies, UFC replays), read from the daily VOD snapshot (`.cache/vod.json`, `lib/provider.ts`), so the app never adds a pull of the 74 MB catalogue.
+- `POST /api/app/quality`: what the app measured on a stream it played (resolution, frame rate, codec, Atmos), merged into the quality cache with the probe's rules (`lib/quality.ts`).
 - `POST /api/app/events`: tunes with their time to picture, stalls, feed switches and busy / wrong-route / offline problems, appended to `.cache/app-events.jsonl` on the box (rolls over at 20 MB). Read it to see which feeds hold up and how fast zaps are.
 
 `.github/workflows/firetv.yml` runs on pushes touching `firetv/**`. It runs the unit tests, builds a release-signed APK and copies it to the box with a key that can only write `/opt/sofa/app/`: user `sofa-app`, whose `authorized_keys` entry is `restrict,command="rrsync -wo -no-del /opt/sofa/app"`. Secrets: `ANDROID_KEYSTORE_B64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`, `APP_TOKEN`, `APP_SERVER_URL`, `APP_DEPLOY_SSH_KEY` and `SERVER_HOST`. The APK carries the token, so it is never uploaded as a GitHub artifact. Local builds read the same values from `~/.gradle/gradle.properties` (`IPTV_KEYSTORE_FILE`, `IPTV_KEYSTORE_PASSWORD`, `IPTV_KEY_ALIAS`, `IPTV_KEY_PASSWORD`, `IPTV_APP_TOKEN`, `IPTV_SERVER_URL`). Keep an offline backup of the keystore: without it, the next update needs an uninstall and a fresh adb install.
@@ -71,6 +71,10 @@ First install: on the stick, enable Settings → My Fire TV → Developer option
 
 ## Tech stack
 
-- Server: [Bun](https://bun.sh) and TypeScript, no runtime dependencies (`server.ts`, `api/`, `scripts/`).
+- Server: [Bun](https://bun.sh) and TypeScript, no runtime dependencies. A file's folder says what it is:
+  - `server.ts`: the HTTP edge, every route in one table with its token gate, cache lifetime and what it invalidates.
+  - Routes: `api/<name>.ts` holds the handlers for `/api/<name>` and `/api/<name>/*`; they return data and leave gating, errors and caching to the table.
+  - Libraries: `lib/<name>.ts`, with its tests beside it in `lib/<name>.test.ts`; `scripts/<name>.ts` are the jobs (the box's timers, the quality probe).
+  - Data: test fixtures in `lib/fixtures/`; what the server and its jobs write lives in `.cache/`, never in git.
 - Fire TV app: Kotlin, Jetpack Compose for TV and Media3/ExoPlayer (`firetv/`).
 - Logo lab: `bun run lab` tunes the app's mark; `lab/sofa/export.ts` writes its drawables.

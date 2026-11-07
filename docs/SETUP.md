@@ -14,7 +14,7 @@ Sofa has two parts. The server (steps 1–4) turns an Xtream Codes subscription 
 
 Copy [`.env.example`](../.env.example) to `.env` and fill in the required block: `XTREAM_HOST/USER/PASS`, a random `PLAYLIST_TOKEN` and, for the app, a different random `APP_TOKENS` (`openssl rand -hex 24` for each). Everything else is optional and documented there.
 
-**Channels: choose your own.** The channel choices built into this repo are one person's tastes: football, tennis and UFC; UK, Spanish, German, Italian, French and Arabic sport; English feeds first, then Arabic; kids channels in a few languages; Russian TV; the leagues they follow. Treat them as an example, not a default to keep. They all live in `api/_lib.ts`:
+**Channels: choose your own.** The channel choices built into this repo are one person's tastes: football, tennis and UFC; UK, Spanish, German, Italian, French and Arabic sport; English feeds first, then Arabic; kids channels in a few languages; Russian TV; the leagues they follow. Treat them as an example, not a default to keep. They all live in `lib/curation.ts`:
 
 | What | Where |
 | --- | --- |
@@ -22,7 +22,7 @@ Copy [`.env.example`](../.env.example) to `.env` and fill in the required block:
 | The groups, their names and order | `B` (a list of all the groups), `CAT_BUCKET`, `bucketForCategory` |
 | Which language's feed comes first | `languageRank`, `regionPref` |
 | The 🏆 league and cup groups | `COMPS` |
-| Which films are listed | `claims4K` in `api/_provider.ts` (4K categories), `ufcReplays` |
+| Which films are listed | `claims4K` in `lib/provider.ts` (4K categories), `ufcReplays` |
 
 Out of the box, on any provider other than the original, the server lists UK, ES, DE, IT, FR and AR football, tennis, UFC and general sport categories, as long as their names start with a region prefix like `UK|`, `UK |` or `UK:`. For anything else, either set `EXTRA_CATEGORIES` (a regex over category names; each match becomes its own group) or edit the rules above. To see your provider's category names:
 

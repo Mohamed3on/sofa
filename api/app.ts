@@ -11,32 +11,32 @@
 // POST /api/app/bitrate?t=TOKEN — a feed's bitrate the app measured while playing.
 // POST /api/app/events?t=TOKEN — what happened while watching, for later analysis.
 // POST /api/app/title-ids?t=TOKEN — title ids for the provider ids the app saved marks under.
-// GET /api/app/library?t=TOKEN — Movies & Shows: titles and rows (see _library.ts).
+// GET /api/app/library?t=TOKEN — Movies & Shows: titles and rows (see library.ts).
 // GET /api/app/history?t=TOKEN — Trakt and Letterboxd marks, Watchlist, followed shows' next episodes.
 // GET /api/app/copies?t=TOKEN&title=… — every copy of a film or episode, for the stick to rank.
 // POST /api/app/rd-infringing?t=TOKEN — torrents Real-Debrid refused, left out of copies from then on.
 // GET /api/app/subtitles?t=TOKEN&title=…&hash=…&size=…&name=… — English and Arabic subtitles for the copy playing.
 // GET /api/app/subtitle?t=TOKEN&id=… — one of them as SRT.
-// GET /api/app/title, /api/app/search, /api/app/person ?t=TOKEN — title pages, search and person pages (see _browse.ts; cards from _titles.ts).
+// GET /api/app/title, /api/app/search, /api/app/person ?t=TOKEN — title pages, search and person pages (see browse.ts; cards from titles.ts).
 // GET /api/app/trakt?t=TOKEN — the Trakt sign-in; POST it { action: connect | cancel | disconnect } to change it.
 // POST /api/app/trakt-history?t=TOKEN — { title, at } a film or episode finished on the stick, for Trakt history.
 // POST /api/app/mark?t=TOKEN — { title, watched?, rating? } a mark or rating made on the stick, for Trakt.
 import { appendFile, mkdir, rename, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { buildAppFeed, buildAppGuide } from './_app-feed.js'
-import { iptvCopies, markInfringing, titleCopies } from './_copies.js'
-import { curatedGuide, fetchCuratedChannels, saneFps, vodChannels, withBackupFeeds, withCompetitionGroups } from './_lib.js'
-import { backupConfigFromEnv, configFromEnv } from './_provider.js'
-import { currentHistory, historyAnswer, loadHistory, saveHistory, watchedOf, watchlistOf, withMark } from './_history.js'
-import { currentLibrary, knownTitles } from './_library.js'
-import { recordBitrate, recordReading, type Meta } from './_quality.js'
-import { movieInfo, saveMeasuredFilm, showEpisodes, showList, titleIds as mapTitleIds } from './_shows.js'
-import { subtitleFile, subtitlesFor } from './_subtitles.js'
-import { personTitles, searchTitles, titleDetails } from './_browse.js'
-import { watchStore } from './_ratings.js'
-import { episodeTitle, parseTitleId, tmdbEpisodes, tmdbFacts, tmdbGet, tmdbTitle } from './_tmdb.js'
-import * as trakt from './_trakt.js'
-import { blurayMovies, filmTitleOf, searchVod } from './_vod.js'
+import { buildAppFeed, buildAppGuide } from '../lib/app-feed.js'
+import { iptvCopies, markInfringing, titleCopies } from '../lib/copies.js'
+import { curatedGuide, fetchCuratedChannels, saneFps, vodChannels, withBackupFeeds, withCompetitionGroups } from '../lib/curation.js'
+import { backupConfigFromEnv, configFromEnv } from '../lib/provider.js'
+import { currentHistory, historyAnswer, loadHistory, saveHistory, watchedOf, watchlistOf, withMark } from '../lib/history.js'
+import { currentLibrary, knownTitles } from '../lib/library.js'
+import { recordBitrate, recordReading, type Meta } from '../lib/quality.js'
+import { movieInfo, saveMeasuredFilm, showEpisodes, showList, titleIds as mapTitleIds } from '../lib/shows.js'
+import { subtitleFile, subtitlesFor } from '../lib/subtitles.js'
+import { personTitles, searchTitles, titleDetails } from '../lib/browse.js'
+import { watchStore } from '../lib/ratings.js'
+import { episodeTitle, parseTitleId, tmdbEpisodes, tmdbFacts, tmdbGet, tmdbTitle } from '../lib/tmdb.js'
+import * as trakt from '../lib/trakt.js'
+import { blurayMovies, filmTitleOf, searchVod } from '../lib/vod.js'
 
 export async function channels() {
   const cfg = configFromEnv()
@@ -155,7 +155,7 @@ export async function vodSearch(req: Request) {
 }
 
 // GET /api/app/shows?t=TOKEN — the shows (series) in the user's languages, in the movies' shape
-// (see _shows.ts); the provider's list is pulled at most once a day.
+// (see shows.ts); the provider's list is pulled at most once a day.
 export async function shows() {
   return showList(configFromEnv())
 }
@@ -181,12 +181,12 @@ const libraryNow = () => currentLibrary(async () => watchedOf(await loadHistory(
 // A score TrueScore's extension adds reaches the library's rows a second or so after it lands in the store.
 watchStore(() => void libraryNow().catch(() => {}))
 
-// GET /api/app/library?t=TOKEN — the Movies & Shows library the nightly job builds (see _library.ts), redone from
+// GET /api/app/library?t=TOKEN — the Movies & Shows library the nightly job builds (see library.ts), redone from
 // TrueScore's store and the scores whenever the store changes, held in memory; a request whose If-None-Match names
 // the current ETag gets an empty 304.
 export const library = () => libraryNow()
 
-// GET /api/app/history?t=TOKEN&shows=tv:N:sSeE@ms,… — the owner's history (see _history.ts): marks from Trakt and
+// GET /api/app/history?t=TOKEN&shows=tv:N:sSeE@ms,… — the owner's history (see history.ts): marks from Trakt and
 // Letterboxd, the Watchlist row, and the next episode of each followed show ([shows]: the stick's
 // own, the episode each last finished and when). Read again when over 10 minutes old; ETag/304 like the library.
 export async function history(req: Request) {
@@ -196,7 +196,7 @@ export async function history(req: Request) {
 
 // POST /api/app/title-ids?t=TOKEN — { movies?: [vodId], shows?: [seriesId], episodes?: [{ series, id }] } to
 // { movies: { vodId: titleId }, shows: { seriesId: titleId }, episodes: { episodeId: titleId } }: the one-time
-// move of the app's resume and watched marks from provider ids to title ids (see _shows.ts titleIds).
+// move of the app's resume and watched marks from provider ids to title ids (see shows.ts titleIds).
 export async function titleIds(req: Request) {
   const r = (await req.json().catch(() => null)) as { movies?: unknown; shows?: unknown; episodes?: unknown } | null
   const id = (v: unknown) => Number.isInteger(v) && (v as number) > 0 && (v as number) <= 2e9
@@ -209,7 +209,7 @@ export async function titleIds(req: Request) {
 }
 
 // GET /api/app/copies?t=TOKEN&title=TITLE_ID — every copy of a film or episode, IPTV copies and Real-Debrid
-// candidates, with what each is (see _copies.ts); the stick ranks them.
+// candidates, with what each is (see copies.ts); the stick ranks them.
 const COPY_TITLE = /^(?:movie:\d+|iptv:\d+|(?:tv|iptv:tv):\d+:s\d+e\d+)$/
 export async function copies(req: Request) {
   const title = new URL(req.url).searchParams.get('title') ?? ''
@@ -228,7 +228,7 @@ export async function rdInfringing(req: Request) {
 }
 
 // GET /api/app/subtitles?t=TOKEN&title=TITLE_ID&hash=OSHASH&size=BYTES&name=RELEASE — English, then Arabic, subtitles for a
-// film or episode, best first for the copy playing (its OpenSubtitles hash and release name; see _subtitles.ts).
+// film or episode, best first for the copy playing (its OpenSubtitles hash and release name; see subtitles.ts).
 export async function subtitles(req: Request) {
   const q = new URL(req.url).searchParams
   const title = q.get('title') ?? ''
@@ -251,7 +251,7 @@ export async function subtitle(req: Request) {
 }
 
 // GET /api/app/title?t=TOKEN&id=movie:27205|tv:1396 — a title page's TMDB details: plot, backdrop, cast and
-// director, More like this, its score, and a show's episodes when the provider lacks it (see _browse.ts).
+// director, More like this, its score, and a show's episodes when the provider lacks it (see browse.ts).
 export async function title(req: Request) {
   const id = new URL(req.url).searchParams.get('id') ?? ''
   if (!/^(movie|tv):\d+$/.test(id)) return new Response('Bad id', { status: 400 })
@@ -260,7 +260,7 @@ export async function title(req: Request) {
 }
 
 // GET /api/app/search?t=TOKEN&q=… — films and shows for a search: a category word's row or TMDB discover,
-// else TMDB's title search plus the provider's catalogue (see _browse.ts searchTitles).
+// else TMDB's title search plus the provider's catalogue (see browse.ts searchTitles).
 export async function search(req: Request) {
   const q = (new URL(req.url).searchParams.get('q') ?? '').trim().slice(0, 100)
   if (!q) return { titles: [] }
@@ -284,7 +284,7 @@ export async function person(req: Request) {
   return { name: p.name ?? '', titles: personTitles(p.combined_credits ?? {}, await knownTitles()) }
 }
 
-// GET /api/app/trakt?t=TOKEN — the Trakt sign-in as Options show it (see _trakt.ts); POST { action } connects
+// GET /api/app/trakt?t=TOKEN — the Trakt sign-in as Options show it (see trakt.ts); POST { action } connects
 // (a new device code), cancels a code or disconnects, and answers the new state.
 export async function traktSignIn(req: Request) {
   if (req.method !== 'POST') return trakt.status()

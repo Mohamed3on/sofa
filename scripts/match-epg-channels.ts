@@ -9,8 +9,8 @@
 // Run it on the box, as the server's user, so the server sees the result:
 //   cd /opt/sofa && runuser -u sofa -- /usr/local/bin/bun scripts/match-epg-channels.ts
 // (PLAYLIST_TOKEN, TYPESAFE_API_KEY from .env; API_BASE overrides the local server)
-import { chanKey, epgMatchesFile } from '../api/_lib.js'
-import { askJev, jevTokens, type JevQuestion } from '../api/_jev.js'
+import { chanKey, epgMatchesFile } from '../lib/curation.js'
+import { askJev, jevTokens, type JevQuestion } from '../lib/jev.js'
 
 const api = process.env.API_BASE ?? 'http://127.0.0.1:8790/api'
 const get = async (url: string) => {

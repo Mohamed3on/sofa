@@ -2,7 +2,7 @@
 // into the live store on the box, entry by entry, so readings the app recorded during the run stay.
 // The server reads the store again on its own; no restart.
 // Usage: bun scripts/merge-quality.ts [probed.json]  (stdin without a file)
-import { recordProbed, type Readings } from '../api/_quality.ts'
+import { recordProbed, type Readings } from '../lib/quality.ts'
 
 const probed: Readings = await (Bun.argv[2] ? Bun.file(Bun.argv[2]) : Bun.stdin).json()
 const changed = await recordProbed(probed, new Date().toISOString().slice(0, 10))

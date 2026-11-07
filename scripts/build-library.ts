@@ -1,22 +1,22 @@
-// Builds the Movies & Shows library (api/_library.ts [rebuildLibrary]) into .cache/library-full.json (every row's
+// Builds the Movies & Shows library (lib/library.ts [rebuildLibrary]) into .cache/library-full.json (every row's
 // candidates) and .cache/library.json (what the app is served). Run nightly on the box by deploy/sofa-library.timer.
 // Without TMDB_TOKEN, or when every TMDB list fails, nothing is written and the app keeps the last library (or the
 // provider's rows).
-// First it reads the owner's Trakt and Letterboxd history into .cache/history.json (api/_history.ts), with the
-// Watchlist's runtimes (it is shown shortest first). Then the scores (api/_ratings.ts: MDBList and IMDb's
+// First it reads the owner's Trakt and Letterboxd history into .cache/history.json (lib/history.ts), with the
+// Watchlist's runtimes (it is shown shortest first). Then the scores (lib/ratings.ts: MDBList and IMDb's
 // histograms) are asked for the owner's Watchlist titles first, then whatever the build shows. Each key is optional:
 // without one its source is skipped, and rows keep their order.
 // Usage: bun scripts/build-library.ts   (XTREAM_*, TMDB_TOKEN, TRAKT_CLIENT_ID, MDBLIST_KEY from env / .env.local)
 import { readFile } from 'node:fs/promises'
-import { dubbedFilms } from '../api/_arabp2p.js'
-import { historyTitles, loadHistory, refreshHistory, saveHistory, watchedOf, watchlistRuntimes } from '../api/_history.js'
-import { LIBRARY_FILE, LIBRARY_FULL_FILE, providerTitles, rebuildLibrary, saveLibrary, withProviderCopies, type Library } from '../api/_library.js'
-import { configFromEnv } from '../api/_provider.js'
-import { imdbTopShows, letterboxdFilms, letterboxdLists, loadScores, refreshScores, saveScores } from '../api/_ratings.js'
-import { scoreTitles } from '../api/_scores.js'
-import { titleCard } from '../api/_titles.js'
-import { runtimeOf, tmdbGet } from '../api/_tmdb.js'
-import { readOnlyTokens } from '../api/_trakt.js'
+import { dubbedFilms } from '../lib/arabp2p.js'
+import { historyTitles, loadHistory, refreshHistory, saveHistory, watchedOf, watchlistRuntimes } from '../lib/history.js'
+import { LIBRARY_FILE, LIBRARY_FULL_FILE, providerTitles, rebuildLibrary, saveLibrary, withProviderCopies, type Library } from '../lib/library.js'
+import { configFromEnv } from '../lib/provider.js'
+import { imdbTopShows, letterboxdFilms, letterboxdLists, loadScores, refreshScores, saveScores } from '../lib/ratings.js'
+import { scoreTitles } from '../lib/scores.js'
+import { titleCard } from '../lib/titles.js'
+import { runtimeOf, tmdbGet } from '../lib/tmdb.js'
+import { readOnlyTokens } from '../lib/trakt.js'
 
 // The owner's history first (seconds): Trakt read whole, recommendations included, and the Letterboxd feed.
 // Only the server refreshes Trakt's tokens.

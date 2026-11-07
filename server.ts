@@ -7,7 +7,7 @@
 import * as app from './api/app'
 import epg from './api/epg'
 import playlist from './api/playlist'
-import { accessToken } from './api/_trakt'
+import { accessToken } from './lib/trakt'
 
 /** Seconds an answer is reused, then served stale while one rebuild runs; or 'no-store', never kept. */
 type Lifetime = { fresh: number; stale?: number } | 'no-store'
