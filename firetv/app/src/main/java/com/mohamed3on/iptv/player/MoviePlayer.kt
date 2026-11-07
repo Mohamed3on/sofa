@@ -150,6 +150,9 @@ class ExoFilmPlayer(private val exo: ExoPlayer) : FilmPlayer {
             when {
                 audio.none(::plays) -> listener?.onError(StreamFailure.NoAudio(audio.mapNotNull { AUDIO_NAMES[it.getTrackFormat(0).sampleMimeType] }.toSet()))
                 inLanguage.isNotEmpty() && inLanguage.none(::plays) -> listener?.onError(StreamFailure.Unsupported)
+                // The session acts on it only for a language chosen for the title.
+                asked != null && inLanguage.isEmpty() && audio.all { it.getTrackFormat(0).language.let { l -> l != null && l != C.LANGUAGE_UNDETERMINED } } ->
+                    listener?.onError(StreamFailure.NoLanguage)
             }
         }
 
@@ -183,7 +186,7 @@ class ExoFilmPlayer(private val exo: ExoPlayer) : FilmPlayer {
         exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
             .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
             .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-            .setPreferredAudioLanguage(place.audio)
+            .setPreferredAudioLanguages(*listOfNotNull(place.audio, place.orAudio).toTypedArray())
             // A release's "default" subtitles are its own audience's (Russian on a Russian remux): only forced or chosen ones show.
             .setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT)
             .apply { if (place.subtitles != null) setPreferredTextLanguage(place.subtitles).setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false) }

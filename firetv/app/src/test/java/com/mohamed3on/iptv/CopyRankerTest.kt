@@ -9,6 +9,8 @@ import com.mohamed3on.iptv.player.Hdr
 import com.mohamed3on.iptv.player.Passthrough
 import com.mohamed3on.iptv.player.SetupProfile
 import com.mohamed3on.iptv.player.Support
+import com.mohamed3on.iptv.player.EGYPTIAN
+import com.mohamed3on.iptv.player.audioChoices
 import com.mohamed3on.iptv.player.rankCopies
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -64,13 +66,27 @@ class CopyRankerTest {
         assertEquals("dub", r.copies.first { it.copy == french }.reason)
     }
 
-    @Test fun arabicDubFirstBeatsABetterOriginalOnlyWhenThereIsADub() {
+    @Test fun aChosenLanguageBeatsABetterOriginalOnlyWhenACopyHasIt() {
         val dub = iptv1080.copy(languages = listOf("ar", "multi"))
-        val r = rankCopies(listOf(hdr10Web, dub), "en", hdr10Tv, { null }, dubFirst = true)
+        val r = rankCopies(listOf(hdr10Web, dub), "en", hdr10Tv, { null }, prefer = "ar")
         assertEquals(dub, r.pick?.copy)
         assertEquals("no Arabic audio", r.copies.first { it.copy == hdr10Web }.reason)
         // No Arabic copy: the usual ranking.
-        assertEquals(hdr10Web, rankCopies(listOf(hdr10Web, iptv1080), "en", hdr10Tv, { null }, dubFirst = true).pick?.copy)
+        assertEquals(hdr10Web, rankCopies(listOf(hdr10Web, iptv1080), "en", hdr10Tv, { null }, prefer = "ar").pick?.copy)
+    }
+
+    @Test fun egyptianDubsAreArabicAndGetTheirOwnChip() {
+        val egyptian = iptv1080.copy(id = "rd:eg", languages = listOf("ar", EGYPTIAN))
+        val gulf = iptv1080.copy(id = "rd:sa", languages = listOf("ar"))
+        assertEquals(listOf("en", EGYPTIAN), audioChoices(listOf(hdr10Web, egyptian), "en")) // Arabic only beside another dialect
+        assertEquals(listOf("en", EGYPTIAN, "ar"), audioChoices(listOf(hdr10Web, egyptian, gulf), "en"))
+        assertEquals(emptyList<String>(), audioChoices(listOf(hdr10Web), "en"))
+        assertEquals(egyptian, rankCopies(listOf(hdr10Web, gulf, egyptian), "en", hdr10Tv, { null }, prefer = EGYPTIAN).pick?.copy)
+        val choices = CopyChoices(MapStore())
+        choices.dubFirst = true
+        assertEquals(EGYPTIAN, choices.prefer("movie:1", listOf(gulf, egyptian)))
+        choices.language("movie:1", "en")
+        assertEquals("en", choices.prefer("movie:1", listOf(gulf, egyptian)))
     }
 
     @Test fun ae7ATrueHdCorrectionOverridesWhatThatSetupLearnt() {

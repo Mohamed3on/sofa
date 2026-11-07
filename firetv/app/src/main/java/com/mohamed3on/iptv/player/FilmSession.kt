@@ -20,8 +20,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** Where a film is: carried across every copy switch with the audio and subtitle languages chosen. */
-data class Place(val position: Long, val audio: String? = null, val subtitles: String? = null)
+/** Where a film is: carried across every copy switch with the audio and subtitle languages chosen; [orAudio] when the file has no [audio] track. */
+data class Place(val position: Long, val audio: String? = null, val subtitles: String? = null, val orAudio: String? = null)
 
 /** The slice of a film player a [FilmSession] drives; ExoPlayer in the app, a fake in tests. Main thread only. */
 interface FilmPlayer {
@@ -345,10 +345,15 @@ class FilmSession(
     }
 
     private fun open(copy: Copy, url: String, at: Place) {
-        // No language chosen yet: the film's own (R2), not the dub a multi-language file flags as default; Arabic
-        // when the owner put Arabic dubs first and the copy has it.
-        val language = if (choices.dubFirst && "ar" in copy.languages) "ar" else plan.state.value.answer?.copies?.originalLanguage
-        val place = if (at.audio == null && language != null) at.copy(audio = language) else at
+        // No track chosen yet: the title's audio language (chosen on its page, or "Arabic dub first"; a file may have it
+        // unlisted), then the film's own (R2), not the dub a multi-language file flags as default.
+        val originalLanguage = plan.state.value.answer?.copies?.originalLanguage
+        val want = plan.state.value.ranking?.language?.let(::audioTrack)
+        val place = when {
+            at.audio != null -> at
+            want != null -> at.copy(audio = want, orAudio = originalLanguage)
+            else -> at.copy(audio = originalLanguage)
+        }
         current = copy
         openPlace = place
         attempt = true
@@ -376,8 +381,16 @@ class FilmSession(
 
     private fun failed(failure: StreamFailure) {
         val copy = current!!
+        if (failure == StreamFailure.NoLanguage) {
+            // Only the title's chosen language (or "Arabic dub first") moves on: the copy is remembered as lacking it.
+            // A copy that never claimed it plays on, in the film's own language.
+            val want = plan.state.value.ranking?.language?.takeIf { speaks(copy, it, plan.state.value.answer?.copies?.originalLanguage) } ?: return
+            choices.lacks(copy, audioTrack(want))
+            rerank()
+        }
         val playing = phase == FilmPhase.Playing
-        val place = here()
+        // The next copy asks for the title's language again, not the track this file fell back to.
+        val place = here().let { if (failure == StreamFailure.NoLanguage) it.copy(audio = null) else it }
         attempt = false
         work?.cancel()
         player.stop()
@@ -397,7 +410,7 @@ class FilmSession(
                 iptvBusy = true
                 restart { next(place) }
             }
-            !permanent && retried.add(copy.id) -> reopen(copy, place)
+            !permanent && failure != StreamFailure.NoLanguage && retried.add(copy.id) -> reopen(copy, place)
             else -> restart { next(place) }
         }
     }

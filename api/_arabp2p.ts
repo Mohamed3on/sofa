@@ -516,8 +516,8 @@ export async function arabp2pCopies(tmdb: string, t: TmdbTitle): Promise<{ copie
       src: 'rd' as const, hash: h.hash, file: h.file, filename: h.filename, name: row.title, size: h.size || row.size, seeds: row.seeds,
       ...(process.env.TORBOX_TOKEN && { cached: true as const }),
       ...a,
-      // A dub's audio is Arabic (often with the original too); an Arabic film's is the original, named or not.
-      langs: row.dub ? [...new Set(['ar', ...a.langs])] : a.langs,
+      // A dub's audio is Arabic ("arz" too for an Egyptian dub; often with the original too); an Arabic film's is the original, named or not.
+      langs: row.dub ? [...new Set(['ar', ...(row.egyptian ? ['arz'] : []), ...a.langs])] : a.langs,
     }
   })
   return { copies, pending: jobs.has(tmdb) }

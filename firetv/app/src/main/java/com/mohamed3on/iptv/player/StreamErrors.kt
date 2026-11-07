@@ -18,6 +18,8 @@ sealed interface StreamFailure {
     data object Unsupported : StreamFailure
     /** No audio track of this file can play here; [audio] names the tracks' formats as the ranker does ("dts", "truehd"). Permanent too. */
     data class NoAudio(val audio: Set<String>) : StreamFailure
+    /** Every track of this file names its language and none is the one asked for (a release name's languages are often its subtitles'). */
+    data object NoLanguage : StreamFailure
 }
 
 /** What a session does about a failure (KTD8). */
@@ -31,7 +33,7 @@ object StreamErrors {
             in 500..599 -> Recovery.Backoff
             else -> Recovery.NextFeed
         }
-        StreamFailure.Timeout, StreamFailure.Unplayable, StreamFailure.Unsupported, is StreamFailure.NoAudio -> Recovery.NextFeed
+        StreamFailure.Timeout, StreamFailure.Unplayable, StreamFailure.Unsupported, is StreamFailure.NoAudio, StreamFailure.NoLanguage -> Recovery.NextFeed
         // The network, not the channel: another feed would fail the same way. Retrying lets
         // playback come back by itself when the network does.
         StreamFailure.Unreachable -> Recovery.Backoff

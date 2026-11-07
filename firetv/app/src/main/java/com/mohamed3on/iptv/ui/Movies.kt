@@ -180,6 +180,9 @@ import com.mohamed3on.iptv.player.PlayOf
 import com.mohamed3on.iptv.player.ExoStreamPlayer
 import com.mohamed3on.iptv.player.FilmSession
 import com.mohamed3on.iptv.player.Prepared
+import com.mohamed3on.iptv.player.EGYPTIAN
+import com.mohamed3on.iptv.player.audioChoices
+import com.mohamed3on.iptv.player.audioName
 import com.mohamed3on.iptv.player.Support
 import com.mohamed3on.iptv.player.Phase
 import com.mohamed3on.iptv.player.StreamSession
@@ -1346,11 +1349,37 @@ private fun playTrailer(context: Context, key: String) {
 }
 
 /**
- * A title page's or Up next's button: a quiet translucent pill that turns solid light when focused, so
- * the one OK will press reads from across the room.
+ * The audio languages a film's copies have, as flagged chips (🇬🇧 English, 🇪🇬 Egyptian, 🇸🇦 Arabic; only with two or more): the
+ * chosen one (else the default: "Arabic dub first" or the original) is outlined; OK on another makes Play open its best copy on that
+ * track, for this film from then on.
  */
 @Composable
-private fun PageButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun AudioChips(title: TitleId, prepared: Prepared) {
+    val graph = LocalContext.current.graph
+    val copies = prepared.answer?.copies ?: return
+    val langs = audioChoices(copies.copies, copies.originalLanguage)
+    if (langs.isEmpty()) return
+    val chosen = prepared.ranking?.language ?: copies.originalLanguage
+    Row(Modifier.appear(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+        for (l in langs) PageButton(listOfNotNull(FLAGS[l], audioName(l)).joinToString(" "), {
+            graph.copyChoices.language(title, l)
+            graph.films.rerank(title)
+        }, selected = l == chosen, small = true)
+    }
+}
+
+/** A language's flag, for the chips: the country most of its films come from. */
+private val FLAGS = mapOf(
+    "en" to "🇬🇧", EGYPTIAN to "🇪🇬", "ar" to "🇸🇦", "fr" to "🇫🇷", "es" to "🇪🇸", "de" to "🇩🇪", "it" to "🇮🇹", "pt" to "🇵🇹",
+    "ja" to "🇯🇵", "ko" to "🇰🇷", "zh" to "🇨🇳", "hi" to "🇮🇳", "ru" to "🇷🇺", "tr" to "🇹🇷", "nl" to "🇳🇱", "da" to "🇩🇰", "sv" to "🇸🇪", "no" to "🇳🇴",
+)
+
+/**
+ * A title page's or Up next's button: a quiet translucent pill that turns solid light when focused, so
+ * the one OK will press reads from across the room. A [selected] one is outlined in the accent; a [small] one is a chip.
+ */
+@Composable
+private fun PageButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false, small: Boolean = false) {
     val reduced = LocalReducedMotion.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
@@ -1359,7 +1388,7 @@ private fun PageButton(label: String, onClick: () -> Unit, modifier: Modifier = 
     val press by animateFloatAsState(if (pressed) 0.96f else 1f, Motion.focus(), label = "press")
     Text(
         label,
-        style = Type.headline.copy(color = if (focused) Palette.ink else Palette.textPrimary),
+        style = (if (small) Type.body else Type.headline).copy(color = if (focused) Palette.ink else Palette.textPrimary),
         maxLines = 1,
         modifier = modifier
             .graphicsLayer {
@@ -1371,10 +1400,10 @@ private fun PageButton(label: String, onClick: () -> Unit, modifier: Modifier = 
                 val p = lift.value.coerceIn(0f, 1f)
                 val r = CornerRadius(Radius.row.toPx())
                 drawRoundRect(lerp(Palette.material, Palette.textPrimary, p), cornerRadius = r)
-                if (p < 1f) drawRoundRect(Palette.edge, cornerRadius = r, style = Stroke(1.dp.toPx()), alpha = 1f - p)
+                if (p < 1f) drawRoundRect(if (selected) Palette.accent else Palette.edge, cornerRadius = r, style = Stroke((if (selected) 2 else 1).dp.toPx()), alpha = 1f - p)
             }
             .clickable(interaction, indication = null, onClick = onClick)
-            .padding(horizontal = Space.xl, vertical = Space.m),
+            .padding(horizontal = if (small) Space.l else Space.xl, vertical = if (small) Space.s else Space.m),
     )
 }
 
@@ -1959,6 +1988,7 @@ private fun FilmPage(
                             PageButton("Versions", { versions = true }, Modifier.focusRequester(versionsButton))
                             TrailerButton(info?.trailer)
                         }
+                        if (buttons) AudioChips(film.titleId, prepared)
                     }
                 }
             },

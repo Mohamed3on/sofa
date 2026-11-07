@@ -130,6 +130,22 @@ class FilmSessionTest {
         assertEquals("en", r.player.opens.last().second.audio)
     }
 
+    // A release name's languages are often its subtitles': a file without the chosen language's track moves on, remembered.
+    @Test fun aChosenLanguageTheFileLacksMovesOnAndIsRemembered() = runTest {
+        val r = rig()
+        val claims = rd4k.copy(id = "rd:claims", languages = listOf("en", "ar"))
+        val dub = iptv1080.copy(languages = listOf("ar"))
+        r.choices.language("movie:1", "ar")
+        r.player.respond = { if ("rd:claims" in it) StreamFailure.NoLanguage else null }
+        answer(r, claims, dub)
+        r.session.play(Place(0))
+        runCurrent()
+        assertEquals(dub, r.state.copy)
+        assertEquals("ar", r.player.opens.last().second.audio)
+        assertEquals(setOf("ar"), r.choices.lacking()[claims.id])
+        assertEquals(dub, r.plan.state.value.ranking?.pick?.copy)
+    }
+
     @Test fun aBusyProviderMovesOnWithNoMark() = runTest {
         val r = rig()
         r.player.respond = { if ("iptv.test" in it) StreamFailure.Http(458) else null }

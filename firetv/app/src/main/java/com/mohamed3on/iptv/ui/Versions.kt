@@ -47,6 +47,7 @@ import com.mohamed3on.iptv.data.RdStatus
 import com.mohamed3on.iptv.graph
 import com.mohamed3on.iptv.player.Capacity.Source
 import com.mohamed3on.iptv.player.Copy
+import com.mohamed3on.iptv.player.EGYPTIAN
 import com.mohamed3on.iptv.player.TIER_NAMES
 import com.mohamed3on.iptv.player.pictureTier
 import com.mohamed3on.iptv.player.Correction
@@ -333,7 +334,7 @@ internal fun copyLabels(c: Copy): List<String> = listOfNotNull(
     c.hdr.firstOrNull()?.let { if (it == "DV") "Dolby Vision" + (c.dvProfile?.let { p -> " $p" } ?: "") else it },
     VIDEO[c.codec],
     listOfNotNull(AUDIO_LABEL[c.audio], c.channels.takeIf { it > 0 }?.let(::channelLayout), "Atmos".takeIf { c.atmos }).joinToString(" ").ifEmpty { null },
-    c.languages.joinToString("/") { if (it == "multi") "Multi" else it.uppercase() }.ifEmpty { null },
+    c.languages.filter { it != "ar" || EGYPTIAN !in c.languages }.joinToString("/") { when (it) { "multi" -> "Multi"; EGYPTIAN -> "AR-EG"; else -> it.uppercase() } }.ifEmpty { null },
     c.mbps.takeIf { it > 0f }?.let { "${it.roundToInt()} Mbps" },
 )
 

@@ -91,8 +91,8 @@ class Ranking internal constructor(
     val fallback: Ranked?,
     /** R10: the best working copy that only the bandwidth ruled out. */
     val heavier: Ranked?,
-    /** Copies with Arabic audio count as the title's language (the owner's "Arabic dub first"). */
-    private val arabic: Boolean = false,
+    /** The audio language the copies were ranked for: the title's chosen one (or "Arabic dub first"); null for its original. */
+    val language: String? = null,
 ) {
     /**
      * [r]'s reason worded against [plays], the copy Play opens, when that isn't [pick]
@@ -100,7 +100,7 @@ class Ranking internal constructor(
      */
     fun reasonFor(r: Ranked, plays: String?): String {
         val p = copies.firstOrNull { it.copy.id == plays }?.takeIf { it !== pick } ?: return r.reason
-        return reason(r, p, arabic)
+        return reason(r, p, language)
     }
 
     /** R9: the best-ranked working copy lighter than [current], for a step-down. */
@@ -112,8 +112,8 @@ class Ranking internal constructor(
 
 /**
  * Ranks a title's [copies] for [setup] (U6): language, then support, then bandwidth, picture, sound,
- * English subtitles for a foreign film, and Real-Debrid on a tie (KTD15); a [pin] beats all of it. With [dubFirst], a title
- * that has a copy with Arabic audio takes those copies as its language instead.
+ * English subtitles for a foreign film, and Real-Debrid on a tie (KTD15); a [pin] beats all of it. With [prefer], a title
+ * that has a copy in that language ranks those copies as its language instead.
  * [marks] are this setup's, by copy id; [typicalMbps] is per source, null when unknown (optimistic). Audio the
  * setup doesn't report passing is taken to play: a release name lists only its headline track, and a remux often
  * carries a Dolby one too. Audio it [learnt] doesn't play (the audio's correction, when) only ranks the copy's sound
@@ -128,16 +128,19 @@ fun rankCopies(
     corrections: Set<Correction> = emptySet(),
     pin: String? = null,
     learnt: Map<Correction, Long> = emptyMap(),
-    dubFirst: Boolean = false,
+    prefer: String? = null,
+    lacking: Map<String, Set<String>> = emptyMap(),
 ): Ranking {
     val p = setup.corrected(corrections)
-    val arabic = dubFirst && copies.any { "ar" in it.languages }
+    // A copy found to lack a language (its file had no such track) doesn't count as speaking it.
+    val has = { c: Copy, l: String -> speaks(c, l, originalLanguage) && audioTrack(l) !in lacking[c.id].orEmpty() }
+    val want = prefer?.takeIf { l -> copies.any { has(it, l) } }
     val ignore = Correction.IgnoreBandwidth in corrections
     val iptv = if (ignore) null else typicalMbps(Source.Iptv)
     val rd = if (ignore) null else typicalMbps(Source.RealDebrid)
-    val ranked = copies.map { judge(it, p, marks[it.id], originalLanguage, arabic, if (it.source == Source.Iptv) iptv else rd, it.id == pin, learnt) }.sortedWith(ORDER)
+    val ranked = copies.map { judge(it, p, marks[it.id], originalLanguage, want?.let { l -> has(it, l) }, if (it.source == Source.Iptv) iptv else rd, it.id == pin, learnt) }.sortedWith(ORDER)
     val pick = ranked.firstOrNull()?.takeIf { it.pinned || it.support != Support.Wont }
-    for (r in ranked) r.reason = reason(r, pick, arabic)
+    for (r in ranked) r.reason = reason(r, pick, want)
     val working = pick?.takeIf { it.support == Support.Works && !it.pinned }
     return Ranking(
         ranked, pick,
@@ -146,7 +149,7 @@ fun rankCopies(
         heavier = working?.takeIf { it.fits }?.let { w ->
             ranked.firstOrNull { it.support == Support.Works && it.original == w.original && !it.fits && versus(it, w, fit = false) < 0 }
         },
-        arabic,
+        want,
     )
 }
 
@@ -165,7 +168,7 @@ fun audioFamily(audio: String): Correction? = when (audio) {
     else -> null
 }
 
-private fun judge(c: Copy, p: SetupProfile, mark: Mark?, language: String?, arabic: Boolean, typical: Float?, pinned: Boolean, learnt: Map<Correction, Long>): Ranked {
+private fun judge(c: Copy, p: SetupProfile, mark: Mark?, language: String?, speaksWanted: Boolean?, typical: Float?, pinned: Boolean, learnt: Map<Correction, Long>): Ranked {
     // Profile 7 plays as its HDR10 base layer (MoviePlayer's Dv7AsHevc): the stick decodes no profile 7 Dolby Vision.
     val dv = "DV" in c.hdr && c.dvProfile != 7
     val hdr10 = "HDR10" in c.hdr || "HDR10+" in c.hdr || c.dvProfile == 7
@@ -196,7 +199,7 @@ private fun judge(c: Copy, p: SetupProfile, mark: Mark?, language: String?, arab
     val atmos = c.atmos && (c.audio != "eac3" || Passthrough.EAc3Joc in p.passthrough)
     return Ranked(
         c, support, mark,
-        original = if (arabic) "ar" in c.languages else language == null || c.languages.isEmpty() || language in c.languages || "multi" in c.languages,
+        original = speaksWanted ?: (language == null || c.languages.isEmpty() || language in c.languages || "multi" in c.languages),
         fits = typical == null || c.mbps <= 0f || c.mbps <= typical,
         pinned = pinned, why = why, typical = typical,
         dvMissing = dv && Hdr.DolbyVision !in p.hdr,
@@ -252,6 +255,29 @@ private fun versus(a: Ranked, b: Ranked, fit: Boolean = true): Int = when {
     else -> 0
 }
 
+/** The box's tag for an Egyptian Arabic dub (ISO 639-3), listed beside "ar". */
+const val EGYPTIAN = "arz"
+
+/** Whether [c] has audio in [lang]: listed (an Egyptian dub is Arabic too), or the title's [original] in a copy that lists none or "multi". */
+fun speaks(c: Copy, lang: String, original: String?): Boolean =
+    lang in c.languages || (lang == "ar" && EGYPTIAN in c.languages) || (lang == original && (c.languages.isEmpty() || "multi" in c.languages))
+
+/**
+ * The audio languages a title page offers (its original, English, Egyptian, Arabic, in that order): those some copy has, and only when
+ * there are two or more. Arabic shows beside Egyptian only when a copy has another dialect.
+ */
+fun audioChoices(copies: List<Copy>, original: String?): List<String> =
+    listOfNotNull(original, "en", EGYPTIAN, "ar").distinct().filter { l ->
+        copies.any { if (l == "ar") "ar" in it.languages && EGYPTIAN !in it.languages else speaks(it, l, original) }
+    }.takeIf { it.size > 1 }.orEmpty()
+
+/** "English", "Egyptian", "Arabic", else the language's own English name. */
+fun audioName(lang: String): String =
+    if (lang == EGYPTIAN) "Egyptian" else Locale.forLanguageTag(lang).getDisplayLanguage(Locale.ENGLISH).ifEmpty { lang.uppercase() }
+
+/** The track to start on for [lang]: an Egyptian dub's is tagged Arabic. */
+fun audioTrack(lang: String): String = if (lang == EGYPTIAN) "ar" else lang
+
 private val ORDER = Comparator<Ranked> { a, b ->
     when {
         a.pinned != b.pinned -> if (a.pinned) -1 else 1
@@ -262,10 +288,10 @@ private val ORDER = Comparator<Ranked> { a, b ->
     }
 }
 
-private fun reason(r: Ranked, pick: Ranked?, arabic: Boolean): String = when {
+private fun reason(r: Ranked, pick: Ranked?, want: String?): String = when {
     r === pick -> if (r.pinned) "Your choice" else r.why.ifEmpty { "best for this setup" }
     pick == null || r.support == Support.Wont -> r.why
-    !r.original && pick.original -> if (arabic) "no Arabic audio" else "dub"
+    !r.original && pick.original -> if (want != null) "no ${audioName(want)} audio" else "dub"
     r.support == Support.Unsure -> r.why
     // Every reason reads this copy against the pick ("1080p vs 4K"); a copy that beats a pinned pick says so.
     else -> versus(r, pick).let { k ->
@@ -337,11 +363,33 @@ class CopyChoices(private val store: KeyValueStore, private val now: () -> Long 
     }
     private val corrections: MutableMap<String, Set<Correction>> by lazy { read<Map<String, Set<Correction>>>(CORRECTIONS).orEmpty().toMutableMap() }
     private val pins: MutableMap<String, String> by lazy { read<Map<String, String>>(PINS).orEmpty().toMutableMap() }
+    private val lacking: MutableMap<String, Set<String>> by lazy { read<Map<String, Set<String>>>(LACKING).orEmpty().toMutableMap() }
+    private val languages: MutableMap<String, String> by lazy { read<Map<String, String>>(LANGUAGES).orEmpty().toMutableMap() }
     private val learnt: MutableMap<String, Map<Correction, Long>> by lazy { read<Map<String, Map<Correction, Long>>>(LEARNT).orEmpty().toMutableMap() }
 
-    /** Ranks [copies] of [titleId] for [setup] with this setup's marks, corrections and learnt audio, the title's pin and [dubFirst]. */
+    /** Ranks [copies] of [titleId] for [setup] with this setup's marks, corrections and learnt audio, the title's pin and its audio language. */
     fun rank(titleId: String, copies: List<Copy>, originalLanguage: String?, setup: SetupProfile, typicalMbps: (Source) -> Float?) =
-        rankCopies(copies, originalLanguage, setup, typicalMbps, marks(setup), corrections(setup), pin(titleId), learnt(setup), dubFirst)
+        rankCopies(copies, originalLanguage, setup, typicalMbps, marks(setup), corrections(setup), pin(titleId), learnt(setup), prefer(titleId, copies), lacking())
+
+    /** The audio language for [titleId]: chosen on its page, else with "Arabic dub first" an Egyptian dub when it has one, else Arabic. */
+    @Synchronized fun prefer(titleId: String, copies: List<Copy>): String? = languages[titleId]
+        ?: if (dubFirst) EGYPTIAN.takeIf { copies.any { EGYPTIAN in it.languages } } ?: "ar" else null
+
+    /** Copy ids with the audio languages their files were found to lack. */
+    @Synchronized fun lacking(): Map<String, Set<String>> = lacking
+
+    /** Records that [copy]'s file has no [lang] track, whatever its name claims. */
+    @Synchronized fun lacks(copy: Copy, lang: String) {
+        lacking[copy.id] = lacking[copy.id].orEmpty() + lang
+        write<Map<String, Set<String>>>(LACKING, lacking)
+    }
+
+    /** Chooses [lang] as [titleId]'s audio (null: back to the default); a pinned copy gives way to it. */
+    @Synchronized fun language(titleId: String, lang: String?) {
+        if (lang == null) languages.remove(titleId) else languages[titleId] = lang
+        write<Map<String, String>>(LANGUAGES, languages)
+        pin(titleId, null)
+    }
 
     /** The owner's "Arabic dub first" (Options): every title's copies with Arabic audio rank first and play in Arabic. */
     var dubFirst: Boolean
@@ -402,6 +450,8 @@ class CopyChoices(private val store: KeyValueStore, private val now: () -> Long 
         const val PINS = "copies.pins"
         const val LEARNT = "copies.learnt"
         const val DUB_FIRST = "copies.dubFirst"
+        const val LANGUAGES = "copies.languages"
+        const val LACKING = "copies.lacking"
         const val RD_MARK_MS = 30L * 24 * 3_600_000
         const val IPTV_FAIL_MS = 24L * 3_600_000
         val json = Json { ignoreUnknownKeys = true }
