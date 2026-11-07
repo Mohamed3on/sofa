@@ -210,10 +210,6 @@ private fun PlayerChrome(
     var movies by remember { mutableStateOf(false) }
     val moviesShown = animateFloatAsState(if (movies) 1f else 0f, if (reduced) tween(Motion.FADE_MS) else Motion.panel(), label = "movies")
     val moviesComposed by remember { derivedStateOf { movies || moviesShown.value > 0f } }
-    val prefs = LocalContext.current.graph.prefs
-    LaunchedEffect(movies) {
-        if (!movies) prefs.put(Check.LAST_SCREEN, null) else if (prefs.get(Check.LAST_SCREEN) == null) prefs.put(Check.LAST_SCREEN, "movies")
-    }
     // firetv/check.sh: every screen but live is in Movies & Shows, which takes the target from there.
     val check by Check.open.collectAsState()
     LaunchedEffect(check) {

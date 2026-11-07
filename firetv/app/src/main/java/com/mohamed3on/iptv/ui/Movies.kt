@@ -151,7 +151,6 @@ import com.mohamed3on.iptv.data.known
 import com.mohamed3on.iptv.data.tmdbImage
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.text.InlineTextContent
@@ -172,7 +171,6 @@ import com.mohamed3on.iptv.data.groupLabel
 import com.mohamed3on.iptv.data.movieUrl
 import com.mohamed3on.iptv.data.posterUrl
 import com.mohamed3on.iptv.graph
-import com.mohamed3on.iptv.player.Capacity
 import com.mohamed3on.iptv.system.Check
 import com.mohamed3on.iptv.player.Copy
 import com.mohamed3on.iptv.player.PlayOf
@@ -209,6 +207,7 @@ import com.mohamed3on.iptv.ui.theme.slideFade
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration
@@ -265,35 +264,10 @@ enum class LibraryKind(val title: String, val noun: String) {
 /** What is on screen: Movies & Shows while browsing; a film or an episode while one plays. */
 internal val LocalLibrary = staticCompositionLocalOf { LibraryKind.Movies }
 
-/** A page over the browsing screen: a title's, or a person's titles. Back takes the top one off. */
-private sealed interface LibraryPage {
-    data class Title(val movie: Movie, val versions: Boolean = false) : LibraryPage
-    data class Cast(val person: Person) : LibraryPage
-}
-
-/** Pages kept under the top one, so Back lands where each was left; past this the oldest goes. */
-private const val MAX_PAGES = 6
-
-/** A show's episode on screen: the show, its episodes, and which one plays. */
-private data class ShowPlay(val show: Movie, val episodes: List<Episode>, val index: Int) {
-    val episode get() = episodes[index]
-}
-
-/**
- * What plays: the movie (for a show, the episode as one), its [title] id and where it starts (ms);
- * [fallback] is the library's IPTV copy, for when the box can't say what else there is.
- */
-private data class Playing(val movie: Movie, val from: Long, val title: TitleId, val fallback: Copy?, val show: ShowPlay? = null)
-
-/** The library's own copy of a film or episode (provider stream [id]); none for a title the provider lacks. */
-private fun libraryCopy(id: Int) = if (id > 0) Copy("iptv:$id", Capacity.Source.Iptv) else null
-
 /** How long focus rests on an Up next card or an episode row before its title is prepared, so passing over one costs nothing. */
 private const val WARM_REST_MS = 400L
 /** Search asks once typing pauses this long. */
 private const val SEARCH_DEBOUNCE_MS = 250L
-/** The next episode is prepared this long after one starts, so its start has the line to itself. */
-private const val NEXT_WARM_MS = 15_000L
 
 /**
  * Movies & Shows: one title-first library of films and shows over the still-playing live channel, which
@@ -302,7 +276,7 @@ private const val NEXT_WARM_MS = 15_000L
  * library's rows. Any title opens its title page (a film's, or a show's with its episodes), whose cast and
  * More like this open further pages; the next episode plays when one ends. [shown] is its entrance (0 → 1);
  * [open] is false while it leaves. [onPlaying] says whether a film or episode is on screen, so the live
- * picture steps aside for it.
+ * picture steps aside for it. The pages and what plays are the [MoviesNavigator]'s; this draws them.
  */
 @Composable
 fun MoviesLayer(
@@ -327,15 +301,22 @@ fun MoviesLayer(
     val resume = remember(filmPlaces, showPlaces) { (filmPlaces + showPlaces).sortedByDescending { it.at } }
     val episodesHere by graph.watchedEpisodes.ids.collectAsState()
     val dismissed by graph.dismissed.ids.collectAsState()
-    // Followed shows' next episodes (R31): none for a show part-way through (that episode shows instead), nor one watched here or taken out.
-    val nextUp = remember(history, showPlaces, episodesHere, dismissed) {
-        history?.next.orEmpty().filter { n -> showPlaces.none { it.title == n.show.titleId } && n.episode !in episodesHere && n.episode !in dismissed }
-    }
-    val live by rememberUpdatedState(session)
+    val nextUp = remember(history, showPlaces, episodesHere, dismissed) { nextUpOf(history, showPlaces, episodesHere, dismissed) }
+    val latestNextUp by rememberUpdatedState(nextUp)
     val scope = rememberCoroutineScope()
-    var playing by remember { mutableStateOf<Playing?>(null) }
-    // The pages on screen over the browsing screen, the top one last.
-    val pages = remember { mutableStateListOf<LibraryPage>() }
+    val nav = remember {
+        MoviesNavigator(
+            graph.prefs, graph.resume, graph.showResume,
+            episodesOf = { graph.titles.showOf(it).getOrNull()?.episodes },
+            watched = { graph.marks.watched.value },
+            nextUp = { latestNextUp },
+            providerId = { graph.titles.movies.items.value?.findTitle(it)?.id },
+            warm = graph.films::warm,
+            scope = scope,
+        )
+    }
+    val playing = nav.playing
+    val pages = nav.pages
     var failed by remember { mutableStateOf<SyncError?>(null) }
     var attempt by remember { mutableStateOf(0) }
     val refreshed = remember { booleanArrayOf(false) }
@@ -359,98 +340,34 @@ fun MoviesLayer(
     // Back on the rows from a title page or a film, the box is asked again too, so scores TrueScore just learnt show.
     val browsing = open && playing == null && pages.isEmpty()
     LaunchedEffect(browsing) { if (browsing && refreshed[0]) sync.sync(Duration.ZERO) }
-    fun push(page: LibraryPage) {
-        if (pages.size >= MAX_PAGES) pages.removeAt(0)
-        pages.add(page)
-    }
     // Old marks move to title ids at launch; if that failed (offline), opening Movies tries again.
     LaunchedEffect(Unit) { graph.migration.run(graph.titles::titleIds) }
     // The setup reader is built on the main thread (its callbacks land there) before copies are ranked off it.
     remember { graph.setup }
-    // While an episode plays, the next one is prepared, so Next episode and the end of this one start at once (KTD13).
-    LaunchedEffect(playing) {
-        val s = playing?.show ?: return@LaunchedEffect
-        delay(NEXT_WARM_MS)
-        s.episodes.getOrNull(s.index + 1)?.titleId?.ifEmpty { null }?.let(graph.films::warm)
-    }
 
-    // However the layer goes, the live picture comes back.
+    // The live picture steps aside while a film or an episode is on screen, and comes back however the layer goes.
+    LaunchedEffect(playing != null) { onPlaying(playing != null) }
     DisposableEffect(Unit) { onDispose { onPlaying(false) } }
 
-    // Live TV stays stopped while Movies & Shows is open, even when the app starts it again (Home and back): the
-    // provider's one connection and the bandwidth are the films' (KTD20). Leaving re-tunes the same channel.
-    LaunchedEffect(session, open) {
-        if (!open) {
-            if (session.state.value.phase == Phase.Stopped) session.retry()
-            return@LaunchedEffect
-        }
-        session.state.collect {
-            if (it.phase == Phase.Stopped) return@collect
-            tiles.close()
-            session.stop()
+    val line = remember(session, tiles) {
+        object : LiveLine {
+            override val stopped = session.state.map { it.phase == Phase.Stopped }
+            override fun stop() {
+                tiles.close()
+                session.stop()
+            }
+            override fun retry() = session.retry()
         }
     }
+    LaunchedEffect(line, open) { nav.hold(line, open) }
 
     fun leave() = onClose()
-
-    fun play(next: Playing) {
-        tiles.close()
-        live.stop()
-        playing = next
-        onPlaying(true)
-        // Closing the app mid-film reopens it playing from its saved place (a show: its episode up next).
-        graph.prefs.put(Check.LAST_SCREEN, "play:${next.show?.show?.titleId ?: next.title}")
-    }
-
-    fun episode(show: Movie, episodes: List<Episode>, index: Int, from: Long): Playing {
-        val e = episodes[index]
-        val name = listOf(show.title.title, e.code, e.title).filter(String::isNotEmpty).joinToString(" · ")
-        val movie = Movie(id = e.id, name = name, poster = show.poster, group = show.group, ext = e.ext)
-        return Playing(movie, from, e.titleId, libraryCopy(e.id), ShowPlay(show, episodes, index))
-    }
 
     /** An IPTV copy's stream: the container the box named, else the library's. */
     fun iptvUrl(p: Playing): (Copy) -> String = { c ->
         val id = c.id.removePrefix("iptv:").toInt()
         val ext = graph.films.state(p.title).value.answer?.ext(c.id) ?: p.movie.ext
         if (p.show != null) feed.route.episodeUrl(graph.route.effective.value, id, ext) else feed.route.movieUrl(graph.route.effective.value, id, ext)
-    }
-
-    /** The library's IPTV copy of a film: its own provider id, else the provider's film list's (none for a title it lacks). */
-    fun fallbackOf(movie: Movie) = libraryCopy(movie.id.takeIf { it > 0 } ?: graph.titles.movies.items.value?.findTitle(movie.titleId)?.id ?: 0)
-
-    /** A film from its saved place, or from the start. */
-    fun playFilm(movie: Movie, fromStart: Boolean) =
-        play(Playing(movie, if (fromStart) 0 else graph.resume.startAt(movie.titleId), movie.titleId, fallbackOf(movie)))
-
-    /** A show's episode [index], from its saved place or the start. */
-    fun playEpisode(show: Movie, episodes: List<Episode>, index: Int, fromStart: Boolean) =
-        play(episode(show, episodes, index, if (fromStart) 0 else graph.showResume.startAt(show.titleId, episodes[index].titleId)))
-
-    /** Up next's buttons: a film at its place; a show's episode up next (its episodes are kept a while, so this is quick). */
-    fun resumeTitle(movie: Movie, fromStart: Boolean) {
-        if (!movie.titleId.isShow) return playFilm(movie, fromStart)
-        scope.launch {
-            val eps = graph.titles.showOf(movie).getOrNull()?.episodes?.takeIf { it.isNotEmpty() }
-            val seen = graph.marks.watched.value
-            val place = graph.showResume.find(movie.titleId) ?: nextUp.firstOrNull { it.show.titleId == movie.titleId }?.place()
-            if (eps == null) push(LibraryPage.Title(movie)) else playEpisode(movie, eps, upNextIndex(eps, place, seen), fromStart)
-        }
-    }
-
-    /** The episode after [s] plays, if there is one. */
-    fun nextEpisode(s: ShowPlay?): Boolean {
-        val next = s?.takeIf { it.index < it.episodes.lastIndex } ?: return false
-        // Continue watching moves on to the next episode even if it is left in its first minute.
-        graph.showResume.save(next.show, 0, 0, next.episodes[next.index + 1].titleId, next.episodes[next.index + 1].code)
-        playing = episode(next.show, next.episodes, next.index + 1, 0)
-        return true
-    }
-
-    fun stopped() {
-        playing = null
-        onPlaying(false)
-        graph.prefs.put(Check.LAST_SCREEN, (pages.lastOrNull() as? LibraryPage.Title)?.let { "title:${it.movie.titleId}" } ?: "movies")
     }
 
     // firetv/check.sh (system/Check): the browsing screen is shown (two frames: its rows build a frame late), the
@@ -468,16 +385,10 @@ fun MoviesLayer(
         if (verb == "live") return@LaunchedEffect leave().also { Check.open.value = null }
         val lib = library ?: return@LaunchedEffect
         if (verb != "search") Check.open.value = null // MoviesBrowse takes a search
-        if (verb != "play" && playing != null) stopped()
-        pages.clear()
         val id = target.substringAfter(':').substringBefore('@')
         // play:<titleId>@<copyId> pins that copy first, as choosing it in Versions does.
         target.substringAfter('@', "").ifEmpty { null }?.let { copy -> graph.copyChoices.pin(id, copy).also { graph.films.rerank(id) } }
-        val title = lib.find(id) ?: Movie(id = -1, name = id, group = "", titleId = id)
-        when (verb) {
-            "title", "versions" -> push(LibraryPage.Title(title, versions = verb == "versions"))
-            "play" -> resumeTitle(title, fromStart = false)
-        }
+        nav.reopen(verb, lib.find(id) ?: Movie(id = -1, name = id, group = "", titleId = id))
     }
 
     CompositionLocalProvider(LocalLibrary provides LibraryKind.Movies) {
@@ -498,10 +409,9 @@ fun MoviesLayer(
                 active = browsing,
                 hidden = playing != null || pages.isNotEmpty(),
                 shown = shown,
-                // A person found by search opens their page; anything else its title page.
-                onOpen = { m -> m.titleId.removePrefix("person:").takeIf { m.titleId.startsWith("person:") }?.toIntOrNull()?.let { push(LibraryPage.Cast(Person(it, m.name))) } ?: push(LibraryPage.Title(m)) },
-                onResume = { resumeTitle(it, fromStart = false) },
-                onStartOver = { resumeTitle(it, fromStart = true) },
+                onOpen = nav::open,
+                onResume = { nav.resume(it, fromStart = false) },
+                onStartOver = { nav.resume(it, fromStart = true) },
                 onBack = ::leave,
             )
             pages.forEachIndexed { i, page ->
@@ -509,9 +419,8 @@ fun MoviesLayer(
                     val top = i == pages.lastIndex
                     val active = open && playing == null && top
                     val hidden = playing != null || !top
-                    val back = { pages.removeAt(pages.lastIndex).also { if (pages.isEmpty()) graph.prefs.put(Check.LAST_SCREEN, "movies") } }
                     when (page) {
-                        is LibraryPage.Cast -> PersonPage(page.person, watched, active, hidden, onOpen = { push(LibraryPage.Title(it)) }, onBack = { back() })
+                        is LibraryPage.Cast -> PersonPage(page.person, watched, active, hidden, onOpen = nav::open, onBack = nav::back)
                         is LibraryPage.Title -> {
                             val title = page.movie
                             val saved = resume.firstOrNull { it.title == title.titleId } ?: nextUp.firstOrNull { it.show.titleId == title.titleId }?.place()
@@ -522,20 +431,20 @@ fun MoviesLayer(
                                 watched = watched,
                                 active = active,
                                 hidden = hidden,
-                                onPlay = { fromStart -> playFilm(title, fromStart) },
-                                onOpen = { push(LibraryPage.Title(it)) },
-                                onPerson = { push(LibraryPage.Cast(it)) },
-                                onBack = { back() },
+                                onPlay = { fromStart -> nav.playFilm(title, fromStart) },
+                                onOpen = nav::open,
+                                onPerson = nav::open,
+                                onBack = nav::back,
                             ) else ShowPage(
                                 show = title,
                                 resume = saved,
                                 watched = watched,
                                 active = active,
                                 hidden = hidden,
-                                onPlay = { episodes, e, fromStart -> playEpisode(title, episodes, e, fromStart) },
-                                onOpen = { push(LibraryPage.Title(it)) },
-                                onPerson = { push(LibraryPage.Cast(it)) },
-                                onBack = { back() },
+                                onPlay = { episodes, e, fromStart -> nav.playEpisode(title, episodes, e, fromStart) },
+                                onOpen = nav::open,
+                                onPerson = nav::open,
+                                onBack = nav::back,
                             )
                         }
                     }
@@ -552,9 +461,9 @@ fun MoviesLayer(
                             from = p.from,
                             fallback = p.fallback,
                             iptvUrl = iptvUrl(p),
-                            onEnded = { if (!nextEpisode(s)) stopped() },
-                            onClose = ::stopped,
-                            onNext = s?.takeIf { it.index < it.episodes.lastIndex }?.let { { nextEpisode(it) } },
+                            onEnded = nav::ended,
+                            onClose = nav::stop,
+                            onNext = if (nav.hasNext) ({ nav.nextEpisode() }) else null,
                         )
                     }
                 }
@@ -563,25 +472,10 @@ fun MoviesLayer(
     }
 }
 
-/** A title the provider doesn't carry, as its saved place names it: no provider id (negative, never asked about), so only its copies play it. */
-private fun placeTitle(r: Resume) =
-    Movie(id = -1 - (r.title.hashCode() and Int.MAX_VALUE), name = listOfNotNull(r.name, r.year?.let { "($it)" }).joinToString(" "), poster = r.poster, group = "", titleId = r.title)
-
-/** A show's episode up next: the one in progress, else the first not yet watched, else the first. */
-private fun upNextIndex(episodes: List<Episode>, resume: Resume?, watched: Set<TitleId>): Int =
-    episodes.indexOfFirst { it.titleId == resume?.episode }.takeIf { it >= 0 }
-        ?: episodes.indexOfFirst { it.titleId !in watched }.takeIf { it >= 0 }
-        ?: 0
-
-/** A next episode as Up next's place: the show and its episode, nothing played yet ([Resume.at] 0). */
-private fun NextEpisode.place() = Resume(show.titleId, show.title.title, show.poster, show.title.year, 0, 0, 0, episode, label)
-
 /** A row of the library: one group's titles. [progress] is every saved place, by title id. */
 private const val CONTINUE_ROW = "h|continue"
 /** Titles a row shows once watched ones are out (the box sends each row long enough for that). */
 private const val ROW_SHOWN = 60
-/** What was played (or a followed show's episode aired) within this long leads the screen as Up next; older is a Continue watching row. */
-private const val RECENT_MS = 7 * 86_400_000L
 /** The library's genre rows (api/_library.ts GENRES): one Genres row of tiles stands for them, last. */
 private val GENRE_ROWS = setOf("action", "comedy", "drama", "thriller", "crime", "scifi", "horror", "romance", "animation", "documentary")
 private const val GENRES_ROW = "h|genres"
@@ -662,20 +556,8 @@ private fun MoviesBrowse(
     var hideWatched by remember { mutableStateOf(prefs.get(SHOW_WATCHED) == null) }
     // ☰ on a card: its actions panel, with Remove from Up next ([Actions.removable]) and the rows' Hide watched setting.
     var actions by remember { mutableStateOf<Actions?>(null) }
-    // Each saved place with its title as last played (its provider id, for its episodes and IPTV copy) and as the
-    // library has it now (tier and score), newest first; one played only from Real-Debrid from its own name and poster (R21).
-    // Then followed shows' next episodes, latest aired first: one takes the hero only when nothing is part-way through.
-    // Only what was played, or aired, in the last week is Up next; the rest is the Continue watching row.
-    val (upNext, older) = remember(library, resume, nextUp) {
-        if (library == null) return@remember emptyList<Pair<Movie, Resume>>() to emptyList<Movie>()
-        val since = System.currentTimeMillis() - RECENT_MS
-        val sinceDay = java.time.LocalDate.now().minusDays(RECENT_MS / 86_400_000L).toString()
-        val all = resume.map { r ->
-            val now = library.find(r.title)
-            Triple(r.iptv?.let { if (now != null) it.copy(lib = now.lib, group = now.group) else it } ?: now ?: placeTitle(r), r, r.at >= since)
-        } + nextUp.map { n -> Triple(library.find(n.show.titleId) ?: n.show, n.place(), n.air >= sinceDay) }
-        all.filter { it.third }.map { it.first to it.second } to all.filterNot { it.third }.map { it.first }
-    }
+    // A followed show's next episode takes the hero only when nothing is part-way through; what isn't recent is the Continue watching row.
+    val (upNext, older) = remember(library, resume, nextUp) { upNextOf(library, resume, nextUp) }
     val rows = remember(library, resume, history, watched, hideWatched, older) { rowsOf(library, resume, history, watched, hideWatched, older) }
     val newShows = remember(nextUp) { nextUp.filter { it.new }.mapTo(HashSet()) { it.show.titleId } }
     var page by remember { mutableStateOf(BrowsePage.UpNext) }
@@ -1930,7 +1812,6 @@ private fun FilmPage(
         withFrameNanos {}
         buttons = true
         Check.log("title_shown", "title" to film.titleId)
-        graph.prefs.put(Check.LAST_SCREEN, "title:${film.titleId}")
     }
     LaunchedEffect(active, versions || marking, unavailable, hasExtras) {
         if (!active || versions || marking) return@LaunchedEffect
@@ -2437,7 +2318,6 @@ private fun ShowPage(
     LaunchedEffect(Unit) {
         withFrameNanos {}
         Check.log("title_shown", "title" to show.titleId)
-        graph.prefs.put(Check.LAST_SCREEN, "title:${show.titleId}")
     }
     var attempt by remember { mutableStateOf(0) }
     LaunchedEffect(attempt) {
