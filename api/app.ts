@@ -348,10 +348,11 @@ export async function traktHistory(req: Request) {
   return traktRefused(result)
 }
 
-// GET /api/letterboxd/logs?t=TOKEN — the films waiting to be logged on Letterboxd, oldest first: [{ tmdb, at, rating? }].
+// GET /api/letterboxd/logs?t=TOKEN — the films waiting to be logged on Letterboxd, oldest first, and whose account they're
+// for (LETTERBOXD_USER; the browser logs only while that account is signed in): { user, logs: [{ tmdb, at, rating? }] }.
 // POST the same with { done: [those logs] } once the browser has logged them: 204; a log whose marks changed since stays.
 export async function letterboxdLogs(req: Request) {
-  if (req.method === 'GET') return Response.json(pendingLogs())
+  if (req.method === 'GET') return Response.json({ user: process.env.LETTERBOXD_USER ?? null, logs: process.env.LETTERBOXD_USER ? pendingLogs() : [] })
   const r = (await req.json().catch(() => null)) as { done?: unknown } | null
   const done = Array.isArray(r?.done) ? r.done.filter((l): l is LetterboxdLog => Number.isSafeInteger(l?.tmdb) && Number.isSafeInteger(l?.at) && (l.rating === undefined || Number.isInteger(l.rating))) : null
   if (!done) return new Response('Bad logs', { status: 400 })
