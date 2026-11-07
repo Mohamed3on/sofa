@@ -85,7 +85,7 @@ fun ActionButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifi
             .graphicsLayer { scaleX = press; scaleY = press }
             .focusLift(focused)
             .clickable(interaction, indication = null, onClick = onClick)
-            .padding(horizontal = if (small) Space.l else Space.xl, vertical = if (small) Space.s else Space.m),
+            .padding(horizontal = Space.xl, vertical = Space.m),
     )
 }
 
