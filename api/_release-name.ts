@@ -90,12 +90,17 @@ export function parseRelease(text: string): Attrs {
   }
 }
 
-/** Country flags (🇬🇧 / 🇮🇹, as Torrentio lists a release's audio) to languages; "Multi Audio" / "Dual Audio" to 'multi'. */
+/**
+ * Country flags (🇬🇧 / 🇮🇹, as Torrentio lists a release's audio) to languages; "Multi Audio" / "Dual Audio" to 'multi'. A list of more
+ * than MAX_FLAGS is its subtitles' too (an iTunes WEB-DL flags 16 languages and carries English and Chinese audio): none of it counts.
+ */
+const MAX_FLAGS = 5
 const COUNTRY_LANG: Record<string, string> = { gb: 'en', us: 'en', mx: 'es', br: 'pt', ua: 'uk', jp: 'ja', kr: 'ko', cn: 'zh', tw: 'zh', in: 'hi', sa: 'ar', gr: 'el', se: 'sv', dk: 'da', cz: 'cs', il: 'he', ir: 'fa', vn: 'vi', rs: 'sr', my: 'ms', ee: 'et', si: 'sl', no: 'no' }
 export function flagLanguages(line: string): string[] {
   const out = [...line.matchAll(/([\u{1F1E6}-\u{1F1FF}])([\u{1F1E6}-\u{1F1FF}])/gu)].map((m) => {
     const cc = String.fromCharCode(m[1].codePointAt(0)! - 0x1f1e6 + 97, m[2].codePointAt(0)! - 0x1f1e6 + 97)
     return COUNTRY_LANG[cc] ?? cc
   })
-  return /(?:multi|dual) audio/i.test(line) ? ['multi', ...out] : out
+  const audio = out.length > MAX_FLAGS ? [] : out
+  return /(?:multi|dual) audio/i.test(line) ? ['multi', ...audio] : audio
 }

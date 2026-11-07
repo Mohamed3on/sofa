@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { filmCopy, markInfringing, titleCopies, torrentioCandidates, type IptvCopy } from './_copies'
-import { parseRelease } from './_release-name'
+import { flagLanguages, parseRelease } from './_release-name'
 import torrentio from './fixtures/torrentio-movie-tt1375666.json'
 import movie from './fixtures/tmdb-movie-27205.json'
 import rdList from './fixtures/torrentio-rd-movie-tt1375666.json'
@@ -32,6 +32,9 @@ test('Torrentio streams become candidates with audio languages from the flags, t
   expect(c).toHaveLength(4)
   expect(c[0]).toMatchObject({ hash: '2849211f150e966ef7924f43aec22727a644e10d', file: 0, res: 2160, hdr: ['hdr10'], codec: 'av1', size: Math.round(8.91 * 2 ** 30), seeds: 296 })
   expect(c[0].langs.sort()).toEqual(['de', 'en', 'es', 'fr', 'it'])
+  // Sixteen flags name subtitles too (Toy Story 5's iTunes copy listed AR with English and Chinese audio only).
+  expect(flagLanguages('🇬🇧 / 🇵🇹 / 🇨🇳 / 🇳🇱 / 🇵🇱 / 🇨🇿 / 🇭🇺 / 🇧🇬 / 🇭🇷 / 🇺🇦 / 🇩🇰 / 🇸🇪 / 🇳🇴 / 🇹🇷 / 🇸🇦 / 🇮🇱')).toEqual([])
+  expect(flagLanguages('Multi Audio 🇬🇧 / 🇵🇹 / 🇨🇳 / 🇳🇱 / 🇵🇱 / 🇨🇿')).toEqual(['multi'])
   expect(c[3]).toMatchObject({ file: 3, filename: 'Inception.2010.1080p.BrRip.x264.YIFY.mp4', res: 1080, langs: [] })
   // The file name names the audio the release doesn't: here English only in DTS-HD.
   const [remux] = torrentioCandidates([{
