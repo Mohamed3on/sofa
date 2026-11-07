@@ -246,7 +246,7 @@ export interface RebuildDeps extends Omit<ShowDeps, 'scores' | 'films' | 'lists'
   score: (ids: string[], fresh: Set<string>) => Promise<Map<string, Score>>
   /** IMDb's Top 250 and Most Popular TV shows as tv: ids (_ratings.ts [imdbTopShows]). */
   topShows: string[]
-  /** Films with an Arabic dub TorBox holds (_arabp2p.ts [dubbedFilms]). */
+  /** Films and shows with an Arabic dub TorBox holds (arabp2p.ts [dubbedFilms]). */
   dubbed: string[]
   today?: Date
 }

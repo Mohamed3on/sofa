@@ -521,15 +521,18 @@ const unhashed = (s: Store) => [...new Set(Object.values(s.dubs ?? {}).filter(Bo
   .sort((a, b) => b.votes - a.votes || Number(b.r.egyptian) - Number(a.r.egyptian) || Number(b.r.id) - Number(a.r.id))
   .map((x) => x.r)
 
-/** The hashes of every dubbed copy known. */
-const dubHashes = (s: Store) => Object.values(s.films).flatMap((f) => f.rows.filter((r) => r.dub).flatMap((r) => {
-  const h = s.torrents[r.id]
-  return h && 'hash' in h ? [h.hash] : []
-}))
+/** The hashes of every dubbed copy known: films' and shows' packs. */
+const dubHashes = (s: Store) => [
+  ...Object.values(s.films).flatMap((f) => f.rows.filter((r) => r.dub).flatMap((r) => {
+    const h = s.torrents[r.id]
+    return h && 'hash' in h ? [h.hash] : []
+  })),
+  ...Object.values(s.packs ?? {}).flatMap((p) => ('hash' in p ? [p.hash] : [])),
+]
 
 /**
- * The library's "Dubbed in Arabic" row: films (title ids) with a dubbed copy TorBox held in the last 3 days, the
- * newest upload first. Read from the store file, so the library build (another process) can call it.
+ * The library's "Dubbed in Arabic" row: films and shows (title ids) with a dubbed copy (a show: a pack with its
+ * episodes) TorBox held in the last 3 days, the newest upload first. Read from the store file, so the library build (another process) can call it.
  */
 export async function dubbedFilms(file = storeFile()): Promise<string[]> {
   const s = await readStore(file)
@@ -540,7 +543,13 @@ export async function dubbedFilms(file = storeFile()): Promise<string[]> {
       return r.dub && h && 'hash' in h && recent(h.hash)
     }).map((r) => Number(r.id)))
     return newest ? [{ id: `movie:${id}`, newest }] : []
-  }).sort((a, b) => b.newest - a.newest).map((x) => x.id)
+  }).concat(Object.entries(s.shows ?? {}).flatMap(([id, show]) => {
+    const newest = Math.max(0, ...show.rows.filter((r) => {
+      const p = s.packs?.[r.id]
+      return p && 'hash' in p && recent(p.hash)
+    }).map((r) => Number(r.id)))
+    return newest ? [{ id: `tv:${id}`, newest }] : []
+  })).sort((a, b) => b.newest - a.newest).map((x) => x.id)
 }
 
 /**
