@@ -592,6 +592,9 @@ function wantedPacks(rows: Row[], season: number, packs: Store['packs'] = {}): R
     .slice(0, PER_FILM)
 }
 
+/** The tracker's category of Arabic-dubbed animated shows (beside the films' 98): a search in all of them gives a show's newest uploads, mostly subtitled. */
+const DUBBED_SHOWS = 100
+
 const showJobs = new Map<string, Promise<void>>()
 /** Brings a show's rows (its dubbed uploads, by name) and [season]'s packs up to date, in the background. */
 function refreshShow(tmdb: string, t: TmdbTitle, season: number): Promise<void> {
@@ -607,8 +610,8 @@ function refreshShow(tmdb: string, t: TmdbTitle, season: number): Promise<void> 
       if (stale(show)) {
         const rows = new Map<string, Row>()
         for (const q of names.slice(0, 2)) {
-          const html = await page(`index.php?page=torrents&search=${encodeURIComponent(q)}&category=0&active=0&internel=0&order=3&by=2`)
-          for (const r of searchRows(html)) if (r.dub && names.some((n) => ` ${norm(r.title)} `.includes(` ${norm(n)} `))) rows.set(r.id, r)
+          const html = await page(`index.php?page=torrents&search=${encodeURIComponent(q)}&category=${DUBBED_SHOWS}&active=0&internel=0&order=3&by=2`)
+          for (const r of searchRows(html)) if (names.some((n) => ` ${norm(r.title)} `.includes(` ${norm(n)} `))) rows.set(r.id, r)
         }
         show = shows[tmdb] = { at: Date.now(), ar, rows: [...rows.values()] }
         await save()
