@@ -69,6 +69,8 @@ export const routes: Record<string, Route> = {
 type Entry = { body: Blob; init: ResponseInit; fresh: number; stale: number }
 const cache = new Map<string, Entry>()
 const building = new Map<string, Promise<Entry>>()
+// Bumped by each invalidation, so a build already running for an invalidated URL doesn't keep its stale answer.
+let epoch = 0
 
 /** ?t= is PLAYLIST_TOKEN, or one of the comma-separated APP_TOKENS (two at once while rotating). */
 function gateOpen(gate: Route['gate'], url: URL): boolean {
@@ -95,7 +97,11 @@ async function answer(req: Request, route: Route): Promise<[Response, { fresh: n
   if (route.cache === 'etag') return [etagged(req, data as { body: string; etag?: string })]
   const res = data instanceof Response ? data : Response.json(data)
   if (!res.ok) return [res]
-  if (route.invalidates) for (const url of cache.keys()) if (route.invalidates(data, new URL(url))) cache.delete(url)
+  if (route.invalidates) {
+    for (const url of new Set([...cache.keys(), ...building.keys()])) {
+      if (route.invalidates(data, new URL(url))) (cache.delete(url), epoch++)
+    }
+  }
   const life = typeof route.cache === 'function' ? route.cache(data) : route.cache
   if (!life) return [res]
   const scope = route.gate === 'playlist' ? 'public' : 'private'
@@ -107,13 +113,14 @@ async function answer(req: Request, route: Route): Promise<[Response, { fresh: n
 function build(url: string, req: Request, route: Route): Promise<Entry> {
   const running = building.get(url)
   if (running) return running
+  const began = epoch
   const job = (async () => {
     const [res, life] = await answer(req, route)
     const now = Date.now()
     const fresh = now + (life?.fresh ?? 0) * 1000
     const entry = { body: await res.blob(), init: { status: res.status, headers: res.headers }, fresh, stale: fresh + (life?.stale ?? 0) * 1000 }
     for (const [k, e] of cache) if (e.stale <= now) cache.delete(k)
-    if (life) cache.set(url, entry)
+    if (life && began === epoch) cache.set(url, entry)
     return entry
   })().finally(() => building.delete(url))
   building.set(url, job)

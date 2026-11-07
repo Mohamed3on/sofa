@@ -303,7 +303,7 @@ export async function watchlist(req: Request) {
   if (!r || typeof r.title !== 'string' || !/^(?:movie|tv):\d+$/.test(r.title) || typeof r.on !== 'boolean') return new Response('Bad title', { status: 400 })
   const title = r.title
   const result = await trakt.setWatchlist(title, r.on)
-  if (result !== 'ok') return new Response(result === 'off' ? 'Trakt not connected' : 'Trakt failed', { status: result === 'off' ? 503 : 502 })
+  if (result !== 'ok') return traktRefused(result)
   const h = await loadHistory()
   // Its runtime too, so the row (shortest first) places it at once.
   const runtime = r.on ? (await tmdbTitle(title.startsWith('tv:') ? 'tv' : 'movie', title.split(':')[1]))?.runtime : 0
@@ -327,7 +327,7 @@ export async function mark(req: Request) {
   const show = m[1] === 'tv' && !m[4] && watched !== undefined ? await tmdbTitle('tv', m[2]) : null
   const covered = show ? (await tmdbEpisodes(m[2], show.seasons)).filter((e) => (m[3] ? e.season === +m[3] : e.season > 0)).map((e) => episodeTitle(`tv:${m[2]}`, e.season, e.episode)) : [title]
   const result = await trakt.mark(title, { watched: watched as boolean | undefined, rating: rating as number | null | undefined }, m[3] ? [] : show?.seasons)
-  if (result !== 'ok') return new Response(result === 'off' ? 'Trakt not connected' : 'Trakt failed', { status: result === 'off' ? 503 : 502 })
+  if (result !== 'ok') return traktRefused(result)
   const h = await loadHistory()
   if (h) await saveHistory(withMark(h, title, covered, watched as boolean | undefined, rating as number | null | undefined))
   return new Response(null, { status: 204 })
@@ -342,5 +342,8 @@ export async function traktHistory(req: Request) {
   }
   const result = await trakt.logPlay(r.title, r.at as number)
   if (result === 'ok') return new Response(null, { status: 204 })
-  return new Response(result === 'off' ? 'Trakt not connected' : 'Trakt failed', { status: result === 'off' ? 503 : 502 })
+  return traktRefused(result)
 }
+
+/** Trakt didn't take a change: 503 when it isn't connected, else 502. */
+const traktRefused = (result: string) => new Response(result === 'off' ? 'Trakt not connected' : 'Trakt failed', { status: result === 'off' ? 503 : 502 })

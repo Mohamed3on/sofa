@@ -261,7 +261,7 @@ private fun itemsOf(source: Source, feed: Feed, live: LiveNow?, typed: Boolean, 
         }
     }
     is GroupSource -> feed.channelsIn(source.name).map(::ChannelItem)
-    MoviesSource -> listOf(Note("Films and shows, best rated first, from IPTV and Real-Debrid", "Press OK to browse"))
+    MoviesSource -> listOf(Note("Films and shows, best rated first, from IPTV and Debrid", "Press OK to browse"))
     LiveSource -> live?.let {
         buildList {
             for (match in it.matches) addMatch(match)

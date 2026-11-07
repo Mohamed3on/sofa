@@ -182,9 +182,9 @@ class TitlesClient(
      * for them often), then fetched again so new episodes appear. [fresh] skips the kept copy (opening a show).
      */
     suspend fun episodes(seriesId: Int, fresh: Boolean = false): Result<ShowEpisodes> = withContext(Dispatchers.IO) {
-        showCache[seriesId]?.takeIf { !fresh && System.currentTimeMillis() - it.first < SHOW_KEEP_MS }?.let { return@withContext Result.success(it.second) }
+        showCache[seriesId]?.takeIf { !fresh && now() - it.first < SHOW_KEEP_MS }?.let { return@withContext Result.success(it.second) }
         get("episodes?id=$seriesId", ::parseEpisodes).onSuccess {
-            showCache[seriesId] = System.currentTimeMillis() to it
+            showCache[seriesId] = now() to it
             onEpisodes(it.episodes)
         }
     }
