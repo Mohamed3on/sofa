@@ -842,14 +842,16 @@ export async function fetchCuratedChannels(cfg: XtreamConfig, vod = true): Promi
     // is redundant, so it goes — HD stays only where nothing better exists. Judged on
     // EFFECTIVE height (probed where known), so a feed labelled "HEVC 4K" that really
     // runs 720p is the copy that goes, and an unlabelled feed probed at 1080p50 stays.
+    // Kids holds every language: "DE: CARTOON NETWORK" is not a copy of the UK one (US and UK are one).
+    const lang = (it: Item) => (isKids ? (it.c.name.match(FEED_PREFIX)?.[0] ?? '').replace(/^US/i, 'UK') : '')
     const bestRes = new Map<string, number>()
-    for (const it of items) bestRes.set(it.ck, Math.max(bestRes.get(it.ck) ?? 0, it.rh))
+    for (const it of items) bestRes.set(lang(it) + it.ck, Math.max(bestRes.get(lang(it) + it.ck) ?? 0, it.rh))
     const seen = new Map<string, number>()
     for (const it of items) {
-      if (it.rh < 1080 && (bestRes.get(it.ck) ?? 0) >= 1080) continue
+      if (it.rh < 1080 && (bestRes.get(lang(it) + it.ck) ?? 0) >= 1080) continue
       // Arabic bundles the same AD/StarzPlay channel at many quality tiers, so
       // collapse it tier-agnostically there; elsewhere keep tiers distinct.
-      const key = isArabic ? dedupeKey(it.c.name) : dedupeKey(it.c.name, it.q)
+      const key = lang(it) + (isArabic ? dedupeKey(it.c.name) : dedupeKey(it.c.name, it.q))
       const n = seen.get(key) ?? 0
       if (n >= 2) continue // keep best feed + one spare
       seen.set(key, n + 1)
