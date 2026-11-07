@@ -429,7 +429,9 @@ async function onTorBox(hashes: string[], s: Store): Promise<Set<string>> {
     // Kept on disk for the library build, which reads the file.
     if (held.size) await save()
   }
-  return new Set(hashes.filter((h) => tbSeen.get(h)?.held))
+  // One answer without a hash TorBox held in the last day doesn't drop it: its answers can leave one out, and the
+  // stick asks TorBox itself before playing.
+  return new Set(hashes.filter((h) => tbSeen.get(h)?.held || Date.now() - (s.tb?.[h] ?? 0) < DAY_MS))
 }
 
 // --- The dubbed films, crawled daily -----------------------------------------------------------------------
