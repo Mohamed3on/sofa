@@ -682,7 +682,7 @@ private fun Guide(channel: Channel, guide: GuideDb?, clock: State<Long>, describ
         if (describe && now.descr.isNotBlank()) ScrollText(now.descr, style = Type.prose, lines = 2, modifier = Modifier.widthIn(max = PROSE_WIDTH))
     }
     if (next != null && !next.synthetic) {
-        Text("Next · ${clockTime(next.start)} ${cleanTitle(next.title)}", style = Type.body, maxLines = 2)
+        Text("Next · ${clockTime(next.start)} ${if (next.match) fixtureOf(next.title) else cleanTitle(next.title)}", style = Type.body, maxLines = 2)
     }
 }
 
