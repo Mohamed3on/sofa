@@ -129,23 +129,23 @@ class NextEpisode(val show: Movie, val episode: TitleId, val label: String, val 
 /**
  * The owner's history from the box (U16): every film and episode Trakt and Letterboxd mark [watched] (merged with
  * the stick's own marks in [Marks]), the Watchlist row, and followed shows' next episodes, latest aired first;
- * the owner's rating per title out of 10 ([ratings]: Trakt's, else IMDb's, else Letterboxd's stars doubled) and the Watchlist
- * titles only Letterboxd's list holds ([letterboxd]: no write API), and when Trakt last saw a film or show watched ([seen]).
+ * the owner's rating per title out of 10 ([ratings]: Trakt's, else IMDb's, else Letterboxd's stars doubled), and when Trakt
+ * last saw a film or show watched ([seen]).
  */
-class History(val watched: Set<TitleId>, val watchlist: List<Movie>, val next: List<NextEpisode>, val ratings: Map<TitleId, Int> = emptyMap(), val letterboxd: Set<TitleId> = emptySet(), val seen: Map<TitleId, Seen> = emptyMap())
+class History(val watched: Set<TitleId>, val watchlist: List<Movie>, val next: List<NextEpisode>, val ratings: Map<TitleId, Int> = emptyMap(), val seen: Map<TitleId, Seen> = emptyMap())
 
 /** A title's last watch, epoch seconds ([at] 0: watched, the day unknown), and how many times a film was watched. */
 class Seen(val at: Long, val plays: Int)
 
 @Serializable
-private class HistoryJson(val watched: List<TitleId> = emptyList(), val watchlist: List<LibTitle> = emptyList(), val next: List<NextJson> = emptyList(), val ratings: Map<TitleId, Int> = emptyMap(), val lbw: List<TitleId> = emptyList(), val seen: Map<TitleId, List<Long>> = emptyMap())
+private class HistoryJson(val watched: List<TitleId> = emptyList(), val watchlist: List<LibTitle> = emptyList(), val next: List<NextJson> = emptyList(), val ratings: Map<TitleId, Int> = emptyMap(), val seen: Map<TitleId, List<Long>> = emptyMap())
 
 @Serializable
 private class NextJson(val t: LibTitle, val ep: TitleId, val c: String, val new: Int = 0, val air: String = "")
 
 fun parseHistory(text: String): History {
     val h = json.decodeFromString(HistoryJson.serializer(), text)
-    return History(h.watched.toHashSet(), h.watchlist.map { it.toMovie() }, h.next.map { NextEpisode(it.t.toMovie(), it.ep, it.c, it.new == 1, it.air) }, h.ratings, h.lbw.toHashSet(), h.seen.mapValues { (_, v) -> Seen(v.getOrElse(0) { 0 }, v.getOrElse(1) { 1 }.toInt()) })
+    return History(h.watched.toHashSet(), h.watchlist.map { it.toMovie() }, h.next.map { NextEpisode(it.t.toMovie(), it.ep, it.c, it.new == 1, it.air) }, h.ratings, h.seen.mapValues { (_, v) -> Seen(v.getOrElse(0) { 0 }, v.getOrElse(1) { 1 }.toInt()) })
 }
 
 /** A movie's name as shown: [title] without the provider's [badge] prefix ("EN", "HDR") and the [year] pulled out. */

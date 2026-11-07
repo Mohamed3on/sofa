@@ -1,42 +1,100 @@
-// Films to log on Letterboxd for the owner, kept until their browser has logged them.
+// What the TV asked to change on Letterboxd for the owner, kept until their browser has made the changes.
 // Letterboxd has no API for personal projects, and Cloudflare refuses every write that isn't a real browser's (plain
-// requests, headless Chrome and an Android WebView alike, 2026-11-07), so the box only keeps the queue: the stick's marks
-// and finished plays fold in here, and the TrueScore extension in the owner's Chrome takes it (/api/letterboxd/logs),
-// logs each film on letterboxd.com and says which it logged. One entry per film, the latest marks folded in.
+// requests, headless Chrome and an Android WebView alike, 2026-11-07), so the box only keeps the queue: the stick's marks,
+// ratings, finished films and watchlist removals fold in here, and the TrueScore extension in the owner's Chrome takes it
+// (/api/letterboxd/logs), makes each change on letterboxd.com and says which it made. One entry per film, the latest
+// asks folded in. The box also keeps which diary entries the app made, so marking a film unwatched deletes those only.
 import { fileURLToPath } from 'node:url'
 import { jsonFile } from './fs.js'
 
-/** A film to log: TMDB's [tmdb] id, when it was watched (or marked) [at] (epoch ms; the browser dates it in its own zone), the owner's [rating] out of 10. */
-export interface LetterboxdLog { tmdb: number; at: number; rating?: number }
-
-const store = jsonFile<LetterboxdLog[]>(
-  () => process.env.LETTERBOXD_LOG_FILE ?? fileURLToPath(new URL('../.cache/letterboxd-log.json', import.meta.url)),
-  () => [],
-)
-
-/**
- * Folds a mark or a finished play of [title] in: watched (on [at]) or rated, the film waits to be logged, keeping a
- * rating given before; a rating cleared goes; marked unwatched before it went out, it doesn't go. Anything but a film
- * (movie:N) is left out: Letterboxd logs films.
- */
-export async function noteMark(title: string, { watched, rating, at = Date.now() }: { watched?: boolean; rating?: number | null; at?: number }): Promise<void> {
-  const tmdb = Number(title.match(/^movie:(\d+)$/)?.[1])
-  if (!tmdb) return
-  const all = store.read(true)
-  const held = all.find((l) => l.tmdb === tmdb)
-  const rest = all.filter((l) => l.tmdb !== tmdb)
-  const stars = rating === undefined ? held?.rating : rating ?? undefined
-  if (watched === false || (!watched && !held && !stars)) return held ? store.write(rest) : undefined
-  await store.write([...rest, { tmdb, at: watched ? at : held?.at ?? at, ...(stars && { rating: stars }) }])
+/** What one film should come to on Letterboxd, each part only when the TV asked for it. */
+export interface LetterboxdLog {
+  /** TMDB's id of the film. */
+  tmdb: number
+  /** When the latest change was asked (epoch ms): a new diary entry's date, in the browser's own day. */
+  at: number
+  /** A diary entry to add, dated [at], with the [rating] when one is set. */
+  log?: true
+  /** The film's rating to set, out of 10 (Letterboxd's half stars), or null to clear it. */
+  rating?: number | null
+  /** The diary entries the app made for the film (Letterboxd ids) to delete: it was marked unwatched. */
+  unlog?: string[]
+  /** Onto the Letterboxd watchlist or off it. */
+  watchlist?: boolean
 }
 
-/** The films waiting to be logged, oldest first. */
-export const pendingLogs = (): LetterboxdLog[] => store.read(true).slice().sort((a, b) => a.at - b.at)
+/** A change the browser made: the log as it was sent, and the Letterboxd id of the diary entry it added, if any. */
+export type Done = LetterboxdLog & { made?: string }
 
-/** Takes out the [done] logs the browser sent; an entry whose marks changed since (a new [at] or rating) stays. */
-export async function logged(done: LetterboxdLog[]): Promise<void> {
-  const sent = new Set(done.map((l) => `${l.tmdb}:${l.at}:${l.rating ?? ''}`))
-  const all = store.read(true)
-  const left = all.filter((l) => !sent.has(`${l.tmdb}:${l.at}:${l.rating ?? ''}`))
-  if (left.length !== all.length) await store.write(left)
+interface Store {
+  pending: LetterboxdLog[]
+  /** The diary entries the app made, by TMDB id. */
+  made: Record<string, string[]>
+}
+
+const store = jsonFile<Store | LetterboxdLog[]>(
+  () => process.env.LETTERBOXD_LOG_FILE ?? fileURLToPath(new URL('../.cache/letterboxd-log.json', import.meta.url)),
+  () => ({ pending: [], made: {} }),
+)
+// The first queue was a bare list of logs.
+const read = (): Store => { const s = store.read(true); return Array.isArray(s) ? { pending: s.map((l) => ({ ...l, log: true as const })), made: {} } : s }
+
+const isEmpty = (l: LetterboxdLog) => !l.log && l.rating === undefined && !l.unlog?.length && l.watchlist === undefined
+
+function put(s: Store, tmdb: number, next: LetterboxdLog | null) {
+  const rest = s.pending.filter((l) => l.tmdb !== tmdb)
+  return store.write({ ...s, pending: next && !isEmpty(next) ? [...rest, next] : rest })
+}
+
+/**
+ * Folds a change the TV made to [title] in. Watched (on [at]): a diary entry, unless the app's earlier ones were about
+ * to be deleted, which then stay. Unwatched: an entry not yet added never is, and the ones the app made are deleted.
+ * A rating set or cleared and a watchlist change go as asked. Anything but a film (movie:N) is left out.
+ */
+export async function noteMark(title: string, change: { watched?: boolean; rating?: number | null; watchlist?: boolean; at?: number }): Promise<void> {
+  const tmdb = Number(title.match(/^movie:(\d+)$/)?.[1])
+  if (!tmdb) return
+  const s = read()
+  const next: LetterboxdLog = { ...(s.pending.find((l) => l.tmdb === tmdb) ?? { tmdb, at: 0 }) }
+  const at = change.at ?? Date.now()
+  if (change.watched === true) {
+    if (next.unlog) delete next.unlog
+    else Object.assign(next, { log: true, at })
+  } else if (change.watched === false) {
+    delete next.log
+    const made = s.made[tmdb] ?? []
+    if (made.length) next.unlog = made
+  }
+  if (change.rating !== undefined) next.rating = change.rating
+  if (change.watchlist !== undefined) next.watchlist = change.watchlist
+  if (!next.at) next.at = at
+  await put(s, tmdb, next)
+}
+
+/** The changes waiting for the browser, oldest first. */
+export const pendingLogs = (): LetterboxdLog[] => read().pending.slice().sort((a, b) => a.at - b.at)
+
+/**
+ * Takes out what the browser [done]: each part it made leaves its film's entry (a part asked again since, differently,
+ * stays), the diary entries it added join the app's own, and the ones it deleted leave them.
+ */
+export async function logged(done: Done[]): Promise<void> {
+  const s = read()
+  const made = { ...s.made }
+  let pending = s.pending
+  for (const d of done) {
+    if (d.made) made[d.tmdb] = [...(made[d.tmdb] ?? []), d.made]
+    if (d.unlog) made[d.tmdb] = (made[d.tmdb] ?? []).filter((id) => !d.unlog!.includes(id))
+    if (!made[d.tmdb]?.length) delete made[d.tmdb]
+    pending = pending.flatMap((l) => {
+      if (l.tmdb !== d.tmdb) return [l]
+      const left: LetterboxdLog = { ...l }
+      if (d.log && l.log && l.at === d.at) delete left.log
+      if (d.rating !== undefined && l.rating === d.rating) delete left.rating
+      if (d.unlog && l.unlog) left.unlog = l.unlog.filter((id) => !d.unlog!.includes(id))
+      if (d.watchlist !== undefined && l.watchlist === d.watchlist) delete left.watchlist
+      return isEmpty(left) ? [] : [left]
+    })
+  }
+  await store.write({ pending, made })
 }

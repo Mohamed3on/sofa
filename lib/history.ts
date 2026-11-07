@@ -8,6 +8,7 @@
 // (merged on the stick); the stick's finished plays, marks and ratings go to Trakt through the box (trakt.ts).
 // A source that fails keeps what it gave last and says so in `src`.
 import { readFile } from 'node:fs/promises'
+import { pendingLogs } from './letterboxd-log.js'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { writeAtomic } from './fs.js'
@@ -270,8 +271,14 @@ export async function nextEpisodes(follow: Map<string, Followed>, episodes: (sho
 const FOLLOW_CAP = 30
 /** Titles the Watchlist can show, which the nightly build scores whatever the library rows hold. */
 export const historyTitles = (h: Kept | null) => watchlistOf(h).slice(0, ROW_CAP * 2)
+/** The Letterboxd watchlist, less the films taken off it on the TV that the owner's browser hasn't taken off Letterboxd yet. */
+const lbwOf = (h: Kept | null) => {
+  const leaving = new Set(pendingLogs().filter((l) => l.watchlist === false).map((l) => `movie:${l.tmdb}`))
+  return (h?.lbw ?? []).filter((id) => !leaving.has(id))
+}
+
 /** The Watchlist: Trakt's, then Letterboxd's. */
-export const watchlistOf = (h: Kept | null) => [...new Set([...(h?.watchlist ?? []), ...(h?.lbw ?? [])])]
+export const watchlistOf = (h: Kept | null) => [...new Set([...(h?.watchlist ?? []), ...lbwOf(h)])]
 
 /** The owner's rating of each title out of 10: Trakt's, else IMDb's, else Letterboxd's stars doubled; Trakt's latest first. */
 export function yours(h: Kept | null): Map<string, number> {
@@ -348,8 +355,6 @@ export async function historyAnswer(h: Kept | null, local: string[], k: Known) {
     src: { trakt: h?.trakt ?? 'off', letterboxd: h?.letterboxd ?? 'off' },
     watched: [...watchedOf(h)],
     watchlist,
-    // On the Watchlist only through Letterboxd, which has no write API: the stick can't take them off.
-    lbw: (h?.lbw ?? []).filter((id) => !h?.watchlist.includes(id)),
     // The owner's rating per title, out of 10 (see [yours]).
     ratings: Object.fromEntries(yours(h)),
     // When each title was last watched and how often, where Trakt knows: [epoch seconds (0: watched, day unknown), plays].

@@ -37,7 +37,7 @@ import { watchStore } from '../lib/ratings.js'
 import { episodeTitle, parseTitleId, tmdbEpisodes, tmdbFacts, tmdbGet, tmdbTitle } from '../lib/tmdb.js'
 import * as trakt from '../lib/trakt.js'
 import { blurayMovies, filmTitleOf, searchVod } from '../lib/vod.js'
-import { logged, noteMark, pendingLogs, type LetterboxdLog } from '../lib/letterboxd-log.js'
+import { logged, noteMark, pendingLogs, type Done } from '../lib/letterboxd-log.js'
 
 export async function channels() {
   const cfg = configFromEnv()
@@ -309,6 +309,8 @@ export async function watchlist(req: Request) {
   // Its runtime too, so the row (shortest first) places it at once.
   const runtime = r.on ? (await tmdbTitle(title.startsWith('tv:') ? 'tv' : 'movie', title.split(':')[1]))?.runtime : 0
   if (h) await saveHistory({ ...h, watchlist: [...(r.on ? [title] : []), ...h.watchlist.filter((t) => t !== title)], ...(runtime && { runtimes: { ...h.runtimes, [title]: runtime } }) })
+  // Off the Letterboxd watchlist too, by the owner's browser (lib/letterboxd-log.ts); the row leaves it out meanwhile.
+  if (!r.on && h?.lbw?.includes(title)) await noteMark(title, { watchlist: false })
   return new Response(null, { status: 204 })
 }
 
@@ -350,11 +352,15 @@ export async function traktHistory(req: Request) {
 
 // GET /api/letterboxd/logs?t=TOKEN — the films waiting to be logged on Letterboxd, oldest first, and whose account they're
 // for (LETTERBOXD_USER; the browser logs only while that account is signed in): { user, logs: [{ tmdb, at, rating? }] }.
-// POST the same with { done: [those logs] } once the browser has logged them: 204; a log whose marks changed since stays.
+// POST the same with { done: [those logs, each with made: the Letterboxd id of a diary entry it added] } once the browser
+// has made them: 204; a part asked again since, differently, stays.
 export async function letterboxdLogs(req: Request) {
   if (req.method === 'GET') return Response.json({ user: process.env.LETTERBOXD_USER ?? null, logs: process.env.LETTERBOXD_USER ? pendingLogs() : [] })
   const r = (await req.json().catch(() => null)) as { done?: unknown } | null
-  const done = Array.isArray(r?.done) ? r.done.filter((l): l is LetterboxdLog => Number.isSafeInteger(l?.tmdb) && Number.isSafeInteger(l?.at) && (l.rating === undefined || Number.isInteger(l.rating))) : null
+  const id = (x: unknown) => typeof x === 'string' && /^\w{1,16}$/.test(x)
+  const done = Array.isArray(r?.done) ? r.done.filter((l): l is Done => Number.isSafeInteger(l?.tmdb) && Number.isSafeInteger(l?.at) && (l.log === undefined || l.log === true)
+    && (l.rating === undefined || l.rating === null || Number.isInteger(l.rating)) && (l.unlog === undefined || (Array.isArray(l.unlog) && l.unlog.every(id)))
+    && (l.watchlist === undefined || typeof l.watchlist === 'boolean') && (l.made === undefined || id(l.made))) : null
   if (!done) return new Response('Bad logs', { status: 400 })
   await logged(done)
   return new Response(null, { status: 204 })
