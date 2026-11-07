@@ -50,22 +50,11 @@ private fun audioState(tracks: Tracks): AudioState {
         // "Supported" counts a decoder that exists but doubts the parameters: only a missing decoder hides a track.
         (0 until group.length).filter { group.isTrackSupported(it, true) }.map { i ->
             val format = group.getTrackFormat(i)
-            AudioOption(format.language, codecName(format.sampleMimeType), format.channelCount, group.mediaTrackGroup, i)
+            AudioOption(format.language, chipName(format.sampleMimeType), format.channelCount, group.mediaTrackGroup, i)
                 .also { if (group.isTrackSelected(i)) selected = it }
         }
     }
     return AudioState(options, selected)
-}
-
-private fun codecName(mime: String?) = when (mime) {
-    MimeTypes.AUDIO_AAC -> "AAC"
-    MimeTypes.AUDIO_AC3 -> "AC3"
-    MimeTypes.AUDIO_E_AC3, MimeTypes.AUDIO_E_AC3_JOC -> "E-AC3"
-    MimeTypes.AUDIO_MPEG -> "MP3"
-    MimeTypes.AUDIO_MPEG_L2 -> "MP2"
-    MimeTypes.AUDIO_TRUEHD -> "TrueHD"
-    MimeTypes.AUDIO_DTS, MimeTypes.AUDIO_DTS_HD -> "DTS"
-    else -> mime?.substringAfter('/')?.uppercase() ?: "?"
 }
 
 /** One subtitle track: [language] as an ISO 639-1 code where known, [label] the file's own name for it. */
@@ -126,7 +115,7 @@ fun qualityLabels(video: Format?, audio: Format?): List<String> {
             video.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION -> dolbyVisionProfile(video)?.let { "Dolby Vision $it" } ?: "Dolby Vision"
             video.colorInfo?.colorTransfer == C.COLOR_TRANSFER_ST2084 -> "HDR10"
             video.colorInfo?.colorTransfer == C.COLOR_TRANSFER_HLG -> "HLG"
-            else -> videoCodec(video.sampleMimeType)
+            else -> chipName(video.sampleMimeType)
         }
     }
     if (audio != null) {
@@ -137,17 +126,9 @@ fun qualityLabels(video: Format?, audio: Format?): List<String> {
             8 -> "7.1"
             else -> null
         }
-        parts += listOfNotNull(codecName(audio.sampleMimeType), layout, "Atmos".takeIf { audio.sampleMimeType == MimeTypes.AUDIO_E_AC3_JOC || audio.sampleMimeType == MimeTypes.AUDIO_TRUEHD }).joinToString(" ")
+        parts += listOfNotNull(chipName(audio.sampleMimeType), layout, "Atmos".takeIf { audio.sampleMimeType == MimeTypes.AUDIO_E_AC3_JOC || audio.sampleMimeType == MimeTypes.AUDIO_TRUEHD }).joinToString(" ")
     }
     return parts.filter(String::isNotEmpty)
-}
-
-private fun videoCodec(mime: String?) = when (mime) {
-    MimeTypes.VIDEO_H265 -> "HEVC"
-    MimeTypes.VIDEO_H264 -> "H.264"
-    MimeTypes.VIDEO_AV1 -> "AV1"
-    MimeTypes.VIDEO_VP9 -> "VP9"
-    else -> mime?.substringAfter('/')?.uppercase() ?: "?"
 }
 
 /** A Dolby Vision stream's profile from its codecs string ("dvhe.05.06" → 5, "dvhe.08.06" → 8); null when unknown. */

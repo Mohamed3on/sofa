@@ -9,6 +9,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.video.VideoFrameMetadataListener
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -56,12 +57,13 @@ private fun snapFps(fps: Float): Float? =
  * zap burst), the window asks for the display mode matching the stream's frame rate, e.g. 50Hz
  * for European sports. The TS streams don't declare a frame rate, so it's measured from the
  * frames as they render. Media3 already passes its own estimate to `Surface.setFrameRate`, the
- * secondary hint. The preference is dropped when playback stops and on [detach].
+ * secondary hint. While the picture is [Playback.Waiting] the mode stays; the preference is dropped
+ * when playback is [Playback.Stopped] and on [detach].
  */
 class FrameRate(
     private val window: Window,
     private val exo: ExoPlayer,
-    session: StateFlow<SessionState>,
+    playback: Flow<Playback>,
     scope: CoroutineScope,
 ) {
     /** Presentation times of the current feed's frames; written on the playback thread. */
@@ -87,10 +89,10 @@ class FrameRate(
     }
 
     private val job = scope.launch {
-        session.collectLatest { state ->
-            if (state.phase != Phase.Playing) {
+        playback.collectLatest { state ->
+            if (state != Playback.Playing) {
                 reset()
-                if (state.phase == Phase.Stopped) prefer(0)
+                if (state == Playback.Stopped) prefer(0)
                 return@collectLatest
             }
             delay(SETTLE_MS)

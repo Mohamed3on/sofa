@@ -64,9 +64,10 @@ import com.mohamed3on.iptv.player.StreamPhase
 import com.mohamed3on.iptv.data.ChannelIdentity
 import com.mohamed3on.iptv.data.RouteKind
 import androidx.media3.common.Player
-import androidx.media3.common.VideoSize
+import kotlinx.coroutines.flow.map
 import com.mohamed3on.iptv.player.AudioTracks
-import com.mohamed3on.iptv.player.FrameRate
+import com.mohamed3on.iptv.player.Playback
+import com.mohamed3on.iptv.player.PlaybackSurface
 import com.mohamed3on.iptv.player.LiveQuality
 import com.mohamed3on.iptv.player.liveQuality
 import kotlinx.coroutines.flow.combine
@@ -97,14 +98,13 @@ import kotlin.time.Duration.Companion.minutes
 class MainActivity : ComponentActivity() {
     private val surface by lazy { SurfaceView(this).apply { keepScreenOn = true } }
     private val session = MutableStateFlow<StreamSession?>(null)
-    private val audio = MutableStateFlow<AudioTracks?>(null)
+    /** The main player's playback surface: its audio tracks and picture shape. */
+    private val playback = MutableStateFlow<PlaybackSurface?>(null)
     private val idle = MutableStateFlow<IdleWatch?>(null)
     /** The playing feed's measured quality (feed id to reading), for the banner's live badges. */
     private val live = MutableStateFlow<Pair<Int, LiveQuality>?>(null)
     /** How the main player's stream is doing (health dot, info view); null when there is nothing to say. */
     private val health = MutableStateFlow<Health?>(null)
-    /** The main player's picture shape (width / height, pixel aspect included); 0 until known. */
-    private val aspect = MutableStateFlow(0f)
     private val telemetry get() = graph.telemetry
     /** Past the first start: onCreate already asked for the last screen. */
     private var restarted = false
@@ -120,15 +120,15 @@ class MainActivity : ComponentActivity() {
         setContent {
             val state by sync.state.collectAsState()
             val playing by session.collectAsState()
-            val tracks by audio.collectAsState()
+            val shown by playback.collectAsState()
+            val shape = shown?.aspect?.collectAsState()?.value ?: 0f
             val idleWatch by idle.collectAsState()
             val idleState = idleWatch?.state?.collectAsState()?.value
             val liveQuality by live.collectAsState()
             val streamHealth by health.collectAsState()
-            val shape by aspect.collectAsState()
             IptvTheme(reducedMotion = Motion.reducedMotion(this)) {
                 CompositionLocalProvider(LocalIdleWatch provides idleWatch) {
-                    Root(state, playing, tracks, surface, shape, tiles, liveQuality, streamHealth, idleState, onRetry = { graph.scope.launch { sync.retry() } })
+                    Root(state, playing, shown?.audio, surface, shape, tiles, liveQuality, streamHealth, idleState, onRetry = { graph.scope.launch { sync.retry() } })
                 }
             }
         }
@@ -149,20 +149,21 @@ class MainActivity : ComponentActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 val player = pool.acquire()
                 player.exo.setVideoSurfaceView(surface)
-                val sizes = object : Player.Listener {
-                    override fun onVideoSizeChanged(videoSize: VideoSize) {
-                        if (videoSize.width > 0 && videoSize.height > 0) aspect.value = videoSize.width * videoSize.pixelWidthHeightRatio / videoSize.height
+                val s = StreamSession(player, graph.route, this, SystemClock::elapsedRealtime)
+                // A zap, a reconnect or a problem keeps the display's mode; only a stopped session gives it back.
+                val signal = s.state.map {
+                    when (it.phase) {
+                        Phase.Playing -> Playback.Playing
+                        Phase.Stopped -> Playback.Stopped
+                        else -> Playback.Waiting
                     }
                 }
-                player.exo.addListener(sizes)
-                val s = StreamSession(player, graph.route, this, SystemClock::elapsedRealtime)
-                val frameRate = FrameRate(window, player.exo, s.state, this)
-                val tracks = AudioTracks(player.exo)
+                val shown = PlaybackSurface(player.exo, window, signal, this)
                 // What the stream really is, once its frame rate is measured: the banner shows it, and
                 // the server keeps it in the quality cache. The session log records tunes, stalls and problems.
                 val reporting = telemetry.observe(s, graph.route)
                 launch {
-                    combine(frameRate.measured, s.state) { fps, st -> fps to st }.collect { (fps, st) ->
+                    combine(shown.fps, s.state) { fps, st -> fps to st }.collect { (fps, st) ->
                         val playing = st.feed?.takeIf { st.phase == Phase.Playing }
                         val q = playing?.let { liveQuality(player.exo, fps) }
                         live.value = if (playing != null && q != null && fps != null) playing.id to q else null
@@ -189,17 +190,15 @@ class MainActivity : ComponentActivity() {
                 if (restarted) Check.request(graph.prefs.get(Check.LAST_SCREEN))
                 restarted = true
                 session.value = s
-                audio.value = tracks
+                playback.value = shown
                 try {
                     awaitCancellation()
                 } finally {
-                    player.exo.removeListener(sizes)
                     tiles.close()
                     session.value = null
-                    audio.value = null
-                    tracks.release()
+                    playback.value = null
+                    shown.release()
                     idle.value = null
-                    frameRate.detach()
                     reporting.cancel()
                     live.value = null
                     health.value = null

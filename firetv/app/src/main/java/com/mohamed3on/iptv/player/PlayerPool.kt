@@ -195,9 +195,8 @@ class ExoStreamPlayer internal constructor(
     }
 }
 
-/** Counts the bytes a player's streams deliver (on the loader thread). */
-internal class ByteCounter : TransferListener {
-    val total = AtomicLong()
+/** Counts the bytes a player's streams deliver into [total] (on the loader thread): a live player's and a film's. */
+internal open class ByteCounter(val total: AtomicLong = AtomicLong()) : TransferListener {
     override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
     override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
     override fun onBytesTransferred(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean, bytesTransferred: Int) {

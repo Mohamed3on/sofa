@@ -36,12 +36,7 @@ data class LiveQuality(val width: Int, val height: Int, val fps: Float?, val cod
 fun liveQuality(exo: ExoPlayer, fps: Float?): LiveQuality? {
     val v = exo.videoFormat?.takeIf { it.width > 0 && it.height > 0 } ?: return null
     // Named as ffprobe names them, so app readings and probe readings compare in the cache.
-    val codec = when (v.sampleMimeType) {
-        MimeTypes.VIDEO_H264 -> "h264"
-        MimeTypes.VIDEO_H265 -> "hevc"
-        MimeTypes.VIDEO_MPEG2 -> "mpeg2video"
-        else -> v.sampleMimeType?.substringAfter('/') ?: "unknown"
-    }
+    val codec = probeName(v.sampleMimeType) ?: v.sampleMimeType?.substringAfter('/') ?: "unknown"
     val audio = exo.audioFormat
     return LiveQuality(v.width, v.height, fps, codec, audio?.sampleMimeType == MimeTypes.AUDIO_E_AC3_JOC, (audio?.channelCount ?: 0) >= 6)
 }

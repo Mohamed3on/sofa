@@ -48,7 +48,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,14 +77,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.media3.common.Player
-import androidx.media3.common.VideoSize
 import androidx.tv.material3.Text
 import com.mohamed3on.iptv.data.Movie
 import com.mohamed3on.iptv.graph
 import com.mohamed3on.iptv.player.AudioState
-import com.mohamed3on.iptv.player.FrameRate
-import com.mohamed3on.iptv.player.Phase
-import com.mohamed3on.iptv.player.SessionState
 import com.mohamed3on.iptv.ui.theme.ActionButton
 import com.mohamed3on.iptv.ui.theme.ActivityLine
 import com.mohamed3on.iptv.ui.theme.Badges
@@ -120,7 +115,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import com.mohamed3on.iptv.system.Check
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import android.view.KeyEvent as AndroidKeyEvent
 
@@ -164,11 +158,11 @@ internal fun MoviePlayback(
     val scope = rememberCoroutineScope()
     val close by rememberUpdatedState(onClose)
     val ended by rememberUpdatedState(onEnded)
-    val opened = remember { openFilmPlay(context, graph, of, from, fallback, iptvUrl, scope, { ended() }, { close() }) }
+    val opened = remember { openFilmPlay(context, window, graph, of, from, fallback, iptvUrl, scope, { ended() }, { close() }) }
     val exo = opened.exo
     val play = opened.play
     val session = play.session
-    val audio = opened.audio
+    val audio = opened.surface.audio
     val subtitles = opened.subtitles
     val fetched = opened.fetched
     val ui = remember { MovieState() }
@@ -176,16 +170,13 @@ internal fun MoviePlayback(
     val error by remember { session.state.map { it.phase == FilmPhase.Unavailable }.distinctUntilChanged() }.collectAsState(false)
     var cues by remember { mutableStateOf<List<Cue>>(emptyList()) }
     // The picture keeps its own shape (a 2.39:1 film letterboxed), never stretched to the screen; 0 until known.
-    var aspect by remember { mutableFloatStateOf(0f) }
+    val aspect by opened.surface.aspect.collectAsState()
     val focus = remember { FocusRequester() }
 
     DisposableEffect(Unit) {
-        // FrameRate follows a session's phase; a movie is "playing" from its first frame to the end.
-        val phase = MutableStateFlow(SessionState())
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 ui.playing = isPlaying
-                if (isPlaying && phase.value.phase != Phase.Playing) phase.value = SessionState(phase = Phase.Playing)
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -196,19 +187,13 @@ internal fun MoviePlayback(
                 ui.buffering = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
             }
 
-            override fun onVideoSizeChanged(videoSize: VideoSize) {
-                if (videoSize.width > 0 && videoSize.height > 0) aspect = videoSize.width * videoSize.pixelWidthHeightRatio / videoSize.height
-            }
-
             override fun onCues(cueGroup: CueGroup) {
                 cues = cueGroup.cues
             }
         }
         exo.addListener(listener)
-        val frameRate = window?.let { FrameRate(it, exo, phase, scope) }
         opened.start()
         onDispose {
-            frameRate?.detach()
             exo.removeListener(listener)
             play.close()
         }

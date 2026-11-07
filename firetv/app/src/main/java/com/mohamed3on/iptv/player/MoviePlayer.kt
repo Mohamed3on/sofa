@@ -15,7 +15,6 @@ import androidx.media3.common.util.Util
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.HttpDataSource
-import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -148,7 +147,7 @@ class ExoFilmPlayer(private val exo: ExoPlayer) : FilmPlayer {
             val asked = wanted?.let(Util::normalizeLanguageCode)
             val inLanguage = audio.filter { asked != null && it.getTrackFormat(0).language?.let(Util::normalizeLanguageCode) == asked }
             when {
-                audio.none(::plays) -> listener?.onError(StreamFailure.NoAudio(audio.mapNotNull { AUDIO_NAMES[it.getTrackFormat(0).sampleMimeType] }.toSet()))
+                audio.none(::plays) -> listener?.onError(StreamFailure.NoAudio(audio.mapNotNull { probeName(it.getTrackFormat(0).sampleMimeType) }.toSet()))
                 inLanguage.isNotEmpty() && inLanguage.none(::plays) -> listener?.onError(StreamFailure.Unsupported)
                 // The session acts on it only for a language chosen for the title.
                 asked != null && inLanguage.isEmpty() && audio.all { it.getTrackFormat(0).language.let { l -> l != null && l != C.LANGUAGE_UNDETERMINED } } ->
@@ -227,7 +226,7 @@ class FilmLoad {
 }
 
 /** Counts a film's bytes, and reads its total size off its HTTP responses: Content-Range's total, or a whole-file Content-Length. */
-private class FileSize(private val bytes: AtomicLong, private val onSize: (Long) -> Unit) : TransferListener {
+private class FileSize(bytes: AtomicLong, private val onSize: (Long) -> Unit) : ByteCounter(bytes) {
     override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {
         val headers = (source as? HttpDataSource)?.responseHeaders ?: return
         fun header(name: String) = headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value?.firstOrNull()
@@ -235,11 +234,6 @@ private class FileSize(private val bytes: AtomicLong, private val onSize: (Long)
             ?: header("Content-Length")?.toLongOrNull()?.takeIf { dataSpec.position == 0L }
         if (total != null && total > 0) onSize(total)
     }
-    override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
-    override fun onBytesTransferred(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean, bytesTransferred: Int) {
-        bytes.addAndGet(bytesTransferred.toLong())
-    }
-    override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
 }
 
 /**
@@ -249,14 +243,7 @@ private class FileSize(private val bytes: AtomicLong, private val onSize: (Long)
 fun filmReading(exo: ExoPlayer, fileBytes: Long): Map<String, Any>? {
     val v = exo.videoFormat?.takeIf { it.width > 0 && it.height > 0 } ?: return null
     val dolbyVision = v.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION || v.codecs?.startsWith("dvh") == true
-    val codec = when (v.sampleMimeType) {
-        MimeTypes.VIDEO_H264 -> "h264"
-        MimeTypes.VIDEO_H265, MimeTypes.VIDEO_DOLBY_VISION -> "hevc"
-        MimeTypes.VIDEO_AV1 -> "av1"
-        MimeTypes.VIDEO_VP9 -> "vp9"
-        MimeTypes.VIDEO_MPEG2 -> "mpeg2video"
-        else -> v.sampleMimeType?.substringAfter('/')?.filter { it.isLetterOrDigit() }?.take(24) ?: return null
-    }
+    val codec = probeName(v.sampleMimeType) ?: v.sampleMimeType?.substringAfter('/')?.filter { it.isLetterOrDigit() }?.take(24) ?: return null
     val hdr = when {
         dolbyVision -> "Dolby Vision"
         v.colorInfo?.colorTransfer == C.COLOR_TRANSFER_ST2084 -> "HDR10"
@@ -264,15 +251,7 @@ fun filmReading(exo: ExoPlayer, fileBytes: Long): Map<String, Any>? {
         else -> ""
     }
     val a = exo.audioFormat
-    val audio = when (a?.sampleMimeType) {
-        MimeTypes.AUDIO_E_AC3, MimeTypes.AUDIO_E_AC3_JOC -> "eac3"
-        MimeTypes.AUDIO_AC3 -> "ac3"
-        MimeTypes.AUDIO_AAC -> "aac"
-        MimeTypes.AUDIO_TRUEHD -> "truehd"
-        MimeTypes.AUDIO_DTS, MimeTypes.AUDIO_DTS_HD -> "dts"
-        MimeTypes.AUDIO_OPUS -> "opus"
-        else -> null
-    }
+    val audio = probeName(a?.sampleMimeType)
     val secs = exo.duration.takeIf { it > 0 }?.div(1000.0)
     val kbps = if (secs != null && fileBytes > 0) (fileBytes * 8 / secs / 1000).toInt() else null
     return buildMap {
@@ -295,11 +274,6 @@ private const val REBUFFER_MS = 5_000
 /** Margins under the caps, beyond the loader's 1 MB top-ups, where it counts as filling. */
 private const val TOP_UP_BYTES = 8 * 1024 * 1024
 private const val TOP_UP_MS = 5_000
-/** Audio formats the stick can only pass through, by MIME type, as the ranker names them. */
-private val AUDIO_NAMES = mapOf(
-    MimeTypes.AUDIO_TRUEHD to "truehd", MimeTypes.AUDIO_DTS to "dts", MimeTypes.AUDIO_DTS_HD to "dtshd",
-    MimeTypes.AUDIO_DTS_EXPRESS to "dtshd", MimeTypes.AUDIO_DTS_X to "dtsx",
-)
 
 /** A commentary track: flagged so by its container, or named so. */
 private fun isCommentary(f: Format) = f.roleFlags and C.ROLE_FLAG_COMMENTARY != 0 || f.label?.contains("comment", ignoreCase = true) == true

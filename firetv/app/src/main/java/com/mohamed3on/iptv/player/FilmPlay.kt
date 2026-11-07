@@ -2,6 +2,7 @@ package com.mohamed3on.iptv.player
 
 import android.content.Context
 import android.util.Log
+import android.view.Window
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -176,17 +177,17 @@ class FilmPlay(
 }
 
 /** A play on the stick's ExoPlayer: [play] and the decoder-bound parts the player screen draws. */
-class ExoFilmPlay(val exo: ExoPlayer, val play: FilmPlay, val plan: CopyPlan, val audio: AudioTracks, val subtitles: SubtitleTracks, val fetched: SubtitleFetch, private val begin: () -> Unit) {
+class ExoFilmPlay(val exo: ExoPlayer, val play: FilmPlay, val plan: CopyPlan, val surface: PlaybackSurface, val subtitles: SubtitleTracks, val fetched: SubtitleFetch, private val begin: () -> Unit) {
     /** Starts the play, once the screen listens. */
     fun start() = begin()
 }
 
 /**
- * Opens [of] on a new ExoPlayer: its session over the copies, OpenSubtitles when a copy has no English (R30), the bandwidth
+ * Opens [of] on a new ExoPlayer, shown through [window]'s display: its session over the copies, OpenSubtitles when a copy has no English (R30), the bandwidth
  * meter its loading teaches (KTD8), and a film's quality reading for the box. [ExoFilmPlay.start] plays it from [from]; [FilmPlay.close] lets it all go.
  */
 fun openFilmPlay(
-    context: Context, graph: AppGraph, of: PlayOf, from: Long, fallback: Copy?, iptvUrl: (Copy) -> String,
+    context: Context, window: Window?, graph: AppGraph, of: PlayOf, from: Long, fallback: Copy?, iptvUrl: (Copy) -> String,
     scope: CoroutineScope, onEnded: () -> Unit, onClose: () -> Unit,
 ): ExoFilmPlay {
     val title = of.id
@@ -203,7 +204,15 @@ fun openFilmPlay(
     val fetched = SubtitleFetch(exo, graph.http, graph.sync, scope, { plan.state.value.answer?.copies?.originalLanguage }) {
         session.inform(Notice.Subtitles(it.lang))
     }
-    val audio = AudioTracks(exo)
+    // The display follows the copy playing: it keeps its mode while the next copy opens, and goes back once the play ends.
+    val playback = session.state.map {
+        when (it.phase) {
+            FilmPhase.Playing -> Playback.Playing
+            FilmPhase.Loading, FilmPhase.Starting -> Playback.Waiting
+            FilmPhase.Stopped, FilmPhase.Ended, FilmPhase.Unavailable -> Playback.Stopped
+        }
+    }.distinctUntilChanged()
+    val surface = PlaybackSurface(exo, window, playback, scope)
     val subtitles = SubtitleTracks(exo)
     lateinit var play: FilmPlay
     val listener = object : Player.Listener {
@@ -250,7 +259,7 @@ fun openFilmPlay(
         },
         release = {
             parts.cancel()
-            audio.release()
+            surface.release()
             subtitles.release()
             fetched.release()
             film.release()
@@ -259,7 +268,7 @@ fun openFilmPlay(
             meter.finish().forEach { (bucket, mbps) -> Log.i("IptvCapacity", "${bucket.first} ${bucket.second}: $mbps Mbps") }
         },
     )
-    return ExoFilmPlay(exo, play, plan, audio, subtitles, fetched) {
+    return ExoFilmPlay(exo, play, plan, surface, subtitles, fetched) {
         play.start(Place(from), fallback)
     }
 }
