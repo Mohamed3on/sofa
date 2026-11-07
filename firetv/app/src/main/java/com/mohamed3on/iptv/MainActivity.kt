@@ -52,11 +52,14 @@ import com.mohamed3on.iptv.data.StartAction
 import com.mohamed3on.iptv.data.SyncError
 import com.mohamed3on.iptv.data.startAction
 import com.mohamed3on.iptv.player.Cushion
+import com.mohamed3on.iptv.player.Downshift
+import com.mohamed3on.iptv.player.Shift
 import com.mohamed3on.iptv.player.ExoStreamPlayer
 import com.mohamed3on.iptv.player.Health
 import com.mohamed3on.iptv.player.HealthModel
 import com.mohamed3on.iptv.player.HealthSample
 import com.mohamed3on.iptv.player.StreamPhase
+import com.mohamed3on.iptv.data.Channel
 import com.mohamed3on.iptv.data.ChannelIdentity
 import com.mohamed3on.iptv.data.RouteKind
 import androidx.media3.common.Player
@@ -214,13 +217,25 @@ class MainActivity : ComponentActivity() {
     /**
      * Reads the main player each second into [health]; each rebuffer grows its cushion and goes to
      * the session log. A feed's bitrate is reported once it has played for a minute, so it is settled.
+     * [Downshift] steps to a lighter feed of the channel when the line can't carry it, and back once it has held.
      */
     private suspend fun watchHealth(player: ExoStreamPlayer, s: StreamSession) {
         var played: ChannelIdentity? = null
         var playingSince: Pair<Int, Long>? = null // feed id, when it started playing
+        val downshift = Downshift { SystemClock.elapsedRealtime() }
+        var lighter: Pair<ChannelIdentity?, String>? = null // the channel stepped down, and why
+        fun shift(from: Channel, move: Shift?) {
+            move ?: return
+            s.switchFeed(move.to)
+            telemetry.shift(from, move)
+            lighter = (move as? Shift.Down)?.let { s.state.value.requested?.identity to it.reason }
+        }
         val model = HealthModel(onRebuffer = { network, stream ->
             val cushion = player.cushion.onRebuffer(SystemClock.elapsedRealtime())
-            s.state.value.feed?.let { telemetry.rebuffer(it, network, stream, graph.route.effective.value, cushion) }
+            s.state.value.feed?.let {
+                telemetry.rebuffer(it, network, stream, graph.route.effective.value, cushion)
+                shift(it, downshift.rebuffered(it, s.family, network, stream, s::usable))
+            }
         })
         while (true) {
             val st = s.state.value
@@ -246,9 +261,11 @@ class MainActivity : ComponentActivity() {
                     spare = feed.id != requested?.id,
                     plainRoute = graph.route.effective.value == RouteKind.Plain,
                     cushionMs = player.cushion.resumeMs(now).takeIf { it > Cushion.BASE_MS },
+                    lighter = lighter?.takeIf { it.first == requested?.identity }?.second,
                 ),
             )
             health.value = h
+            if (h != null && feed != null && st.phase == Phase.Playing) shift(feed, downshift.next(feed, s.family, h, s::usable))
             val stream = h?.stream
             if (stream != null && feed != null && playingSince?.let { now - it.second >= 60_000 } == true) telemetry.reportBitrate(feed, stream)
             delay(1_000)

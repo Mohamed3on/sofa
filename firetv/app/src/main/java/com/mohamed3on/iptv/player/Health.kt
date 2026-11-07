@@ -6,7 +6,7 @@ import java.util.Locale
  * How the playing stream is doing: the health dot's [level] and, unless it is [Level.Good], why.
  * [corner] says whether it is worth showing unasked (a spare feed is not). The numbers feed the
  * info view: the line's speed and the stream's bitrate in Mbps (null until measured) and the
- * seconds of picture buffered ahead.
+ * seconds of picture buffered ahead. [behind]: less picture arriving than time passing, the line too slow for the stream.
  */
 data class Health(
     val level: Level,
@@ -15,6 +15,7 @@ data class Health(
     val network: Float? = null,
     val stream: Float? = null,
     val buffered: Float = 0f,
+    val behind: Boolean = false,
 ) {
     enum class Level { Good, Warn, Bad }
 }
@@ -43,6 +44,8 @@ data class HealthSample(
     val plainRoute: Boolean,
     /** The picture a rebuffer waits for when stalls raised it above the usual ([Cushion]); null at the usual. */
     val cushionMs: Long? = null,
+    /** Why a lighter feed plays ([Downshift]), said in place of "On a spare feed"; null when it does not. */
+    val lighter: String? = null,
 )
 
 /**
@@ -115,7 +118,7 @@ class HealthModel(
         val numbers = if (network != null && stream != null) "network ${fmt(network)} of ${fmt(stream)} Mbps" else null
 
         fun health(level: Health.Level, reason: String?, corner: Boolean = level != Health.Level.Good) =
-            Health(level, reason, corner, network, stream, s.buffered / 1000f)
+            Health(level, reason, corner, network, stream, s.buffered / 1000f, behind = !keepingUp)
 
         return when {
             s.buffering && settling -> health(Health.Level.Good, null)
@@ -133,7 +136,7 @@ class HealthModel(
                 val minutes = (s.at - lastRebuffer!!) / 60_000
                 health(Health.Level.Warn, if (minutes < 1) "Buffered just now" else "Buffered $minutes min ago")
             }
-            s.spare -> health(Health.Level.Warn, "On a spare feed", corner = false)
+            s.spare -> health(Health.Level.Warn, s.lighter ?: "On a spare feed", corner = false)
             else -> health(Health.Level.Good, null)
         }
     }

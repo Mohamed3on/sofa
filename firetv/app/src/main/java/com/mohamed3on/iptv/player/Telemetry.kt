@@ -108,6 +108,12 @@ class Telemetry(
         stream?.let { put("streamMbps", it) }
     }
 
+    /** A step from [from] to a lighter feed or back ([Downshift]); a step down says the line's speed and the stream's bitrate (Mbps). */
+    fun shift(from: Channel, move: Shift) = record(if (move is Shift.Down) "downshift" else "upshift") {
+        put("id", from.id); put("to", move.to.id)
+        if (move is Shift.Down) { put("netMbps", move.network); put("streamMbps", move.stream) }
+    }
+
     /** A film session's copy change or answer ([FilmSession]'s report). */
     fun film(e: FilmEvent) = when (e) {
         is FilmEvent.Failover -> record("failover") {

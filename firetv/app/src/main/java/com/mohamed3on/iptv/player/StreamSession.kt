@@ -73,6 +73,8 @@ class StreamSession(
     private var feed: Feed? = null
     private var members: List<Channel> = emptyList()
     private val tried = mutableSetOf<Int>()
+    /** Feeds that failed this tune: never moved to by [switchFeed]. */
+    private val failedIds = mutableSetOf<Int>()
     /** When each family member last stalled this tune, so a stall never hands back to a feed that just stalled. */
     private val stalledAt = mutableMapOf<Int, Long>()
     private var current: Channel? = null
@@ -139,6 +141,21 @@ class StreamSession(
         retry()
     }
 
+    /** The feeds of the channel being played, best first. */
+    val family: List<Channel> get() = members
+
+    /** Whether [member] can be moved to: it hasn't failed this tune nor stalled in the last [FLAP_MS]. */
+    fun usable(member: Channel): Boolean = member.id !in failedIds && stalledAt[member.id]?.let { now() - it < FLAP_MS } != true
+
+    /**
+     * Moves a playing channel to another feed of its family ([Downshift]), on the one provider connection:
+     * [open] stops the old stream first. Not a failure, so nothing counts against either feed.
+     */
+    fun switchFeed(member: Channel) {
+        if (_state.value.phase != Phase.Playing || member.id == current?.id || !usable(member)) return
+        open(member)
+    }
+
     /** Stops playback and every pending retry; the provider connection is closed. */
     fun stop() {
         cancelWork()
@@ -150,6 +167,7 @@ class StreamSession(
     private fun tune(channel: Channel, feed: Feed) {
         members = feed.familyMembers(channel.family)
         tried.clear()
+        failedIds.clear()
         stalledAt.clear()
         busySince = null
         backoffs = 0
@@ -225,6 +243,7 @@ class StreamSession(
     }
 
     private fun failed(failure: StreamFailure) {
+        failedIds += current!!.id
         attempt = false
         cancelWork()
         player.stop()

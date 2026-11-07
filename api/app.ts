@@ -119,9 +119,9 @@ export async function bitrate(req: Request) {
 }
 
 // POST /api/app/events?t=TOKEN — a batch of what happened while watching (tunes and their time to
-// picture, stalls, rebuffers, feed switches, busy/wrong-route/offline; a film's copy failovers, step-downs, offers and trials). Appended to a capped log on
+// picture, stalls, rebuffers, feed switches, steps to a lighter feed and back, busy/wrong-route/offline; a film's copy failovers, step-downs, offers and trials). Appended to a capped log on
 // the box for later analysis: which feeds actually hold up, and real zap times.
-const EVENT_TYPES = new Set(['tune', 'stall', 'rebuffer', 'failover', 'problem', 'stepdown', 'offer', 'trial'])
+const EVENT_TYPES = new Set(['tune', 'stall', 'rebuffer', 'failover', 'problem', 'stepdown', 'offer', 'trial', 'downshift', 'upshift'])
 const EVENTS_MAX_BYTES = 20 * 1024 * 1024
 export async function events(req: Request) {
   const batch = await req.json().catch(() => null)
