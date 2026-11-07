@@ -24,8 +24,11 @@ export interface Library { v: 1; src: 'tmdb' | 'provider'; at: string; img: stri
 export interface RowDef { id: string; n: string; q: [Kind, string][]; has?: (t: LibTitle) => boolean }
 
 const NO_TALK = 'without_genres=10763,10764,10767' // news, reality, talk
-/** Language rows: [code, name, minimum film votes on TMDB (shows a third)]. English has none: nearly every title is. */
-const LANGS: [string, string, number][] = [['ar', 'Arabic', 10], ['ru', 'Russian', 50]]
+/**
+ * Language rows: [code, name, minimum film votes on TMDB (shows a third), films and shows in rows of their own]. English
+ * has none: nearly every title is. Arabic is split, else its many shows bury its films.
+ */
+const LANGS: [string, string, number, boolean?][] = [['ar', 'Arabic', 10, true], ['ru', 'Russian', 50]]
 /** Genre rows: [id, name, TMDB film genre, TMDB show genre]. */
 const GENRES: [string, string, number?, number?][] = [
   ['action', 'Action', 28, 10759], ['comedy', 'Comedy', 35, 35], ['drama', 'Drama', 18, 18], ['thriller', 'Thriller', 53],
@@ -49,11 +52,12 @@ export function rowDefs(today = new Date()): RowDef[] {
     { id: 'new', n: 'New releases', q: [films(`with_release_type=4%7C5&release_date.gte=${day(NEW_DAYS)}&release_date.lte=${day(0)}&vote_count.gte=20`), shows(`air_date.gte=${day(NEW_DAYS)}&air_date.lte=${day(0)}&vote_count.gte=100`)] },
     // Animated films with an Arabic dub TorBox holds (api/_arabp2p.ts): filled by [rebuildLibrary]; shown beside Arabic from DUB_MIN films.
     { id: 'ar-dub', n: 'Dubbed in Arabic', q: [] },
-    ...LANGS.map(([l, n, votes]): RowDef => ({
-      id: l, n,
-      q: [films(`with_original_language=${l}&vote_count.gte=${votes}`), shows(`with_original_language=${l}&vote_count.gte=${Math.ceil(votes / 3)}`)],
-      has: (t) => t.l === l,
-    })),
+    ...LANGS.flatMap(([l, n, votes, split]): RowDef[] => {
+      const f = films(`with_original_language=${l}&vote_count.gte=${votes}`), s = shows(`with_original_language=${l}&vote_count.gte=${Math.ceil(votes / 3)}`)
+      return split
+        ? [{ id: l, n: `${n} films`, q: [f], has: (t) => t.l === l && t.k === 'm' }, { id: `${l}-tv`, n: `${n} shows`, q: [s], has: (t) => t.l === l && t.k === 't' }]
+        : [{ id: l, n, q: [f, s], has: (t) => t.l === l }]
+    }),
     { id: 'other', n: 'Other languages', q: [], has: (t) => t.l !== 'en' && !LANGS.some(([l]) => l === t.l) },
     // The app shows these as one Genres row of tiles, each opening its row.
     ...GENRES.map(([id, n, film, show]): RowDef => ({
