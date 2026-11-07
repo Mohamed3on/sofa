@@ -62,6 +62,8 @@ sealed interface Notice {
     data class SteppedDown(val copy: Copy) : Notice
     /** A pinned copy failed for good, so its pin was cleared (KTD12). */
     data class PinCleared(val copy: Copy) : Notice
+    /** A copy chosen in Versions (or offered) couldn't start (its debrid doesn't hold it): the one playing stays, the choice unpinned. */
+    data class CantStart(val copy: Copy) : Notice
     data class TrialResult(val copy: Copy, val works: Boolean) : Notice
     /** Subtitles in [language] ("en", "ar") came from OpenSubtitles and show (R30). */
     data class Subtitles(val language: String) : Notice
@@ -350,7 +352,7 @@ class FilmSession(
         val originalLanguage = plan.state.value.answer?.copies?.originalLanguage
         val want = plan.state.value.ranking?.language?.let(::audioTrack)
         val place = when {
-            at.audio != null -> at
+            at.audio != null && at.audio != "und" -> at // "und": a track without a language, none to keep
             want != null -> at.copy(audio = want, orAudio = originalLanguage)
             else -> at.copy(audio = originalLanguage)
         }
@@ -385,6 +387,8 @@ class FilmSession(
             // Only the title's chosen language (or "Arabic dub first") moves on: the copy is remembered as lacking it.
             // A copy that never claimed it plays on, in the film's own language.
             val want = plan.state.value.ranking?.language?.takeIf { speaks(copy, it, plan.state.value.answer?.copies?.originalLanguage) } ?: return
+            // A track carried over (the copy before's, in Versions or a resume) isn't the chosen language: the copy is asked for that instead.
+            if (openPlace.audio != audioTrack(want)) return reopen(copy, openPlace.copy(audio = null))
             choices.lacks(copy, audioTrack(want))
             rerank()
         }
@@ -436,7 +440,7 @@ class FilmSession(
     private fun switch(to: Copy, back: Copy?, trial: Boolean) {
         work?.cancel()
         work = jobs.launch {
-            val url = url(to, chosen = true) ?: return@launch
+            val url = url(to, chosen = true) ?: return@launch cantStart(to)
             val place = here()
             this@FilmSession.back = back
             this@FilmSession.trial = trial
@@ -444,6 +448,15 @@ class FilmSession(
             tried += to.id
             open(to, url, place)
         }
+    }
+
+    /** [copy] was chosen and can't start: said, rather than nothing happening, and its pin cleared so Play doesn't keep trying it. */
+    private fun cantStart(copy: Copy) {
+        if (choices.pin(titleId) == copy.id) {
+            choices.pin(titleId, null)
+            rerank()
+        }
+        notify(Notice.CantStart(copy))
     }
 
     /** A permanent fault: the copy is marked for this setup, and a pin on it cleared (KTD7, KTD12). */

@@ -130,6 +130,43 @@ class FilmSessionTest {
         assertEquals("en", r.player.opens.last().second.audio)
     }
 
+    // A chosen copy that can't start says so and gives up its pin; the copy playing stays.
+    @Test fun aChosenCopyThatCantStartSaysSoAndIsUnpinned() = runTest {
+        val r = rig(debrid = FakeDebrid(ready = { it != "rd:gone" }))
+        val gone = rd4k.copy(id = "rd:gone")
+        play(r, gone, iptv1080)
+        assertEquals(iptv1080, r.state.copy)
+        r.session.choose(gone.id)
+        runCurrent()
+        assertEquals(iptv1080, r.state.copy)
+        assertEquals(Notice.CantStart(gone), r.state.notice)
+        assertNull(r.choices.pin("movie:1"))
+    }
+
+    // A track carried over from the copy before isn't the chosen language: the copy that has it is asked for that, not marked as lacking it.
+    @Test fun aCarriedOverTrackAsksForTheChosenLanguageInstead() = runTest {
+        val r = rig()
+        val dub = rd4k.copy(id = "rd:dub", languages = listOf("ar"))
+        r.choices.language("movie:1", "ar")
+        r.player.respond = { url -> if ("rd:dub" in url && r.player.opens.last().second.audio != "ar") StreamFailure.NoLanguage else null }
+        answer(r, dub)
+        r.session.play(Place(0, audio = "fr"))
+        runCurrent()
+        assertEquals(dub, r.state.copy)
+        assertEquals(listOf("fr", "ar"), r.player.opens.map { it.second.audio })
+        assertNull(r.choices.lacking()[dub.id])
+    }
+
+    // "und", a track without a language, is none to keep: the chosen language is asked at once.
+    @Test fun anUndeterminedTrackIsNoLanguage() = runTest {
+        val r = rig()
+        r.choices.language("movie:1", "ar")
+        answer(r, rd4k.copy(id = "rd:dub", languages = listOf("ar")))
+        r.session.play(Place(0, audio = "und"))
+        runCurrent()
+        assertEquals("ar", r.player.opens.single().second.audio)
+    }
+
     // A release name's languages are often its subtitles': a file without the chosen language's track moves on, remembered.
     @Test fun aChosenLanguageTheFileLacksMovesOnAndIsRemembered() = runTest {
         val r = rig()

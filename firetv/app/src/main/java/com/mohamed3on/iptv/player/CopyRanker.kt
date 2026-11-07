@@ -450,7 +450,8 @@ class CopyChoices(private val store: KeyValueStore, private val now: () -> Long 
         const val LEARNT = "copies.learnt"
         const val DUB_FIRST = "copies.dubFirst"
         const val LANGUAGES = "copies.languages"
-        const val LACKING = "copies.lacking"
+        // v2: the first records also blamed the chosen language for a track carried over from the copy before (1.617).
+        const val LACKING = "copies.lacking.v2"
         const val RD_MARK_MS = 30L * 24 * 3_600_000
         const val IPTV_FAIL_MS = 24L * 3_600_000
         val json = Json { ignoreUnknownKeys = true }
