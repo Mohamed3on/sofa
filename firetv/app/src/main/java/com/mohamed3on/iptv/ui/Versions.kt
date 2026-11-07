@@ -108,13 +108,7 @@ internal fun Versions(title: String, data: VersionsData, first: FocusRequester, 
     val setup by graph.setup.profile.collectAsState()
     val debridStatus by graph.debrid.status.collectAsState()
     var all by remember { mutableStateOf(false) }
-    // "Show all" leaves the list as it's pressed: focus moves on to the first copy it brought in.
     val more = remember { FocusRequester() }
-    LaunchedEffect(all) {
-        if (!all) return@LaunchedEffect
-        withFrameNanos {}
-        runCatching { more.requestFocus() }
-    }
     var corrections by remember(setup) { mutableStateOf(choices.corrections(setup)) }
     var learnt by remember(setup, data.ranking) { mutableStateOf(choices.learnt(setup)) }
     val ranking = data.ranking
@@ -132,6 +126,17 @@ internal fun Versions(title: String, data: VersionsData, first: FocusRequester, 
     val state = rememberLazyListState()
     val shown = if (all) rows else rows.filter { it.first.copy.id in spread }
     val firstMore = if (all) shown.firstOrNull { it.first.copy.id !in spread }?.first?.copy?.id else null
+    // The list's index of shown copy [i]: one heading before each group's first copy.
+    fun itemOf(i: Int) = i + (0..i).count { it == 0 || shown[it - 1].second != shown[it].second }
+    // "Show all" leaves the list as it's pressed: focus moves on to the first copy it brought in, scrolled to first
+    // (it can sit in an earlier group, off screen, where it isn't composed); else to the top copy, never nowhere.
+    LaunchedEffect(all) {
+        if (!all) return@LaunchedEffect
+        val i = shown.indexOfFirst { it.first.copy.id == firstMore }
+        if (i >= 0) state.scrollToItem(itemOf(i))
+        withFrameNanos {}
+        if (runCatching { more.requestFocus() }.isFailure) runCatching { first.requestFocus() }
+    }
     // Menu clears a pin or mark and the row moves as the list re-ranks: focus follows it.
     var cleared by remember { mutableStateOf<String?>(null) }
     val clearedFocus = remember { FocusRequester() }
@@ -140,7 +145,7 @@ internal fun Versions(title: String, data: VersionsData, first: FocusRequester, 
         val i = shown.indexOfFirst { it.first.copy.id == id }
         if (i < 0) runCatching { first.requestFocus() }
         else {
-            if (state.layoutInfo.visibleItemsInfo.none { it.key == id }) state.scrollToItem(i + (0..i).count { it == 0 || shown[it - 1].second != shown[it].second })
+            if (state.layoutInfo.visibleItemsInfo.none { it.key == id }) state.scrollToItem(itemOf(i))
             withFrameNanos {}
             runCatching { clearedFocus.requestFocus() }
         }
