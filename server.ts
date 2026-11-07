@@ -99,7 +99,9 @@ async function answer(req: Request, route: Route): Promise<[Response, { fresh: n
   if (!res.ok) return [res]
   if (route.invalidates) {
     for (const url of new Set([...cache.keys(), ...building.keys()])) {
-      if (route.invalidates(data, new URL(url))) (cache.delete(url), epoch++)
+      if (!route.invalidates(data, new URL(url))) continue
+      cache.delete(url)
+      epoch++
     }
   }
   const life = typeof route.cache === 'function' ? route.cache(data) : route.cache
