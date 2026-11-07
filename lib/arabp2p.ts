@@ -423,6 +423,8 @@ async function onTorBox(hashes: string[], s: Store): Promise<Set<string>> {
       tbSeen.set(h, { at: Date.now(), held: held.has(h) })
       if (held.has(h)) (s.tb ??= {})[h] = Date.now()
     }
+    // Kept on disk for the library build, which reads the file.
+    if (held.size) await save()
   }
   return new Set(hashes.filter((h) => tbSeen.get(h)?.held))
 }
