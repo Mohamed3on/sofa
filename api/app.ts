@@ -37,6 +37,7 @@ import { watchStore } from '../lib/ratings.js'
 import { episodeTitle, parseTitleId, tmdbEpisodes, tmdbFacts, tmdbGet, tmdbTitle } from '../lib/tmdb.js'
 import * as trakt from '../lib/trakt.js'
 import { blurayMovies, filmTitleOf, searchVod } from '../lib/vod.js'
+import { logged, noteMark, pendingLogs, type LetterboxdLog } from '../lib/letterboxd-log.js'
 
 export async function channels() {
   const cfg = configFromEnv()
@@ -330,6 +331,7 @@ export async function mark(req: Request) {
   if (result !== 'ok') return traktRefused(result)
   const h = await loadHistory()
   if (h) await saveHistory(withMark(h, title, covered, watched as boolean | undefined, rating as number | null | undefined))
+  await noteMark(title, { watched: watched as boolean | undefined, rating: rating as number | null | undefined })
   return new Response(null, { status: 204 })
 }
 
@@ -341,8 +343,20 @@ export async function traktHistory(req: Request) {
     return new Response('Bad play', { status: 400 })
   }
   const result = await trakt.logPlay(r.title, r.at as number)
+  if (result === 'ok') await noteMark(r.title, { watched: true, at: r.at as number })
   if (result === 'ok') return new Response(null, { status: 204 })
   return traktRefused(result)
+}
+
+// GET /api/letterboxd/logs?t=TOKEN — the films waiting to be logged on Letterboxd, oldest first: [{ tmdb, at, rating? }].
+// POST the same with { done: [those logs] } once the browser has logged them: 204; a log whose marks changed since stays.
+export async function letterboxdLogs(req: Request) {
+  if (req.method === 'GET') return Response.json(pendingLogs())
+  const r = (await req.json().catch(() => null)) as { done?: unknown } | null
+  const done = Array.isArray(r?.done) ? r.done.filter((l): l is LetterboxdLog => Number.isSafeInteger(l?.tmdb) && Number.isSafeInteger(l?.at) && (l.rating === undefined || Number.isInteger(l.rating))) : null
+  if (!done) return new Response('Bad logs', { status: 400 })
+  await logged(done)
+  return new Response(null, { status: 204 })
 }
 
 /** Trakt didn't take a change: 503 when it isn't connected, else 502. */

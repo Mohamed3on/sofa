@@ -61,6 +61,8 @@ export const routes: Record<string, Route> = {
   '/api/app/trakt-history': { method: 'POST', gate: 'app', run: app.traktHistory },
   '/api/app/watchlist': { method: 'POST', gate: 'app', run: app.watchlist },
   '/api/app/mark': { method: 'POST', gate: 'app', run: app.mark },
+  // The films the stick asked to log on Letterboxd, for the TrueScore extension in the owner's Chrome (lib/letterboxd-log.ts).
+  '/api/letterboxd/logs': { gate: 'app', cache: 'no-store', run: app.letterboxdLogs },
   '/api/app/title-ids': { method: 'POST', gate: 'app', cache: 'no-store', run: app.titleIds },
   // A refused torrent leaves every title's copies at once.
   '/api/app/rd-infringing': typed({ method: 'POST', gate: 'app', cache: 'no-store', invalidates: (r, u) => r.stored && u.pathname === '/api/app/copies', run: app.rdInfringing }),
