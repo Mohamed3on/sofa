@@ -38,6 +38,7 @@ import androidx.tv.material3.Text
 import com.mohamed3on.iptv.data.Channel
 import com.mohamed3on.iptv.data.GuideDb
 import com.mohamed3on.iptv.data.Programme
+import com.mohamed3on.iptv.data.cleanTitle
 import com.mohamed3on.iptv.data.displayName
 import com.mohamed3on.iptv.ui.theme.Badges
 import com.mohamed3on.iptv.ui.theme.LiveMark

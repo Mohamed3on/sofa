@@ -175,6 +175,7 @@ import com.mohamed3on.iptv.system.Check
 import com.mohamed3on.iptv.player.Copy
 import com.mohamed3on.iptv.player.PlayOf
 import com.mohamed3on.iptv.player.ExoStreamPlayer
+import com.mohamed3on.iptv.player.MultiView
 import com.mohamed3on.iptv.player.FilmSession
 import com.mohamed3on.iptv.player.Prepared
 import com.mohamed3on.iptv.player.EGYPTIAN

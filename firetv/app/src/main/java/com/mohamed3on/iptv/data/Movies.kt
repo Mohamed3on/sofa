@@ -6,7 +6,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
-import java.text.Normalizer
 import java.util.Locale
 import kotlin.time.Duration.Companion.minutes
 
@@ -263,9 +262,6 @@ fun parseMovies(text: String): Movies {
     require(movies.movies.isNotEmpty()) { "no movies" }
     return movies
 }
-
-/** Accents stripped, lowercased ("Pokémon" → "pokemon"). */
-private fun searchNorm(s: String): String = Normalizer.normalize(s, Normalizer.Form.NFD).replace(Regex("\\p{M}"), "").lowercase()
 
 private val SPACES = Regex("\\s+")
 private val TITLE_PREFIX = Regex("""^([A-Z][A-Z+]{1,2})\s+-\s+""")

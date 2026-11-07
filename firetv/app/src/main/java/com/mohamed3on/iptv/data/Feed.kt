@@ -117,6 +117,12 @@ private val displayNames = java.util.concurrent.ConcurrentHashMap<String, String
  */
 fun displayName(raw: String): String = displayNames.getOrPut(raw) { cleanName(raw) }
 
+/** Marks a competition's group ("🏆 Premier League"), which the groups column lists after Favourites. */
+const val TROPHY = "🏆"
+
+/** A channel group's name as shown: the 🏆 marker is for sorting, not for reading. */
+fun groupName(group: String) = group.removePrefix(TROPHY).trimStart()
+
 private fun cleanName(raw: String): String {
     // An event slot reads as the event: "Next · Lorient - Brest · Ligue 1".
     val fields = raw.split(SLOT_FIELDS)

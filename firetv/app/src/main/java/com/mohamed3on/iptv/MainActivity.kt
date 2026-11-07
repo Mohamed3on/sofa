@@ -77,7 +77,7 @@ import com.mohamed3on.iptv.player.Phase
 import com.mohamed3on.iptv.player.PlayerPool
 import com.mohamed3on.iptv.player.StreamSession
 import com.mohamed3on.iptv.ui.LocalIdleWatch
-import com.mohamed3on.iptv.ui.MultiView
+import com.mohamed3on.iptv.player.MultiView
 import com.mohamed3on.iptv.ui.PlayerScreen
 import com.mohamed3on.iptv.ui.theme.IptvTheme
 import com.mohamed3on.iptv.ui.theme.Motion

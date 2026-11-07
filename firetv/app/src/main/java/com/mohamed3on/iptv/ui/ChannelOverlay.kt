@@ -75,7 +75,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Text
-import com.mohamed3on.iptv.data.Airing
 import com.mohamed3on.iptv.data.Channel
 import com.mohamed3on.iptv.data.Feed
 import com.mohamed3on.iptv.data.GuideDb
@@ -108,101 +107,19 @@ import kotlinx.coroutines.withContext
 import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent as AndroidKeyEvent
-import java.text.Normalizer
+import com.mohamed3on.iptv.data.LiveEntry
+import com.mohamed3on.iptv.data.LiveNow
+import com.mohamed3on.iptv.data.SearchHit
+import com.mohamed3on.iptv.data.SearchResults
+import com.mohamed3on.iptv.data.TROPHY
+import com.mohamed3on.iptv.data.cleanTitle
+import com.mohamed3on.iptv.data.groupName
+import com.mohamed3on.iptv.data.liveNow
+import com.mohamed3on.iptv.data.prepareSearch
+import com.mohamed3on.iptv.data.search
+import com.mohamed3on.iptv.data.searchNorm
+import com.mohamed3on.iptv.data.searchWords
 import kotlin.math.roundToInt
-
-/** A Live now row: a confirmed match ([programme] set) or an unconfirmed event slot. [via] is the 🏆 row it was found on. */
-data class LiveEntry(
-    val title: String, val programme: Programme?, val via: Channel, val tune: Channel, val comp: String? = null,
-    /** Other channels showing the same match, one per family, best first; listed under its row. */
-    val alsoOn: List<Channel> = emptyList(),
-) {
-    val confirmed get() = programme != null
-}
-
-/** Live now (R22): confirmed matches, then unconfirmed event slots. */
-data class LiveNow(val matches: List<LiveEntry>, val slots: List<LiveEntry>) {
-    val entries get() = matches + slots
-    /** The zap context a Live now tune carries: Up/Down walk these, one stop per channel. */
-    val context get() = entries.map { it.tune }.distinctBy { it.family }
-}
-
-/**
- * Live now from the guide's [airing] matches: one row per (normalized title, start) on a channel in a
- * 🏆 group, found on the first such row in server order (🏆 groups are quality-sorted) and tuned to the
- * top-ranked feed of its family. Then 🏆 event slots whose name reads as a fixture, one per name.
- */
-fun Feed.liveNow(airing: List<Airing>): LiveNow {
-    val byTvgId = airing.groupBy { it.tvgId }
-    val trophy = channels.filter { it.group.startsWith(TROPHY) }
-    val seen = HashSet<Pair<String, Long>>()
-    val matches = buildList {
-        for (c in trophy) {
-            if (c.tvgId.isEmpty()) continue
-            for (a in byTvgId[c.tvgId].orEmpty()) {
-                if (seen.add(a.norm to a.programme.start)) add(LiveEntry(a.programme.title, a.programme, c, bestOf(c), a.comp))
-            }
-        }
-    }
-    val slots = trophy.filter { it.slot && it.fixture }.distinctBy { it.name }.map { LiveEntry(it.name, null, it, bestOf(it)) }
-    return LiveNow(sameMatchOnce(matches), slots)
-}
-
-/**
- * Broadcasters title one match differently ("Live: LaLiga - Athletic Bilbao - Real Sociedad",
- * "Athletic Bilbao vs Real Sociedad - Spanish La Liga"), so rows are one match when they share the
- * competition, overlap in time and name two of the same teams' words. The first row (best channel)
- * is kept; it shows the clearest title of the group (a "v"/"vs" one, then the shortest).
- */
-private fun sameMatchOnce(matches: List<LiveEntry>): List<LiveEntry> {
-    val groups = mutableListOf<MutableList<LiveEntry>>()
-    for (m in matches) {
-        val words = teamWords(m.title)
-        val group = groups.firstOrNull { g ->
-            val first = g.first()
-            first.comp == m.comp && first.programme!!.start < m.programme!!.stop && m.programme.start < first.programme.stop &&
-                (teamWords(first.title) intersect words).size >= 2
-        }
-        if (group != null) group += m else groups += mutableListOf(m)
-    }
-    return groups.map { g ->
-        val title = g.map { it.title }.sortedWith(compareBy({ !VERSUS.containsMatchIn(it) }, { it.length })).first()
-        g.first().copy(title = fixtureOf(title), alsoOn = g.drop(1).map { it.tune }.distinctBy { it.family }.filter { it.family != g.first().tune.family })
-    }
-}
-
-private val VERSUS = Regex("\\s(v|vs\\.?)\\s", RegexOption.IGNORE_CASE)
-private val LIVE_PREFIX = Regex("^live\\b\\s*[:\\-]?\\s*", RegexOption.IGNORE_CASE)
-private val SUPERSCRIPT = Regex("[\\u1D2C-\\u1DBF\\u2070-\\u209F\\u00B2\\u00B3\\u00B9]+")
-
-/** A guide title without the broadcaster's superscript markers ("Eagles @ Commanders ᴸᶦᵛᵉ"). */
-internal fun cleanTitle(title: String): String = title.replace(SUPERSCRIPT, "").trim()
-
-/**
- * Just the fixture from a broadcaster's title: "LALIGA EA SPORTS 2026/2027 MD11 : Getafe CF vs
- * Sevilla FC" → "Getafe CF vs Sevilla FC", "Athletic Bilbao vs Real Sociedad - Spanish LaLiga
- * 2026/2027 - Week 11" → "Athletic Bilbao vs Real Sociedad". Other titles are cleaned like channel names.
- */
-internal fun fixtureOf(title: String): String {
-    var t = title.replace(SUPERSCRIPT, "").replace(LIVE_PREFIX, "").trim()
-    t.substringAfterLast(":", "").trim().let { if (it.contains(" - ") || VERSUS.containsMatchIn(it)) t = it }
-    if (VERSUS.containsMatchIn(t)) return t.split(" - ").firstOrNull { VERSUS.containsMatchIn(it) }?.trim() ?: t
-    // No fixture: a coverage title, often shouted with a feed prefix ("IT: DAZN DIRETTA GOL SERIE A HD").
-    return if (t.contains(" - ")) t else displayName(t)
-}
-/** Words that name a competition or the coverage, never a team. */
-private val NOT_TEAM = setOf(
-    "live", "liga", "laliga", "league", "premier", "spanish", "english", "italian", "german", "french", "serie",
-    "bundesliga", "ligue", "champions", "europa", "conference", "football", "sports", "sport", "primera", "primeira",
-    "matchday", "round", "final", "copa", "coppa", "cup", "pokal", "championship",
-)
-private fun teamWords(title: String): Set<String> =
-    Regex("\\p{L}{4,}").findAll(Normalizer.normalize(title, Normalizer.Form.NFD).replace(Regex("\\p{M}"), "").lowercase())
-        .map { it.value }.filterNot { it in NOT_TEAM }.toSet()
-
-private fun Feed.bestOf(channel: Channel) = familyMembers(channel.family).firstOrNull() ?: channel
-
-private const val TROPHY = "🏆"
 
 /** Which section of the groups column [group] is in: Favourites, the 🏆 competitions, or the rest. */
 private fun groupSection(group: String) = when {
@@ -210,9 +127,6 @@ private fun groupSection(group: String) = when {
     group.startsWith(TROPHY) -> 1
     else -> 2
 }
-
-/** A group's name as shown: the 🏆 marker is for sorting, not for reading. */
-internal fun groupLabel(group: String) = group.removePrefix(TROPHY).trimStart()
 
 /** What a channel row shows under its name. */
 data class RowLines(val name: String, val now: Programme?, val next: Programme?, val noGuide: Boolean)
@@ -308,9 +222,6 @@ private fun MutableList<Item>.addMatch(match: LiveEntry) {
     add(row)
     match.alsoOn.mapTo(this) { c -> ChannelItem(c, under = "${row.key}>") }
 }
-
-/** The typed words, as the search reads them (dictation's closing full stop dropped). */
-private fun searchWords(query: String) = searchNorm(query).trim().trimEnd('.', '!', '?').split(' ').filter(String::isNotEmpty)
 
 /**
  * Null while Live now is still loading. Search shows a hint until 2 characters are [typed], then
@@ -1162,7 +1073,7 @@ private const val GROUP_OUT_MS = 120
 @Composable
 fun GroupRow(label: String, marked: Boolean, focus: FocusRequester?, onFocused: () -> Unit, onClick: () -> Unit, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
-    val name = remember(label) { groupLabel(label) }
+    val name = remember(label) { groupName(label) }
     Box(
         modifier
             .fillMaxWidth()
@@ -1270,7 +1181,7 @@ private fun LiveRow(entry: LiveEntry, clock: State<Long>, playing: Boolean, watc
             FitText(if (programme == null) "Not confirmed" else if (entry.alsoOn.isNotEmpty()) "$channel · +${entry.alsoOn.size} more" else channel, style = Type.body, modifier = Modifier.weight(1f))
             if (programme != null) Progress(programme, clock)
         }
-        LastLine(watchHint) { FitText(entry.comp ?: groupLabel(entry.via.group), style = Type.caption) }
+        LastLine(watchHint) { FitText(entry.comp ?: groupName(entry.via.group), style = Type.caption) }
     }
 }
 

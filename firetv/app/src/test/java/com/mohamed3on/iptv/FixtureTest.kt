@@ -1,6 +1,6 @@
 package com.mohamed3on.iptv
 
-import com.mohamed3on.iptv.ui.fixtureOf
+import com.mohamed3on.iptv.data.fixtureOf
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
