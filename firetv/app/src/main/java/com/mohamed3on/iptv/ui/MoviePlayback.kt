@@ -698,6 +698,7 @@ private fun noticeText(n: Notice, service: String) = when (n) {
     }
     is Notice.SteppedDown -> NoticeText("Stalls: now on ${short(n.copy, service)} · Versions can reverse it")
     is Notice.PinCleared -> NoticeText("Your pinned version won’t play here, so it’s unpinned")
+    is Notice.CantStart -> NoticeText("${short(n.copy, service)} can’t start now · still on this version")
     is Notice.TrialResult -> NoticeText(if (n.works) "${short(n.copy, service)} works here" else "${short(n.copy, service)} didn’t play here · back to the last version")
     is Notice.Subtitles -> NoticeText("${fetchedName(n.language)} subtitles from OpenSubtitles · timing in Options")
     is Notice.SkipIntro -> NoticeText("Intro", "Skip")

@@ -43,6 +43,7 @@ import com.mohamed3on.iptv.player.Capacity.Source
 import com.mohamed3on.iptv.player.Copy
 import com.mohamed3on.iptv.player.EGYPTIAN
 import com.mohamed3on.iptv.player.TIER_NAMES
+import com.mohamed3on.iptv.player.audioName
 import com.mohamed3on.iptv.player.pictureTier
 import com.mohamed3on.iptv.player.Correction
 import com.mohamed3on.iptv.player.Hdr
@@ -73,10 +74,14 @@ class VersionsData(val prepared: Prepared, val playing: String? = null) {
     val failed get() = prepared.failed
 }
 
-/** How a copy stands here, in the order Versions groups them (R11). */
-private enum class Standing(private val label: String) {
-    Plays("Plays here"), Untested("Untested here"), NotReady("Not ready on %s"), Wont("Won’t play here");
-    fun heading(service: String) = label.format(service)
+/** How a copy stands here, in the order Versions groups them (R11): its heading, and what that means when the name alone doesn't say. */
+private enum class Standing(val heading: String, private val note: String?) {
+    Plays("Ready to play", null),
+    Untested("Might play", "Not tried on this TV yet"),
+    NotReady("Can’t start now", "%s ready to stream"),
+    Wont("Won’t play on this TV", null);
+    /** [service] is "Debrid" while TorBox and Real-Debrid both serve: then both are named. */
+    fun note(service: String) = note?.format(if (service == "Debrid") "TorBox and Real-Debrid don’t have it" else "$service doesn’t have it")
 }
 
 /** A cached debrid copy not checked yet stands with the copies that play: it likely does. */
@@ -113,8 +118,12 @@ internal fun Versions(title: String, data: VersionsData, first: FocusRequester, 
     var corrections by remember(setup) { mutableStateOf(choices.corrections(setup)) }
     var learnt by remember(setup, data.ranking) { mutableStateOf(choices.learnt(setup)) }
     val ranking = data.ranking
+    // With a language chosen, the copies without it go last, in a group of their own (null): still there for the original.
     val rows = remember(ranking, data.debrid) {
-        ranking?.copies.orEmpty().map { it to standing(it, data) }.sortedBy { it.second.ordinal }
+        // A copy its debrid doesn't have ready can't start: not listed.
+        ranking?.copies.orEmpty().filter { standing(it, data) != Standing.NotReady }
+            .map { it to standing(it, data).takeIf { _ -> ranking?.language == null || it.original } }
+            .sortedBy { it.second?.ordinal ?: Int.MAX_VALUE }
     }
     // A spread first: each group's best copy of each kind (so 1080p and SDR show beside the 4K remuxes); "Show all" has the rest.
     val spread = remember(rows) { rows.distinctBy { (r, s) -> s to kind(r.copy) }.mapTo(HashSet()) { it.first.copy.id } }
@@ -150,9 +159,15 @@ internal fun Versions(title: String, data: VersionsData, first: FocusRequester, 
             }
         }
         shown.forEachIndexed { i, (r, s) ->
-            if (i == 0 || shown[i - 1].second != s) item(key = "h${s.name}") { Heading(s.heading(debridStatus.name)) }
+            if (i == 0 || shown[i - 1].second != s) item(key = "h${s?.name ?: "other"}") {
+                val language = ranking?.language?.let(::audioName)
+                if (s != null) Heading(s.heading, s.note(debridStatus.name), first = i == 0)
+                else Heading("Without $language audio", "In other languages, for the original", first = i == 0)
+            }
             item(key = r.copy.id) {
-                VersionRow(r, ranking!!.reasonFor(r, plays), data, focus = if (i == 0) first else if (r.copy.id == firstMore) more else null, onClick = { onChoose(r.copy) }, undo = r.pinned || r.mark != null, onMenu = {
+                // Under "Without Arabic audio" a row needn't say so again.
+                val reason = ranking!!.reasonFor(r, plays).let { if (s != null) it else it.split(" · ").filterNot { p -> p.startsWith("no ") && p.endsWith(" audio") }.joinToString(" · ") }
+                VersionRow(r, reason, data, focus = if (i == 0) first else if (r.copy.id == firstMore) more else null, onClick = { onChoose(r.copy) }, undo = r.pinned || r.mark != null, onMenu = {
                     cleared = r.copy.id
                     when {
                         r.pinned -> choices.pin(title, null)
@@ -261,8 +276,12 @@ internal fun VersionsPanel(title: String, onPlay: () -> Unit, onClose: () -> Uni
 private val PANEL_WIDTH = 420.dp
 
 @Composable
-private fun Heading(text: String) {
-    Text(text, style = Type.headline, modifier = Modifier.padding(start = Space.l, top = Space.m, bottom = Space.xs))
+private fun Heading(text: String, note: String? = null, first: Boolean = false) {
+    // More room above a group than inside it, so the groups read apart; the note says what the group means.
+    Column(Modifier.padding(start = Space.l, end = Space.l, top = if (first) Space.s else Space.xl, bottom = Space.xs), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(text, style = Type.headline)
+        note?.let { Text(it, style = Type.caption.copy(color = Palette.textSecondary)) }
+    }
 }
 
 /** A copy: tier and labels, then why it ranks where it does, then source, size and release name. */
@@ -349,8 +368,8 @@ private fun debridState(c: Copy, checks: Map<String, DebridCheck>, service: Stri
     if (c.source != Source.Debrid) return null
     return when (val r = checks[c.id]) {
         is DebridCheck.Ready, null -> null
-        DebridCheck.NotCached -> "not cached"
-        is DebridCheck.Failed -> if (r.error.permanent) "refused by $service" else "check failed"
+        DebridCheck.NotCached -> "$service doesn’t have it"
+        is DebridCheck.Failed -> if (r.error.permanent) "refused by $service" else "couldn’t ask $service"
     }
 }
 
