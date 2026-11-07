@@ -145,7 +145,7 @@ export async function providerLibrary(cfg: XtreamConfig): Promise<Library> {
 }
 
 /** Films the Dubbed in Arabic row waits for: fewer looks like a broken row. */
-const DUB_MIN = 8
+const DUB_MIN = 4
 
 /** Titles a row keeps after sorting that the owner hasn't watched (the rest stay findable through search). */
 export const ROW_CAP = 60
