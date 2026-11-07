@@ -138,6 +138,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.platform.LocalFocusManager
 import com.mohamed3on.iptv.data.Catalog
+import com.mohamed3on.iptv.data.CatalogRow
 import com.mohamed3on.iptv.data.History
 import com.mohamed3on.iptv.data.NextEpisode
 import com.mohamed3on.iptv.data.resume
@@ -575,19 +576,26 @@ private fun NextEpisode.place() = Resume(show.titleId, show.title.title, show.po
 
 /** A row of the library: one group's titles. [progress] is every saved place, by title id. */
 private const val CONTINUE_ROW = "h|continue"
-/** Titles a TrueScore row shows once watched ones are out. */
+/** Titles a row shows once watched ones are out (the box sends each row long enough for that). */
 private const val ROW_SHOWN = 60
 /** What was played (or a followed show's episode aired) within this long leads the screen as Up next; older is a Continue watching row. */
 private const val RECENT_MS = 7 * 86_400_000L
+/** The library's genre rows (api/_library.ts GENRES): one Genres row of tiles stands for them, last. */
+private val GENRE_ROWS = setOf("action", "comedy", "drama", "thriller", "crime", "scifi", "horror", "romance", "animation", "documentary")
+private const val GENRES_ROW = "h|genres"
 
-private class MovieRow(val key: String, val title: String, val badge: String?, val movies: List<Movie>, val progress: Map<TitleId, Float>)
+/** [genres]: on the Genres row, each tile's genre (its row's name) by the card key of the title that pictures it. */
+private class MovieRow(val key: String, val title: String, val badge: String?, val movies: List<Movie>, val progress: Map<TitleId, Float>, val genres: Map<String, String>? = null)
+
+/** A Genres tile a genre's titles were opened from: its card's movie id and its place in the row. */
+private class GenreTile(val id: Int, val col: Int)
 
 /**
- * The owner's Watchlist when it has titles (R26), then the library's rows (TrueScore's recent and all-time, trending, new,
- * genres, languages; the provider's groups when TMDB's are missing); what is part-way through lives in Up next, not here.
- * [hideWatched] leaves watched titles out of the library's rows (a row left empty goes; TrueScore's, sent longer than
- * they show, still show 60); the Watchlist keeps everything. What is part-way through but not
- * recent ([continuing]) is a plain Continue watching row after TrueScore's.
+ * The owner's Watchlist when it has titles (R26), then the library's rows (TrueScore's, trending, new, languages; the
+ * provider's groups when TMDB's are missing), then one Genres row; what is part-way through lives in Up next, not here.
+ * [hideWatched] leaves watched titles out of the library's rows (a row left empty goes); each shows its first 60; the
+ * Watchlist keeps everything. A genre is a tile pictured by its best title not already picturing another; OK opens its
+ * titles. What is part-way through but not recent ([continuing]) is a plain Continue watching row after TrueScore's.
  */
 private fun rowsOf(library: Catalog?, resume: List<Resume>, history: History?, watched: Set<TitleId>, hideWatched: Boolean, continuing: List<Movie>): List<MovieRow> {
     library ?: return emptyList()
@@ -596,15 +604,26 @@ private fun rowsOf(library: Catalog?, resume: List<Resume>, history: History?, w
     val mine = listOfNotNull(
         history?.watchlist?.map { library.find(it.titleId) ?: it }?.takeIf { it.isNotEmpty() }?.let { MovieRow("h|watchlist", "Watchlist", null, it, progress) },
     )
+    val genres = LinkedHashMap<String, String>()
+    val tiles = ArrayList<Movie>()
     val rows = library.rows.mapNotNull { row ->
         val label = groupLabel(row.name)
-        val movies = if (hideWatched) row.movies.filter { it.titleId !in watched } else row.movies
-        (if (row.id.startsWith("ts-")) movies.take(ROW_SHOWN) else movies).takeIf { it.isNotEmpty() }?.let { MovieRow("r|${row.id}", label.name, label.badge, it, progress) }
+        val movies = rowTitles(row, watched, hideWatched).takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+        if (row.id in GENRE_ROWS) {
+            movies.firstOrNull { it.key !in genres }?.let { genres[it.key] = label.name; tiles += it }
+            return@mapNotNull null
+        }
+        MovieRow("r|${row.id}", label.name, label.badge, movies, progress)
     }
     val at = rows.indexOfLast { it.key.startsWith("r|ts-") } + 1
     val later = continuing.takeIf { it.isNotEmpty() }?.let { MovieRow(CONTINUE_ROW, "Continue watching", null, it, progress) }
-    return mine + rows.take(at) + listOfNotNull(later) + rows.drop(at)
+    val genreRow = tiles.takeIf { it.isNotEmpty() }?.let { MovieRow(GENRES_ROW, "Genres", null, it, progress, genres) }
+    return mine + rows.take(at) + listOfNotNull(later) + rows.drop(at) + listOfNotNull(genreRow)
 }
+
+/** A library row's titles as the screen shows them: watched ones out when [hideWatched], the first 60. */
+private fun rowTitles(row: CatalogRow, watched: Set<TitleId>, hideWatched: Boolean) =
+    (if (hideWatched) row.movies.filter { it.titleId !in watched } else row.movies).take(ROW_SHOWN)
 
 /** Which part of the browsing screen is up. */
 private enum class BrowsePage { UpNext, Rows, Search }
@@ -712,13 +731,29 @@ private fun MoviesBrowse(
             if (card != null) openedResult = null
         }
     }
+    // A library row named like a query ("comedy", "arabic"), as the rows show it: search answers it at once, offline too.
+    val rowNamed: (String) -> List<Movie>? = { q -> library?.rows?.firstOrNull { it.name.equals(q.trim(), ignoreCase = true) }?.let { rowTitles(it, watched, hideWatched) } }
+    // The Genres tile whose titles search shows: Back from them returns to it.
+    val genreFrom = remember { mutableStateOf<GenreTile?>(null) }
+    var inGenre by remember { mutableStateOf(false) }
     fun openSearch() {
         beforeSearch = shownPage
         focused.value = null
+        inGenre = false
         page = BrowsePage.Search
     }
+    fun openGenre(name: String, from: GenreTile) {
+        openSearch()
+        inGenre = true
+        genreFrom.value = from
+        query = name
+        // Focus goes to its first title, as on coming back to a result: the Fire TV keyboard stays shut.
+        openedResult = rowNamed(name)?.firstOrNull()?.id
+    }
     fun closeSearch() {
-        leftSearch[0] = true
+        leftSearch[0] = !inGenre
+        if (inGenre) query = ""
+        inGenre = false
         focused.value = null
         page = beforeSearch
     }
@@ -792,7 +827,7 @@ private fun MoviesBrowse(
                         )
                         if (search) Box(Modifier.onFocusChanged { if (it.hasFocus) at = FocusAt.Search }) {
                             SearchGrid(
-                                library!!, query, { query = it }, results, keys, onFocused = { focused.value = it },
+                                library!!, query, { query = it }, results, keys, rowNamed, onFocused = { focused.value = it },
                                 back = openedResult?.let { it to resultBack },
                                 stray = { !hasFocus },
                                 // Coming back to a result is no arrival at Search: the Fire TV keyboard stays shut.
@@ -812,6 +847,8 @@ private fun MoviesBrowse(
                                 onMenu = { m, continuing -> actions = Actions(m, removable = continuing, rows = true) },
                                 // Up from the first row: back to Up next, else to Search.
                                 onTop = { if (upNext.isNotEmpty()) page = BrowsePage.UpNext else runCatching { searchButton.requestFocus() } },
+                                onGenre = ::openGenre,
+                                returnTo = genreFrom,
                             )
                         }
                     }
@@ -1466,12 +1503,18 @@ private fun rememberKeepClear(): BringIntoViewSpec {
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Rows(rows: List<MovieRow>, watched: Set<TitleId>, focus: FocusRequester, active: Boolean, onFocused: (Movie) -> Unit, onOpen: (Movie) -> Unit, onMenu: (Movie, continuing: Boolean) -> Unit, onTop: () -> Unit) {
+private fun Rows(
+    rows: List<MovieRow>, watched: Set<TitleId>, focus: FocusRequester, active: Boolean, onFocused: (Movie) -> Unit, onOpen: (Movie) -> Unit,
+    onMenu: (Movie, continuing: Boolean) -> Unit, onTop: () -> Unit, onGenre: (String, GenreTile) -> Unit, returnTo: MutableState<GenreTile?>,
+) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val first = remember { FocusRequester() }
+    // Back from a genre's titles (these rows were gone meanwhile): the tile it was opened from.
+    val tile = remember { returnTo.value }
+    LaunchedEffect(Unit) { returnTo.value = null }
     // The card each row was left on, for a row built again after scrolling far away.
-    val columns = remember { HashMap<String, Int>() }
+    val columns = remember { HashMap<String, Int>().apply { tile?.let { put(GENRES_ROW, it.col) } } }
     val rowFocus = remember { HashMap<String, FocusRequester>() }
     var focusedRow by remember { mutableStateOf(-1) }
     val pivot = remember(density) {
@@ -1484,7 +1527,7 @@ private fun Rows(rows: List<MovieRow>, watched: Set<TitleId>, focus: FocusReques
     // The card a title page was opened from (row key, movie id). Back lands on it explicitly.
     val list = rememberLazyListState()
     val back = remember { FocusRequester() }
-    var opened by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    var opened by remember { mutableStateOf(tile?.let { GENRES_ROW to it.id }) }
     val lastFocused = remember { arrayOfNulls<Pair<String, Int>>(1) }
     LaunchedEffect(active) {
         val target = opened?.takeIf { active } ?: return@LaunchedEffect
@@ -1534,7 +1577,8 @@ private fun Rows(rows: List<MovieRow>, watched: Set<TitleId>, focus: FocusReques
                         },
                         onOpen = { movie ->
                             opened = row.key to movie.id
-                            onOpen(movie)
+                            val genre = row.genres?.get(movie.key)
+                            if (genre != null) onGenre(genre, GenreTile(movie.id, columns[row.key] ?: 0)) else onOpen(movie)
                         },
                         onMenu = { movie -> onMenu(movie, row.key == CONTINUE_ROW) },
                         onVertical = { down ->
@@ -1608,7 +1652,8 @@ private fun PosterRow(
                         onFocused(col, movie)
                     },
                     onClick = { onOpen(movie) },
-                    onMenu = onMenu?.let { m -> { m(movie) } },
+                    onMenu = onMenu?.takeIf { row.genres == null }?.let { m -> { m(movie) } },
+                    label = row.genres?.get(movie.key),
                 )
             }
         }
@@ -1618,9 +1663,10 @@ private fun PosterRow(
 /**
  * A 2:3 poster at a fixed size, so nothing moves while it loads; the title's monogram when there is
  * none. Focus lifts it toward the viewer with an accent ring, on one spring read only while drawing.
+ * With a [label] it is a Genres tile: the poster pictures the genre, named over it, and nothing else.
  */
 @Composable
-private fun PosterCard(movie: Movie, progress: Float?, watched: Boolean = false, focus: FocusRequester?, back: FocusRequester? = null, onFocused: () -> Unit, onClick: () -> Unit, onMenu: (() -> Unit)? = null) {
+private fun PosterCard(movie: Movie, progress: Float?, watched: Boolean = false, focus: FocusRequester?, back: FocusRequester? = null, onFocused: () -> Unit, onClick: () -> Unit, onMenu: (() -> Unit)? = null, label: String? = null) {
     val reduced = LocalReducedMotion.current
     val context = LocalPlatformContext.current
     val density = LocalDensity.current
@@ -1675,6 +1721,12 @@ private fun PosterCard(movie: Movie, progress: Float?, watched: Boolean = false,
         if (request != null) {
             AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, onError = { failed = true }, modifier = Modifier.fillMaxSize())
         }
+        if (label != null) {
+            // Dark enough at the foot that the name reads over a poster's own lettering.
+            Box(Modifier.fillMaxSize().drawBehind { drawRect(Brush.verticalGradient(0.25f to Color.Transparent, 0.6f to Color(0xB3000000), 1f to Color(0xF2000000))) })
+            Text(label, style = Type.title, modifier = Modifier.align(Alignment.BottomStart).padding(Space.s))
+            return@Box
+        }
         if (progress != null) {
             ProgressLine({ progress }, Modifier.align(Alignment.BottomCenter).padding(horizontal = Space.s, vertical = Space.s))
         }
@@ -1709,6 +1761,7 @@ private fun SearchGrid(
     onQuery: (String) -> Unit,
     focus: FocusRequester,
     keys: FocusRequester,
+    rowNamed: (String) -> List<Movie>?,
     onFocused: (Movie?) -> Unit,
     back: Pair<Int, FocusRequester>?,
     stray: () -> Boolean,
@@ -1725,6 +1778,10 @@ private fun SearchGrid(
     LaunchedEffect(query, library) {
         if (query.isBlank()) {
             found = null
+            return@LaunchedEffect
+        }
+        rowNamed(query)?.let {
+            found = it
             return@LaunchedEffect
         }
         delay(SEARCH_DEBOUNCE_MS)
