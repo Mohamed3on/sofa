@@ -109,6 +109,21 @@ const ATTR = { start: /\bstart="([^"]*)"/, stop: /\bstop="([^"]*)"/, channel: /\
 /** Search form of a title: lowercased, accents stripped ("Bayern München" → "bayern munchen"). */
 export const searchNorm = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
 
+const descrWords = (s: string) => searchNorm(s).match(/[\p{L}\p{N}]+/gu) ?? []
+/**
+ * A guide description as one paragraph. Some feeds send line breaks as the text "\r\n", and beIN's
+ * match rows repeat the row ("Arsenal vs Hull City", "At 7-11-2026, MECCA 18:00, GMT 15:00",
+ * "Premier League", "Season 2026/2027", "Emirates Stadium Stadium", "."): a line whose every word the
+ * title already says, or that is the fixture or its kick-off time, is dropped, and a doubled last word made single.
+ */
+export function guideDescr(title: string, raw: string): string {
+  const said = new Set([...descrWords(title), 'season', 'at'])
+  return raw.replace(/\\[rn]/g, '\n').split(/\s*\n\s*/)
+    .filter((l) => !/\bGMT \d|^[^.]+ vs [^.]+$/.test(l) && !descrWords(l).every((w) => said.has(w)))
+    .map((l) => l.trim().replace(/(?<!\p{L})(\p{L}+) \1$/u, '$1'))
+    .reduce((p, l) => (p ? `${p}${/[.!?:]$/.test(p) ? ' ' : ' · '}${l}` : l), '')
+}
+
 /**
  * The app's guide as a gzip SQLite file, parsed from the same XMLTV TiviMate gets so it
  * carries the same corrections. Rows flag name-as-title filler (synthetic) and titles
@@ -134,7 +149,7 @@ export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now
     const attr = (k: keyof typeof ATTR) => unxml(m[1].match(ATTR[k])?.[1] ?? '')
     const tvgId = attr('channel')
     const title = unxml(m[2].match(/<title\b[^>]*>([\s\S]*?)<\/title>/)?.[1] ?? '').trim()
-    const descr = unxml(m[2].match(/<desc\b[^>]*>([\s\S]*?)<\/desc>/)?.[1] ?? '').trim()
+    const descr = guideDescr(title, unxml(m[2].match(/<desc\b[^>]*>([\s\S]*?)<\/desc>/)?.[1] ?? ''))
     return { tvgId, title, descr, start: xmltvSeconds(attr('start')), stop: xmltvSeconds(attr('stop')), synthetic: filler.has(`${tvgId}\n${title.toLowerCase()}`) }
   })
   const replays = replayAirings(rows.map((r) => (r.synthetic ? { ...r, title: '' } : r)), new Date(now))

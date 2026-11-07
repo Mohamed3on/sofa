@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, setSystemTime, spyOn, test } from 'bun:test'
-import { buildAppFeed, buildAppGuide } from './_app-feed.js'
+import { buildAppFeed, buildAppGuide, guideDescr } from './_app-feed.js'
 import { buildM3U, withBackupFeeds, withCompetitionGroups, type Channel } from './_lib.js'
 import { BACKUP_ID, VPN_HOST } from './_provider.js'
 import { Database } from 'bun:sqlite'
@@ -215,6 +215,13 @@ describe('guide', () => {
     // ended 1h ago stays, ended 3h ago is dropped
     expect(titled("Recent News")).toBeDefined()
     expect(titled("Old News")).toBeUndefined()
+  })
+
+  test('a description reads as one paragraph without what the row already says', () => {
+    expect(guideDescr('Arsenal vs Hull City - English Premier League 2026/2027 - Week 10',
+      String.raw`Arsenal vs Hull City\r\nAt 7-11-2026, MECCA 18:00, GMT 15:00\r\nPremier League\r\nSeason 2026/2027\r\nEmirates Stadium Stadium\r\n.`)).toBe('Emirates Stadium')
+    expect(guideDescr('NBA Action', String.raw`Weekly segments \r\n\r\nInside the League.\r\nCaptain Jon Jon sails`))
+      .toBe('Weekly segments · Inside the League. Captain Jon Jon sails')
   })
 })
 
