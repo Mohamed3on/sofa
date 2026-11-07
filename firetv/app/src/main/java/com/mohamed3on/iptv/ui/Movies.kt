@@ -102,8 +102,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onPlaced
@@ -154,6 +156,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import com.mohamed3on.iptv.data.Resume
+import com.mohamed3on.iptv.data.RowLayout
 import com.mohamed3on.iptv.data.TitleId
 import com.mohamed3on.iptv.data.SyncError
 import com.mohamed3on.iptv.data.groupLabel
@@ -465,6 +468,8 @@ fun MoviesLayer(
 
 /** A row of the library: one group's titles. [progress] is every saved place, by title id. */
 private const val CONTINUE_ROW = "h|continue"
+/** The other rows' opacity while one is being moved. */
+private const val DIMMED_ROW = 0.3f
 /** Titles a row shows once watched ones are out (the box sends each row long enough for that). */
 private const val ROW_SHOWN = 60
 /** The library's genre rows (api/_library.ts GENRES): one Genres row of tiles stands for them, last. */
@@ -549,7 +554,12 @@ private fun MoviesBrowse(
     var actions by remember { mutableStateOf<Actions?>(null) }
     // A followed show's next episode takes the hero only when nothing is part-way through; what isn't recent is the Continue watching row.
     val (upNext, older) = remember(library, resume, nextUp) { upNextOf(library, resume, nextUp) }
-    val rows = remember(library, resume, history, watched, hideWatched, older) { rowsOf(library, resume, history, watched, hideWatched, older) }
+    // The rows as the viewer arranged them with ☰ (moved, hidden), kept on this device.
+    val layout = remember { RowLayout(prefs) }
+    val arranged by layout.version.collectAsState()
+    // The row picked up to move (hold OK on a card, or ☰ → Move row): Up and Down move it, OK or Back puts it down.
+    var lifted by remember { mutableStateOf<String?>(null) }
+    val rows = remember(library, resume, history, watched, hideWatched, older, arranged) { layout.arrange(rowsOf(library, resume, history, watched, hideWatched, older)) { it.key } }
     val newShows = remember(nextUp) { nextUp.filter { it.new }.mapTo(HashSet()) { it.show.titleId } }
     var page by remember { mutableStateOf(BrowsePage.UpNext) }
     var beforeSearch by remember { mutableStateOf(BrowsePage.UpNext) }
@@ -719,11 +729,14 @@ private fun MoviesBrowse(
                                 rows, watched, content, active,
                                 onFocused = { focused.value = it },
                                 onOpen = onOpen,
-                                onMenu = { m, continuing -> actions = Actions(m, removable = continuing, rows = true) },
+                                onMenu = { m, row -> actions = Actions(m, removable = row == CONTINUE_ROW, row = row) },
                                 // Up from the first row: back to Up next, else to Search.
                                 onTop = { if (upNext.isNotEmpty()) page = BrowsePage.UpNext else runCatching { searchButton.requestFocus() } },
                                 onGenre = ::openGenre,
                                 returnTo = genreFrom,
+                                lifted = lifted,
+                                onLift = { lifted = it },
+                                onMove = { key, down -> layout.move(rows.map { it.key }, key, down) },
                             )
                         }
                     }
@@ -751,11 +764,20 @@ private fun MoviesBrowse(
                 },
                 onRemove = if (a.removable) ({ onRemove(a.movie) }) else null,
                 // Watched titles in the library's rows, or not (hidden at first; the Watchlist, Up next and search keep them); kept across launches.
-                hideWatched = if (a.rows) hideWatched else null,
+                hideWatched = if (a.row != null) hideWatched else null,
                 onHideWatched = {
                     hideWatched = !hideWatched
                     prefs.put(SHOW_WATCHED, if (hideWatched) null else "1")
                 },
+                // The card's row: picked up to move, or hidden while another row stays; hidden rows come back from any row.
+                rowActions = a.row?.let { row ->
+                    val keys = rows.map { it.key }
+                    listOfNotNull(
+                        if (keys.size > 1) "Move row" to { lifted = row } else null,
+                        if (keys.size > 1) "Hide row" to { layout.hide(row) } else null,
+                        layout.hidden.size.takeIf { it > 0 }?.let { n -> "Show hidden rows ($n)" to { layout.showHidden() } },
+                    )
+                }.orEmpty(),
                 modifier = m,
                 open = open,
             )
@@ -763,17 +785,18 @@ private fun MoviesBrowse(
     } }
 }
 
-/** ☰'s panel on the browsing screen: for [movie], from Up next or Continue watching ([removable]) or the rows ([rows]). */
-private class Actions(val movie: Movie, val removable: Boolean = false, val rows: Boolean = false)
+/** ☰'s panel on the browsing screen: for [movie], from Up next or Continue watching ([removable]) or the rows ([row], its key). */
+private class Actions(val movie: Movie, val removable: Boolean = false, val row: String? = null)
 
 /**
  * ☰ on a card or a title page: Add to / Remove from Watchlist (not a title only Letterboxd's list holds), Mark watched or
- * unwatched, Rate, then Remove from Up next ([onRemove]) and the rows' Hide watched titles setting ([hideWatched]) where they apply.
+ * unwatched, Rate, then Remove from Up next ([onRemove]), the rows' Hide watched titles setting ([hideWatched]) and the
+ * card's row's own actions ([rowActions]) where they apply.
  */
 @Composable
 private fun TitleActions(
     movie: Movie, onClose: () -> Unit, onRemove: (() -> Unit)? = null, hideWatched: Boolean? = null, onHideWatched: () -> Unit = {}, modifier: Modifier = Modifier,
-    open: Boolean = true,
+    open: Boolean = true, rowActions: List<Pair<String, () -> Unit>> = emptyList(),
 ) {
     val graph = LocalContext.current.graph
     val id = movie.titleId
@@ -794,7 +817,7 @@ private fun TitleActions(
         after = listOfNotNull(
             onRemove?.let { "Remove from Up next" to { it(); onClose() } },
             hideWatched?.let { "Hide watched titles: ${if (it) "On" else "Off"}" to { onHideWatched(); onClose() } },
-        ),
+        ) + rowActions.map { (label, act) -> label to { act(); onClose() } },
         open = open,
     )
 }
@@ -1371,8 +1394,10 @@ private fun rememberKeepClear(): BringIntoViewSpec {
 @Composable
 private fun Rows(
     rows: List<MovieRow>, watched: Set<TitleId>, focus: FocusRequester, active: Boolean, onFocused: (Movie) -> Unit, onOpen: (Movie) -> Unit,
-    onMenu: (Movie, continuing: Boolean) -> Unit, onTop: () -> Unit, onGenre: (String, GenreTile) -> Unit, returnTo: MutableState<GenreTile?>,
+    onMenu: (Movie, row: String) -> Unit, onTop: () -> Unit, onGenre: (String, GenreTile) -> Unit, returnTo: MutableState<GenreTile?>,
+    lifted: String?, onLift: (String?) -> Unit, onMove: (row: String, down: Boolean) -> Unit,
 ) {
+    val reduced = LocalReducedMotion.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val first = remember { FocusRequester() }
@@ -1421,7 +1446,31 @@ private fun Rows(
     }
     CompositionLocalProvider(LocalBringIntoViewSpec provides pivot) {
         LazyColumn(
-            Modifier.fillMaxSize().edgeFade(Palette.ink, top = FADE).focusRequester(focus).focusRestorer(first).focusGroup(),
+            Modifier
+                .fillMaxSize()
+                .edgeFade(Palette.ink, top = FADE)
+                // A lifted row takes the keys: Up and Down move it (focus stays on its card), OK or Back puts it down.
+                // The press that lifted it (held OK) is let through as it ends, so its card sees the key up.
+                .onPreviewKeyEvent {
+                    val key = lifted ?: return@onPreviewKeyEvent false
+                    val down = it.type == KeyEventType.KeyDown
+                    when (remoteKey(it.nativeKeyEvent.keyCode)) {
+                        RemoteKey.Up, RemoteKey.Down -> if (down) {
+                            val to = rows.indexOfFirst { r -> r.key == key } + if (remoteKey(it.nativeKeyEvent.keyCode) == RemoteKey.Down) 1 else -1
+                            if (to in rows.indices) {
+                                onMove(key, to > rows.indexOfFirst { r -> r.key == key })
+                                scope.launch { list.animateScrollToItem(to) }
+                            }
+                        }
+                        RemoteKey.Ok -> if (!down || it.nativeKeyEvent.repeatCount > 0) return@onPreviewKeyEvent false else onLift(null)
+                        RemoteKey.Back -> if (down) onLift(null)
+                        else -> {}
+                    }
+                    true
+                }
+                .focusRequester(focus)
+                .focusRestorer(first)
+                .focusGroup(),
             state = list,
             contentPadding = PaddingValues(top = FADE, bottom = Space.xxxl),
             verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -1430,6 +1479,10 @@ private fun Rows(
                 CompositionLocalProvider(LocalBringIntoViewSpec provides keepClear) {
                     PosterRow(
                         row,
+                        modifier = Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null, placementSpec = if (reduced) null else Motion.spring(0.35f)),
+                        lifted = row.key == lifted,
+                        dimmed = lifted != null && row.key != lifted,
+                        onHold = { onLift(row.key) },
                         watched = watched,
                         rowFocus = rowFocus.getOrPut(row.key) { FocusRequester() },
                         entry = if (i == 0) first else null,
@@ -1446,7 +1499,7 @@ private fun Rows(
                             val genre = row.genres?.get(movie.key)
                             if (genre != null) onGenre(genre, GenreTile(movie.id, columns[row.key] ?: 0)) else onOpen(movie)
                         },
-                        onMenu = { movie -> onMenu(movie, row.key == CONTINUE_ROW) },
+                        onMenu = { movie -> onMenu(movie, row.key) },
                         onVertical = { down ->
                             when {
                                 !down && i == 0 -> onTop()
@@ -1465,7 +1518,10 @@ private fun Rows(
 private fun PosterRow(
     row: MovieRow, watched: Set<TitleId>, rowFocus: FocusRequester, entry: FocusRequester?, startAt: Int, back: Pair<Int, FocusRequester>?,
     onFocused: (Int, Movie) -> Unit, onOpen: (Movie) -> Unit, onVertical: (down: Boolean) -> Unit, onMenu: ((Movie) -> Unit)? = null,
+    modifier: Modifier = Modifier, lifted: Boolean = false, dimmed: Boolean = false, onHold: (() -> Unit)? = null,
 ) {
+    // While a row is being moved the others recede, and its name takes the accent with the arrows that move it.
+    val shade by animateFloatAsState(if (dimmed) DIMMED_ROW else 1f, Motion.focus(), label = "shade")
     val own = remember { FocusRequester() }
     val restore = entry ?: own
     val at = startAt.coerceIn(0, (row.movies.size - 1).coerceAtLeast(0))
@@ -1476,10 +1532,11 @@ private fun PosterRow(
     val scope = rememberCoroutineScope()
     val nudge = remember { Animatable(0f) }
     val focusedCol = remember { intArrayOf(at) }
-    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+    Column(modifier.graphicsLayer { alpha = shade }, verticalArrangement = Arrangement.spacedBy(Space.s)) {
         Row(Modifier.padding(start = EDGE), horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
-            Text(row.title, style = Type.headline, maxLines = 1)
+            Text(row.title, style = Type.headline, color = if (lifted) Palette.accent else Color.Unspecified, maxLines = 1)
             row.badge?.let { Badges(remember(it) { listOf(it) }) }
+            if (lifted) Text("↑↓", style = Type.headline, color = Palette.accent)
         }
         LazyRow(
             state = state,
@@ -1520,6 +1577,7 @@ private fun PosterRow(
                     onClick = { onOpen(movie) },
                     onMenu = onMenu?.takeIf { row.genres == null }?.let { m -> { m(movie) } },
                     label = row.genres?.get(movie.key),
+                    onHold = onHold,
                 )
             }
         }
@@ -1532,11 +1590,13 @@ private fun PosterRow(
  * With a [label] it is a Genres tile: the poster pictures the genre, named over it, and nothing else.
  */
 @Composable
-private fun PosterCard(movie: Movie, progress: Float?, watched: Boolean = false, focus: FocusRequester?, back: FocusRequester? = null, onFocused: () -> Unit, onClick: () -> Unit, onMenu: (() -> Unit)? = null, label: String? = null) {
+private fun PosterCard(movie: Movie, progress: Float?, watched: Boolean = false, focus: FocusRequester?, back: FocusRequester? = null, onFocused: () -> Unit, onClick: () -> Unit, onMenu: (() -> Unit)? = null, label: String? = null, onHold: (() -> Unit)? = null) {
     val reduced = LocalReducedMotion.current
     val context = LocalPlatformContext.current
     val density = LocalDensity.current
     val interaction = remember { MutableInteractionSource() }
+    // OK went down on this card; it was held.
+    val press = remember { booleanArrayOf(false, false) }
     var focused by remember { mutableStateOf(false) }
     val lift = animateFloatAsState(if (focused) 1f else 0f, Motion.focus(), label = "lift")
     var failed by remember(movie.poster) { mutableStateOf(false) }
@@ -1557,6 +1617,22 @@ private fun PosterCard(movie: Movie, progress: Float?, watched: Boolean = false,
             .onKeyEvent {
                 if (onMenu == null || remoteKey(it.nativeKeyEvent.keyCode) != RemoteKey.Menu) return@onKeyEvent false
                 if (it.type == KeyEventType.KeyDown && it.nativeKeyEvent.repeatCount == 0) onMenu()
+                true
+            }
+            // With [onHold], OK is the card's own: a press opens it on release, a held one (the remote's long press, its
+            // first repeat) is [onHold] and opens nothing. A press that began elsewhere (putting a row down) does neither.
+            .onPreviewKeyEvent {
+                if (onHold == null || remoteKey(it.nativeKeyEvent.keyCode) != RemoteKey.Ok) return@onPreviewKeyEvent false
+                val repeat = it.nativeKeyEvent.repeatCount
+                when {
+                    it.type == KeyEventType.KeyDown && repeat == 0 -> press[0] = true
+                    it.type == KeyEventType.KeyDown && repeat == 1 && press[0] -> { press[1] = true; onHold() }
+                    it.type == KeyEventType.KeyUp -> {
+                        if (press[0] && !press[1]) onClick()
+                        press[0] = false
+                        press[1] = false
+                    }
+                }
                 true
             }
             .clickable(interaction, indication = null, onClick = onClick)
