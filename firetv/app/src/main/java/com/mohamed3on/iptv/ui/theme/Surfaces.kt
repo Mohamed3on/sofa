@@ -30,6 +30,18 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.Alignment
+import androidx.tv.material3.Text
 
 /*
  * Materials and depth. API 30 has no blur, and nothing can blur a video SurfaceView, so the
@@ -84,6 +96,12 @@ fun Modifier.bottomScrim(alpha: () -> Float = { 1f }): Modifier = drawWithCache 
 
 /** Dims everything behind a modal surface (quick panel, still-watching prompt). */
 val Scrim = Color(0x99000000)
+
+/** Darkens the foot of a wide card's picture, so its name and progress read over any picture. */
+val CardScrim = Brush.verticalGradient(0.4f to Color.Transparent, 1f to Color(0xE6000000))
+
+/** Darkens a genre tile's poster from the middle down: dark enough at the foot that its name reads over the poster's own lettering. */
+val TileScrim = Brush.verticalGradient(0.25f to Color.Transparent, 0.6f to Color(0xB3000000), 1f to Color(0xF2000000))
 
 /**
  * Focus as depth: the focused item lifts toward the viewer (scale + the raised surface),
@@ -209,4 +227,56 @@ fun Modifier.edgeFade(color: Color, top: Dp = 24.dp, bottom: Dp = 48.dp, alpha: 
         drawRect(topBrush, size = Size(size.width, t), alpha = a)
         drawRect(bottomBrush, topLeft = Offset(0f, size.height - b), size = Size(size.width, b), alpha = a)
     }
+}
+
+/** A thin accent thumb at the right of an inner list that scrolls, read while drawing. */
+fun Modifier.scrollbar(state: LazyListState): Modifier = drawWithContent {
+    drawContent()
+    val info = state.layoutInfo
+    val total = info.totalItemsCount
+    val visible = info.visibleItemsInfo.size
+    if (total == 0 || visible >= total) return@drawWithContent
+    val w = 3.dp.toPx()
+    val h = (size.height * visible / total).coerceAtLeast(24.dp.toPx())
+    val top = (size.height - h) * (state.firstVisibleItemIndex.toFloat() / (total - visible)).coerceIn(0f, 1f)
+    drawRoundRect(Palette.accent, topLeft = Offset(size.width - w, top), size = Size(w, h), cornerRadius = CornerRadius(w / 2))
+}
+
+/** A [ProblemCard]'s widest: a sentence a line, still read as a card. */
+private val CARD_WIDTH = 560.dp
+
+/**
+ * What went wrong (or wants an answer), centred over the dimmed screen: [title], [body], then [action], the
+ * card's one button when it has one.
+ */
+@Composable
+fun ProblemCard(title: String, body: String, action: @Composable ColumnScope.() -> Unit = {}) {
+    Box(Modifier.fillMaxSize().background(Scrim), contentAlignment = Alignment.Center) {
+        Column(Modifier.widthIn(max = CARD_WIDTH).material().padding(Space.xxl), verticalArrangement = Arrangement.spacedBy(Space.m)) {
+            Text(title, style = Type.title)
+            Text(body, style = Type.body)
+            action()
+        }
+    }
+}
+
+/**
+ * A small note in a screen's top corner (live TV's health, a film's notices) that fades in while [value] is set
+ * and out once it clears, showing the last value as it goes.
+ */
+@Composable
+fun <T : Any> CornerNotice(value: T?, modifier: Modifier = Modifier, content: @Composable RowScope.(T) -> Unit) {
+    val shown = animateFloatAsState(if (value != null) 1f else 0f, Motion.panel(), label = "corner")
+    val kept = remember { arrayOfNulls<Any>(1) }
+    if (value != null) kept[0] = value
+    @Suppress("UNCHECKED_CAST") val last = kept[0] as T? ?: return
+    if (value == null && shown.value == 0f) return
+    Row(
+        modifier
+            .graphicsLayer { alpha = shown.value }
+            .material(Radius.panel)
+            .padding(horizontal = Space.l, vertical = Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+    ) { content(last) }
 }

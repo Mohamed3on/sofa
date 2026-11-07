@@ -39,6 +39,8 @@ import com.mohamed3on.iptv.ui.theme.Space
 import com.mohamed3on.iptv.ui.theme.Type
 import com.mohamed3on.iptv.ui.theme.material
 import com.mohamed3on.iptv.ui.theme.tabular
+import com.mohamed3on.iptv.ui.theme.PanelRow
+import com.mohamed3on.iptv.ui.theme.pressable
 
 /**
  * ☰ on a title page, a card or an episode row: [rows] (Mark watched, Versions…), Rate (when [onRate] is given), whose page

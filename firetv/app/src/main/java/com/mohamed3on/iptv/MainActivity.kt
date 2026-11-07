@@ -8,17 +8,13 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
 import com.mohamed3on.iptv.ui.theme.ActionButton
 import com.mohamed3on.iptv.ui.theme.ActivityLine
 import com.mohamed3on.iptv.ui.theme.Mark
-import com.mohamed3on.iptv.ui.theme.Radius
 import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
@@ -82,10 +78,10 @@ import com.mohamed3on.iptv.ui.PlayerScreen
 import com.mohamed3on.iptv.ui.theme.IptvTheme
 import com.mohamed3on.iptv.ui.theme.Motion
 import com.mohamed3on.iptv.ui.theme.Palette
-import com.mohamed3on.iptv.ui.theme.Scrim
 import com.mohamed3on.iptv.ui.theme.Space
 import com.mohamed3on.iptv.ui.theme.Type
-import com.mohamed3on.iptv.ui.theme.material
+import com.mohamed3on.iptv.ui.theme.ProblemCard
+import com.mohamed3on.iptv.ui.theme.KeyCap
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -373,17 +369,10 @@ private fun SyncFailed(error: SyncError, onRetry: () -> Unit) {
 /** The R24 prompt. Its button is only the visible answer: MainActivity takes any key as one. */
 @Composable
 private fun StillWatching() {
-    Box(Modifier.fillMaxSize().background(Scrim), contentAlignment = Alignment.Center) {
-        Column(
-            Modifier.widthIn(max = 560.dp).material().padding(Space.xxl),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
-            Text("Still watching?", style = Type.title)
-            Text("Playback stops in a minute unless you press a button.", style = Type.body)
-            val focus = remember { FocusRequester() }
-            LaunchedEffect(Unit) { focus.requestFocus() }
-            ActionButton("Keep watching", onClick = {}, Modifier.padding(top = Space.m).focusRequester(focus))
-        }
+    ProblemCard("Still watching?", "Playback stops in a minute unless you press a button.") {
+        val focus = remember { FocusRequester() }
+        LaunchedEffect(Unit) { focus.requestFocus() }
+        ActionButton("Keep watching", onClick = {}, Modifier.padding(top = Space.m).focusRequester(focus))
     }
 }
 
@@ -397,20 +386,6 @@ private fun IdleStopped() {
             Text("to resume", style = Type.body)
         }
     }
-}
-
-/** A remote key drawn as a small cap, so instructions point at the button itself. */
-@Composable
-internal fun KeyCap(label: String) {
-    Text(
-        label,
-        style = Type.caption.copy(color = Palette.textPrimary),
-        modifier = Modifier
-            .clip(RoundedCornerShape(Radius.chip))
-            .background(Palette.raised)
-            .border(1.dp, Palette.edge, RoundedCornerShape(Radius.chip))
-            .padding(horizontal = Space.s, vertical = 2.dp),
-    )
 }
 
 @Composable

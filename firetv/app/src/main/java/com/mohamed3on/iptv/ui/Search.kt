@@ -237,7 +237,7 @@ internal fun SearchBox(
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
                     row.forEachIndexed { c, key ->
                         val word = key.length > 1
-                        KeyCap(
+                        KeyboardKey(
                             key,
                             style = if (word) Type.caption else Type.headline,
                             modifier = Modifier.weight(if (word) 1.5f else 1f),
@@ -246,7 +246,7 @@ internal fun SearchBox(
                         ) {
                             if (key == VOICE) {
                                 listening = true
-                                return@KeyCap
+                                return@KeyboardKey
                             }
                             onQuery(
                                 when (key) {
@@ -264,7 +264,7 @@ internal fun SearchBox(
 }
 
 @Composable
-private fun KeyCap(label: String, style: TextStyle, modifier: Modifier, focus: FocusRequester?, onFocused: () -> Unit, onClick: () -> Unit) {
+private fun KeyboardKey(label: String, style: TextStyle, modifier: Modifier, focus: FocusRequester?, onFocused: () -> Unit, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     Box(

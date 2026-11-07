@@ -31,6 +31,19 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.positionInParent
 import kotlinx.coroutines.launch
 import kotlin.math.PI
+import androidx.compose.animation.core.InfiniteRepeatableSpec
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.SideEffect
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.focus.onFocusChanged
 
 /**
  * Motion is springs, described the way Apple does: a damping ratio (1 = no overshoot)
@@ -58,9 +71,20 @@ object Motion {
     /** Focused rows and tiles grow this much toward the viewer. */
     const val FOCUS_SCALE = 1.03f
     /** Reduced-motion cross-fade. */
-    internal const val FADE_MS = 160
+    private const val FADE_MS = 160
+    /** A poster or still fades in as it loads (Coil's crossfade); Coil skips it for images already in memory. */
+    const val IMAGE_FADE_MS = 150
 
-    private fun <T> fade(): FiniteAnimationSpec<T> = tween(FADE_MS)
+    /** A short fade: reduced motion's stand-in for movement, and a value changing in place. */
+    fun <T> fade(): FiniteAnimationSpec<T> = tween(FADE_MS)
+    /** A fade out a touch faster than [fade] in: the info view's stats, a groups-column row leaving. */
+    fun <T> quickFade(): FiniteAnimationSpec<T> = tween(120)
+    /** A backdrop arriving behind its page: slow enough that it never pops. */
+    fun <T> slowFade(): FiniteAnimationSpec<T> = tween(400)
+    /** [panel], or with reduced motion a [fade]. */
+    fun <T> panel(reduced: Boolean): FiniteAnimationSpec<T> = if (reduced) fade() else panel()
+    /** One turn a second, steadily: the tuning spinner. */
+    fun spin(): InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(1_000, easing = LinearEasing))
 
     /**
      * Banner content on a zap moves in the direction of travel: zapping down brings the
@@ -91,7 +115,7 @@ enum class Edge { Left, Right, Bottom }
 fun AnimatedVisibilityScope.reveal(): State<Float> {
     val reduced = LocalReducedMotion.current
     return transition.animateFloat(
-        transitionSpec = { if (reduced) tween(Motion.FADE_MS) else Motion.panel() },
+        transitionSpec = { Motion.panel(reduced) },
         label = "reveal",
     ) { if (it == EnterExitState.Visible) 1f else 0f }
 }
@@ -143,3 +167,30 @@ fun Modifier.glide(): Modifier {
 
 /** [progress] delayed by [lag] of its course: a second column that follows the first in, and leaves before it. */
 fun staggered(progress: Float, lag: Float = 0.15f): Float = ((progress - lag) / (1f - lag)).coerceIn(0f, 1f)
+
+/**
+ * A panel at the right edge (Options, Recent, Versions) that slides in from the right and back out to it. A
+ * non-null [value] shows it; while it leaves, [content] keeps the last value. [content] gets whether the panel is
+ * still open (passed on, so focus can leave a closing panel) and the modifier for the panel.
+ */
+@Composable
+fun <T : Any> BoxScope.SlidePanel(value: T?, modifier: Modifier = Modifier, content: @Composable (value: T, open: Boolean, modifier: Modifier) -> Unit) {
+    val reduced = LocalReducedMotion.current
+    val focusManager = LocalFocusManager.current
+    var last by remember { mutableStateOf(value) }
+    val holdsFocus = remember { booleanArrayOf(false) }
+    SideEffect {
+        if (value != null) last = value
+        // A closing panel lets focus go at once, so the page's own "focus is back with me" check moves it where it belongs.
+        else if (holdsFocus[0]) focusManager.clearFocus(force = true)
+    }
+    AnimatedVisibility(
+        visible = value != null,
+        enter = EnterTransition.None,
+        exit = ExitTransition.None,
+        modifier = Modifier.align(Alignment.CenterEnd).padding(Space.safe).onFocusChanged { holdsFocus[0] = it.hasFocus }.then(modifier),
+    ) {
+        val shown = reveal()
+        (value ?: last)?.let { content(it, value != null, Modifier.slideFade({ shown.value }, Edge.Right, reduced)) }
+    }
+}

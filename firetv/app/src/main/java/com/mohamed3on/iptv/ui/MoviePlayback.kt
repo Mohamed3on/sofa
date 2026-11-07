@@ -3,9 +3,7 @@ package com.mohamed3on.iptv.ui
 import android.view.SurfaceView
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.offset
-import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.text.style.TextAlign
 import androidx.media3.common.text.Cue
 import androidx.media3.common.text.CueGroup
 import androidx.compose.foundation.lazy.LazyColumn
@@ -65,7 +63,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
@@ -91,14 +88,13 @@ import com.mohamed3on.iptv.ui.theme.LocalReducedMotion
 import com.mohamed3on.iptv.ui.theme.Motion
 import com.mohamed3on.iptv.ui.theme.Palette
 import com.mohamed3on.iptv.ui.theme.ScrollText
-import com.mohamed3on.iptv.ui.theme.Scrim
 import com.mohamed3on.iptv.ui.theme.Space
 import com.mohamed3on.iptv.ui.theme.Type
 import com.mohamed3on.iptv.ui.theme.bottomScrim
 import com.mohamed3on.iptv.ui.theme.material
 import com.mohamed3on.iptv.ui.theme.reveal
 import com.mohamed3on.iptv.ui.theme.slideFade
-import com.mohamed3on.iptv.KeyCap
+import com.mohamed3on.iptv.ui.theme.KeyCap
 import com.mohamed3on.iptv.player.Copy
 import com.mohamed3on.iptv.player.FilmPhase
 import com.mohamed3on.iptv.player.FilmState
@@ -107,7 +103,11 @@ import com.mohamed3on.iptv.player.Notice
 import com.mohamed3on.iptv.player.OfferKind
 import com.mohamed3on.iptv.player.PlayOf
 import com.mohamed3on.iptv.player.openFilmPlay
-import com.mohamed3on.iptv.ui.theme.Radius
+import com.mohamed3on.iptv.ui.theme.PanelRow
+import com.mohamed3on.iptv.ui.theme.scrollbar
+import com.mohamed3on.iptv.ui.theme.SlidePanel
+import com.mohamed3on.iptv.ui.theme.CornerNotice
+import com.mohamed3on.iptv.ui.theme.ProblemCard
 import androidx.compose.foundation.layout.ColumnScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
@@ -126,7 +126,6 @@ private const val NOTE_MS = 3_000L
 private val BAR_HEIGHT = 5.dp
 private val THUMB = 14.dp
 private val PANEL_WIDTH = 420.dp
-private val CARD_WIDTH = 560.dp
 
 /** The player's own view of ExoPlayer, kept in Compose state on the main thread. */
 private class MovieState {
@@ -280,7 +279,7 @@ internal fun MoviePlayback(
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(Palette.video)
             .onKeyEvent { e ->
                 val native = e.nativeKeyEvent
                 val down = e.type == KeyEventType.KeyDown
@@ -361,13 +360,7 @@ internal fun MoviePlayback(
             }
         }
 
-        AnimatedVisibility(
-            visible = panel,
-            enter = EnterTransition.None,
-            exit = ExitTransition.None,
-            modifier = Modifier.align(Alignment.CenterEnd).padding(Space.safe),
-        ) {
-            val shown = reveal()
+        SlidePanel(Unit.takeIf { panel }) { _, _, m ->
             val audioState by audio.state.collectAsState()
             val subtitleState by subtitles.state.collectAsState()
             val filmState by session.state.collectAsState()
@@ -402,7 +395,7 @@ internal fun MoviePlayback(
                 },
                 // Its place is kept here; leaving then saves nothing, so Continue watching names the next episode.
                 onNext = onNext?.let { next -> { play.next(next) } },
-                modifier = Modifier.slideFade({ shown.value }, Edge.Right, reduced),
+                modifier = m,
             ) { first ->
                 Versions(
                     title, VersionsData(prepared, filmState.copy?.id), first,
@@ -600,18 +593,17 @@ private const val SHIFT_MS = 100L
 
 @Composable
 private fun Unavailable(onBack: () -> Unit) {
-    Box(Modifier.fillMaxSize().background(Scrim), contentAlignment = Alignment.Center) {
-        Column(Modifier.widthIn(max = CARD_WIDTH).material().padding(Space.xxl), verticalArrangement = Arrangement.spacedBy(Space.m)) {
-            val shows = LocalLibrary.current == LibraryKind.Shows
-            Text(if (shows) "This episode isn’t available right now" else "This movie isn’t available right now", style = Type.title)
-            Text("No copy of it would play. Try another, or this one again later.", style = Type.body)
-            val button = remember { FocusRequester() }
-            LaunchedEffect(Unit) {
-                withFrameNanos {}
-                runCatching { button.requestFocus() }
-            }
-            ActionButton(if (shows) "Back to shows" else "Back to movies", onBack, Modifier.padding(top = Space.m).focusRequester(button))
+    val shows = LocalLibrary.current == LibraryKind.Shows
+    ProblemCard(
+        if (shows) "This episode isn’t available right now" else "This movie isn’t available right now",
+        "No copy of it would play. Try another, or this one again later.",
+    ) {
+        val button = remember { FocusRequester() }
+        LaunchedEffect(Unit) {
+            withFrameNanos {}
+            runCatching { button.requestFocus() }
         }
+        ActionButton(if (shows) "Back to shows" else "Back to movies", onBack, Modifier.padding(top = Space.m).focusRequester(button))
     }
 }
 
@@ -666,7 +658,7 @@ private fun Subtitles(cues: List<Cue>, line: String?) {
         }
         if (text.isNotEmpty()) Text(
             text.joinToString("\n"),
-            style = Type.title.copy(color = Color.White, textAlign = TextAlign.Center, shadow = Shadow(Color.Black, Offset(0f, 2f), 6f)),
+            style = Type.subtitle,
             modifier = Modifier.align(Alignment.BottomCenter).padding(start = Space.xxxl, end = Space.xxxl, bottom = SUBTITLE_BOTTOM),
         )
     }
@@ -684,20 +676,7 @@ private fun NoticeCorner(state: StateFlow<FilmState>, modifier: Modifier) {
     val film by state.collectAsState()
     val service = debridName()
     val now = film.notice?.let { noticeText(it, service) } ?: if (film.trial) NoticeText("Trying this version · Back returns to the last one") else null
-    val shown = animateFloatAsState(if (now != null) 1f else 0f, Motion.panel(), label = "notice")
-    val kept = remember { arrayOfNulls<NoticeText>(1) }
-    if (now != null) kept[0] = now
-    val n = kept[0] ?: return
-    if (now == null && shown.value == 0f) return
-    Row(
-        modifier
-            .widthIn(max = NOTICE_WIDTH)
-            .graphicsLayer { alpha = shown.value }
-            .material(Radius.panel)
-            .padding(horizontal = Space.l, vertical = Space.s),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.s),
-    ) {
+    CornerNotice(now, modifier.widthIn(max = NOTICE_WIDTH)) { n ->
         ScrollText(n.text, style = Type.caption.copy(color = Palette.textPrimary), lines = 2, modifier = Modifier.weight(1f, fill = false))
         n.action?.let {
             KeyCap("▲")

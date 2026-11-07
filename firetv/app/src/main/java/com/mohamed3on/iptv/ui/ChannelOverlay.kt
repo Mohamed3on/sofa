@@ -5,7 +5,6 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
@@ -96,6 +95,8 @@ import com.mohamed3on.iptv.ui.theme.Type
 import com.mohamed3on.iptv.ui.theme.reveal
 import com.mohamed3on.iptv.ui.theme.slideFade
 import com.mohamed3on.iptv.ui.theme.staggered
+import com.mohamed3on.iptv.ui.theme.PanelRow
+import com.mohamed3on.iptv.ui.theme.pressable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -380,7 +381,7 @@ fun ChannelOverlay(
         shown = next
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             arrival.snapTo(0f)
-            arrival.animateTo(1f, if (reduced) tween(Motion.FADE_MS) else Motion.spring(0.28f))
+            arrival.animateTo(1f, if (reduced) Motion.fade() else Motion.spring(0.28f))
         }
     }
     // Holding Down through the groups column builds only the group focus rests on (~120ms), like
@@ -736,7 +737,7 @@ fun ChannelOverlay(
     ) {
         // In with the list, first; and out of the way of the schedule (Right on a channel), folding to
         // nothing with the gap after it. It stays built meanwhile, so closing the schedule builds nothing.
-        val aside = animateFloatAsState(if (details == null && actions == null) 1f else 0f, if (reduced) tween(Motion.FADE_MS) else Motion.panel(), label = "aside")
+        val aside = animateFloatAsState(if (details == null && actions == null) 1f else 0f, Motion.panel(reduced), label = "aside")
         Box(
             Modifier.layout { measurable, constraints ->
                 val placeable = measurable.measure(constraints)
@@ -1064,10 +1065,8 @@ private fun SectionTitle(text: String) {
 @Composable
 fun LazyItemScope.groupMotion(): Modifier {
     val reduced = LocalReducedMotion.current
-    return Modifier.animateItem(fadeInSpec = tween(Motion.FADE_MS), placementSpec = if (reduced) null else Motion.panel(), fadeOutSpec = tween(GROUP_OUT_MS))
+    return Modifier.animateItem(fadeInSpec = Motion.fade(), placementSpec = if (reduced) null else Motion.panel(), fadeOutSpec = Motion.quickFade())
 }
-
-private const val GROUP_OUT_MS = 120
 
 /** A groups-column entry; [marked] shows a quiet accent bar while the channel column has focus. Idle groups recede. */
 @Composable

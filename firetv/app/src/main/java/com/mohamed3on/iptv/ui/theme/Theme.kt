@@ -17,6 +17,9 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.darkColorScheme
 import com.mohamed3on.iptv.R
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.geometry.Offset
 
 /**
  * The app's look: the video is the hero, and all chrome floats over it as a dark,
@@ -53,6 +56,16 @@ object Palette {
 
     /** Progress track behind [accent]. */
     val track = Color(0x33FFFFFF)
+    /** A mark drawn on [accent] (a watched title's check). */
+    val onAccent = Color.White
+    /** Behind the video: the bars round a picture that doesn't fill the screen, and the tiles' gaps. */
+    val video = Color.Black
+    /** Under a card's corner chip: dark enough under its 13 sp text to clear 4.5:1 over any poster. */
+    val chipGround = Color(0xE00B0E12)
+
+    /** Logos drawn in place of a service's name: IMDb's yellow badge, Letterboxd's three dots. */
+    val imdb = Color(0xFFF5C518)
+    val letterboxd = listOf(Color(0xFFFF8000), Color(0xFF00E054), Color(0xFF40BCF4))
 
     /**
      * Review scores, acclaimed to poor: oklch L 0.82 on every step (so none reads louder; a 0.6 L gap over the dark
@@ -92,6 +105,13 @@ object Type {
     val prose = body.copy(lineHeight = 23.sp)
     /** Times, badges, hints. */
     val caption = base.copy(fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium, color = Palette.textTertiary, letterSpacing = 0.01.em)
+
+    /** A title page's or person's name: the one name on the page, larger than [display]. */
+    val pageTitle = display.copy(fontSize = 36.sp, lineHeight = 42.sp)
+    /** A film's subtitles: white with a soft shadow, so they read over any picture. */
+    val subtitle = title.copy(color = Color.White, textAlign = TextAlign.Center, shadow = Shadow(Color.Black, Offset(0f, 2f), 6f))
+    /** The lettering in IMDb's badge: part of a logo, not text to read, so under the 13 sp floor. */
+    val imdbLogo = caption.copy(color = Color.Black, fontSize = 10.sp, lineHeight = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.em)
 }
 
 /**

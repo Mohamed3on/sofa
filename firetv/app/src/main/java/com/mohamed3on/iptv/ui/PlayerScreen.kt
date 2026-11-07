@@ -6,12 +6,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -100,7 +97,6 @@ import com.mohamed3on.iptv.ui.theme.Motion
 import com.mohamed3on.iptv.ui.theme.Palette
 import com.mohamed3on.iptv.ui.theme.ProgressLine
 import com.mohamed3on.iptv.ui.theme.ListScrim
-import com.mohamed3on.iptv.ui.theme.Scrim
 import com.mohamed3on.iptv.ui.theme.edgeFade
 import com.mohamed3on.iptv.ui.theme.Space
 import com.mohamed3on.iptv.ui.theme.FitText
@@ -123,7 +119,11 @@ import com.mohamed3on.iptv.ui.theme.tabular
 import com.mohamed3on.iptv.ui.theme.PROSE_WIDTH
 import com.mohamed3on.iptv.ui.theme.bottomScrim
 import com.mohamed3on.iptv.ui.theme.leftScrim
-import com.mohamed3on.iptv.ui.theme.material
+import com.mohamed3on.iptv.ui.theme.PanelRow
+import com.mohamed3on.iptv.ui.theme.pressable
+import com.mohamed3on.iptv.ui.theme.SlidePanel
+import com.mohamed3on.iptv.ui.theme.CornerNotice
+import com.mohamed3on.iptv.ui.theme.ProblemCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -139,7 +139,6 @@ private const val ASPECT_SLACK = 0.03f
 private val LOGO_SIZE = DpSize(128.dp, 72.dp)
 private val TUNING_SIZE = 16.dp
 private val PROGRESS_WIDTH = 200.dp
-private val CARD_WIDTH = 560.dp
 /** After launch's banner has sunk, so building the hidden list never competes with anything on screen. */
 private const val LIST_BUILD_DELAY_MS = BANNER_MS + 2_000L
 /** How long a previewed channel plays before the list steps back from it. */
@@ -149,8 +148,6 @@ private const val RECEDE = 0.85f
 /** How long the corner says why before only its dot stays. */
 private const val HEALTH_TEXT_MS = 6_000L
 private const val REFRESHING = "Refreshing…"
-/** Info view stats and badges leave a touch faster than they arrive. */
-private const val STATS_OUT_MS = 120
 
 /**
  * The full-screen player (R10, R14): the video, with chrome only when asked for. The channel
@@ -164,7 +161,7 @@ private const val STATS_OUT_MS = 120
 fun PlayerScreen(feed: Feed, session: StreamSession?, audio: AudioTracks?, surface: SurfaceView, aspect: Float, tiles: MultiView<ExoStreamPlayer>, live: Pair<Int, LiveQuality>?, health: Health?) {
     val grid by tiles.state.collectAsState()
     var movie by remember { mutableStateOf(false) }
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().background(Palette.video)) {
         // Gone, not just stopped, in multi-view and under a movie: its last frame would fight their surfaces.
         // The picture keeps its shape: a 4:3 channel is pillarboxed, never stretched; widescreen fills the screen.
         val fill = aspect <= 0f || abs(aspect - SCREEN_ASPECT) < ASPECT_SLACK
@@ -215,7 +212,7 @@ private fun PlayerChrome(
     var info by remember { mutableStateOf(false) }
     // Movies rise over the open channel list, which keeps its place underneath for Back.
     var movies by remember { mutableStateOf(false) }
-    val moviesShown = animateFloatAsState(if (movies) 1f else 0f, if (reduced) tween(Motion.FADE_MS) else Motion.panel(), label = "movies")
+    val moviesShown = animateFloatAsState(if (movies) 1f else 0f, Motion.panel(reduced), label = "movies")
     val moviesComposed by remember { derivedStateOf { movies || moviesShown.value > 0f } }
     // firetv/check.sh: every screen but live is in Movies & Shows, which takes the target from there.
     val check by Check.open.collectAsState()
@@ -393,7 +390,7 @@ private fun PlayerChrome(
             modifier = Modifier.fillMaxSize(),
             label = "problem",
         ) { shown ->
-            if (shown != null) ProblemCard(shown, takeFocus = layer == Layer.None) {
+            if (shown != null) StreamProblem(shown, takeFocus = layer == Layer.None) {
                 if (shown.switchesRoute) session.switchRoute() else session.retry()
             }
         }
@@ -408,7 +405,7 @@ private fun PlayerChrome(
         // once, unseen, after launch has settled (the banner gone), and stays built while hidden (drawing
         // nothing), so every opening is only the slide.
         val listOpen = layer == Layer.ChannelList
-        val shown = animateFloatAsState(if (listOpen) 1f else 0f, if (reduced) tween(Motion.FADE_MS) else Motion.panel(), label = "list")
+        val shown = animateFloatAsState(if (listOpen) 1f else 0f, Motion.panel(reduced), label = "list")
         var listBuilt by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) {
             delay(LIST_BUILD_DELAY_MS)
@@ -424,7 +421,7 @@ private fun PlayerChrome(
                 peek = true
             }
         }
-        val recede = animateFloatAsState(if (peek && listOpen) 1f else 0f, if (reduced) tween(Motion.FADE_MS) else Motion.panel(), label = "recede")
+        val recede = animateFloatAsState(if (peek && listOpen) 1f else 0f, Motion.panel(reduced), label = "recede")
         if (listBuilt || opens > 0) {
             Box(
                 Modifier
@@ -513,15 +510,9 @@ private fun PlayerChrome(
             onClose = { movies = false },
         )
 
-        AnimatedVisibility(
-            visible = layer == Layer.Recent,
-            enter = EnterTransition.None,
-            exit = ExitTransition.None,
-            modifier = Modifier.align(Alignment.CenterEnd).padding(Space.safe).onFocusChanged { layerFocused = it.hasFocus },
-        ) {
-            val shown = reveal()
+        SlidePanel(Unit.takeIf { layer == Layer.Recent }, Modifier.onFocusChanged { layerFocused = it.hasFocus }) { _, _, m ->
             RecentSheet(
-                modifier = Modifier.slideFade({ shown.value }, Edge.Right, reduced),
+                modifier = m,
                 feed = feed,
                 guide = guide,
                 clock = clock,
@@ -541,18 +532,12 @@ private fun PlayerChrome(
 
         // Out here, so a refresh keeps its status when the panel closes before it finishes.
         var refreshStatus by remember { mutableStateOf<String?>(null) }
-        AnimatedVisibility(
-            visible = layer == Layer.QuickPanel,
-            enter = EnterTransition.None,
-            exit = ExitTransition.None,
-            modifier = Modifier.align(Alignment.CenterEnd).padding(Space.safe),
-        ) {
-            val shown = reveal()
+        SlidePanel(Unit.takeIf { layer == Layer.QuickPanel }) { _, _, m ->
             val audioState = audio?.state?.collectAsState()?.value ?: AudioState()
             val choice by graph.route.choice.collectAsState()
             val effective by graph.route.effective.collectAsState()
             QuickPanel(
-                modifier = Modifier.slideFade({ shown.value }, Edge.Right, reduced),
+                modifier = m,
                 open = layer == Layer.QuickPanel,
                 // The audio tracks are the full-screen player's, which multi-view stops.
                 audio = if (multiView) AudioState() else audioState,
@@ -621,7 +606,7 @@ private fun Banner(
             Row(horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
                 // Event slots are named for the event, so a long name gets a second line rather than an ellipsis.
                 ScrollText(remember(channel.name) { displayName(channel.name) }, style = Type.title, lines = 2, modifier = Modifier.weight(1f, fill = false))
-                AnimatedVisibility(info == null, enter = fadeIn(tween(Motion.FADE_MS)), exit = fadeOut(tween(STATS_OUT_MS))) { Badges(badges) }
+                AnimatedVisibility(info == null, enter = fadeIn(Motion.fade()), exit = fadeOut(Motion.quickFade())) { Badges(badges) }
                 if (tuning) Tuning()
             }
             Guide(channel, guide, clock, describe = info != null)
@@ -631,8 +616,8 @@ private fun Banner(
             if (info != null) kept[0] = info
             AnimatedVisibility(
                 visible = info != null,
-                enter = fadeIn(tween(Motion.FADE_MS)) + if (reduced) EnterTransition.None else expandVertically(Motion.panel()),
-                exit = fadeOut(tween(STATS_OUT_MS)) + if (reduced) ExitTransition.None else shrinkVertically(Motion.panel()),
+                enter = fadeIn(Motion.fade()) + if (reduced) EnterTransition.None else expandVertically(Motion.panel()),
+                exit = fadeOut(Motion.quickFade()) + if (reduced) ExitTransition.None else shrinkVertically(Motion.panel()),
             ) {
                 kept[0]?.let {
                     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -694,7 +679,7 @@ private fun Guide(channel: Channel, guide: GuideDb?, clock: State<Long>, describ
 private fun Tuning() {
     val reduced = LocalReducedMotion.current
     val angle = rememberInfiniteTransition(label = "tuning")
-        .animateFloat(0f, 360f, infiniteRepeatable(tween(1_000, easing = LinearEasing)), label = "angle")
+        .animateFloat(0f, 360f, Motion.spin(), label = "angle")
     Canvas(Modifier.size(TUNING_SIZE)) {
         val stroke = 2.dp.toPx()
         rotate(if (reduced) 0f else angle.value) {
@@ -722,27 +707,20 @@ private fun problemOf(state: SessionState): Problem? = when (val phase = state.p
 }
 
 @Composable
-private fun ProblemCard(problem: Problem, takeFocus: Boolean, onAction: () -> Unit) {
-    Box(Modifier.fillMaxSize().background(Scrim), contentAlignment = Alignment.Center) {
-        Column(
-            Modifier.widthIn(max = CARD_WIDTH).material().padding(Space.xxl),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
-            Text(problem.title, style = Type.title)
-            Text(problem.body, style = Type.body)
-            val label = problem.button ?: return@Column
-            val button = remember { FocusRequester() }
-            LaunchedEffect(takeFocus) { if (takeFocus) button.requestFocus() }
-            Text(
-                label,
-                style = Type.headline,
-                modifier = Modifier
-                    .padding(top = Space.m)
-                    .focusRequester(button)
-                    .pressable(onAction)
-                    .padding(horizontal = Space.xl, vertical = Space.m),
-            )
-        }
+private fun StreamProblem(problem: Problem, takeFocus: Boolean, onAction: () -> Unit) {
+    ProblemCard(problem.title, problem.body) {
+        val label = problem.button ?: return@ProblemCard
+        val button = remember { FocusRequester() }
+        LaunchedEffect(takeFocus) { if (takeFocus) button.requestFocus() }
+        Text(
+            label,
+            style = Type.headline,
+            modifier = Modifier
+                .padding(top = Space.m)
+                .focusRequester(button)
+                .pressable(onAction)
+                .padding(horizontal = Space.xl, vertical = Space.m),
+        )
     }
 }
 
@@ -862,12 +840,7 @@ private fun levelColor(level: Health.Level) = when (level) {
 
 /** Unasked trouble in the corner: the dot and why, then just the dot until it clears; it fades out once fine. */
 @Composable
-private fun HealthCorner(health: Health?, modifier: Modifier) {
-    val shown = animateFloatAsState(if (health != null) 1f else 0f, Motion.panel(), label = "health")
-    val kept = remember { arrayOfNulls<Health>(1) }
-    if (health != null) kept[0] = health
-    val h = kept[0] ?: return
-    if (health == null && shown.value == 0f) return
+private fun HealthCorner(health: Health?, modifier: Modifier) = CornerNotice(health, modifier) { h ->
     var expanded by remember { mutableStateOf(true) }
     // A new kind of trouble says why again; its numbers changing does not.
     LaunchedEffect(h.level, h.reason?.substringBefore(" ·")?.filterNot(Char::isDigit)) {
@@ -875,17 +848,8 @@ private fun HealthCorner(health: Health?, modifier: Modifier) {
         delay(HEALTH_TEXT_MS)
         expanded = false
     }
-    Row(
-        modifier
-            .graphicsLayer { alpha = shown.value }
-            .material(Radius.panel)
-            .padding(horizontal = Space.l, vertical = Space.s),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.s),
-    ) {
-        if (expanded && h.reason != null) Text(h.reason, style = Type.caption.copy(color = Palette.textPrimary), maxLines = 1)
-        HealthDot(h.level)
-    }
+    if (expanded && h.reason != null) Text(h.reason, style = Type.caption.copy(color = Palette.textPrimary), maxLines = 1)
+    HealthDot(h.level)
 }
 
 private val HEALTH_DOT = 10.dp

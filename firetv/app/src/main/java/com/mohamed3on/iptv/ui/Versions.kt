@@ -15,7 +15,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.focus.focusProperties
 import com.mohamed3on.iptv.ui.theme.material
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
@@ -26,13 +25,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
@@ -64,6 +59,9 @@ import com.mohamed3on.iptv.ui.theme.Palette
 import com.mohamed3on.iptv.ui.theme.Space
 import com.mohamed3on.iptv.ui.theme.FitText
 import com.mohamed3on.iptv.ui.theme.Type
+import com.mohamed3on.iptv.ui.theme.PanelRow
+import com.mohamed3on.iptv.ui.theme.pressable
+import com.mohamed3on.iptv.ui.theme.scrollbar
 import kotlin.math.roundToInt
 
 /** What Versions lists: a title's ranking, the debrid's answers, the box's answer (sizes, names) and the copy playing, if any. */
@@ -307,19 +305,6 @@ private fun VersionRow(r: Ranked, reason: String, data: VersionsData, focus: Foc
             active = focused,
         )
     }
-}
-
-/** A thin accent thumb at the right of an inner list that scrolls, read while drawing. */
-internal fun Modifier.scrollbar(state: LazyListState): Modifier = drawWithContent {
-    drawContent()
-    val info = state.layoutInfo
-    val total = info.totalItemsCount
-    val visible = info.visibleItemsInfo.size
-    if (total == 0 || visible >= total) return@drawWithContent
-    val w = 3.dp.toPx()
-    val h = (size.height * visible / total).coerceAtLeast(24.dp.toPx())
-    val top = (size.height - h) * (state.firstVisibleItemIndex.toFloat() / (total - visible)).coerceIn(0f, 1f)
-    drawRoundRect(Palette.accent, topLeft = Offset(size.width - w, top), size = Size(w, h), cornerRadius = CornerRadius(w / 2))
 }
 
 /** The serving debrid's name, for labels: "TorBox", "Real-Debrid", or "Debrid" while both serve. */

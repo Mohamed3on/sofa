@@ -25,7 +25,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
@@ -77,7 +76,7 @@ private val CAPTION_HEIGHT = 20.dp
 @Composable
 fun MultiViewTiles(state: MultiViewState<ExoStreamPlayer>, guide: GuideDb?, clock: State<Long>) {
     val reduced = LocalReducedMotion.current
-    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black).padding(Space.safe)) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(Palette.video).padding(Space.safe)) {
         val n = state.tiles.size
         val rows = if (n > 2) 2 else 1
         val gutter = Space.l

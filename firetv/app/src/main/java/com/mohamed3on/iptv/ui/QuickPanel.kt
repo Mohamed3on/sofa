@@ -3,18 +3,12 @@ package com.mohamed3on.iptv.ui
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -25,13 +19,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
@@ -53,12 +44,10 @@ import com.mohamed3on.iptv.data.RouteKind
 import com.mohamed3on.iptv.player.AudioOption
 import com.mohamed3on.iptv.player.AudioState
 import com.mohamed3on.iptv.ui.theme.Motion
-import com.mohamed3on.iptv.ui.theme.Palette
 import com.mohamed3on.iptv.ui.theme.Space
-import com.mohamed3on.iptv.ui.theme.FitText
 import com.mohamed3on.iptv.ui.theme.Type
-import com.mohamed3on.iptv.ui.theme.focusLift
 import com.mohamed3on.iptv.ui.theme.material
+import com.mohamed3on.iptv.ui.theme.PanelRow
 import java.util.Locale
 
 private val PANEL_WIDTH = 420.dp
@@ -200,46 +189,6 @@ fun QuickPanel(
     }
 }
 
-/** A panel entry: a label, its current value at the right, and a check when it is the selected option. */
-@Composable
-fun PanelRow(
-    label: String,
-    value: String? = null,
-    checked: Boolean = false,
-    focus: FocusRequester? = null,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    var focused by remember { mutableStateOf(false) }
-    Row(
-        modifier
-            .fillMaxWidth()
-            .then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
-            .onFocusChanged { focused = it.isFocused }
-            .pressable(onClick)
-            .padding(horizontal = Space.l, vertical = Space.m),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.m),
-    ) {
-        FitText(label, style = Type.headline, active = focused, modifier = Modifier.weight(1f))
-        // A value that changes in place ("Refreshing…" → "Up to date") cross-fades.
-        if (value != null) AnimatedContent(
-            targetState = value,
-            transitionSpec = { fadeIn(tween(Motion.FADE_MS)) togetherWith fadeOut(tween(Motion.FADE_MS)) },
-            label = "value",
-        ) { Text(it, style = Type.body, maxLines = 1) }
-        if (checked) CheckMark(Palette.accent)
-    }
-}
-
-/** Focusable and pressed with OK, lifting toward the viewer while focused. */
-@Composable
-internal fun Modifier.pressable(onClick: () -> Unit): Modifier {
-    val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
-    return focusLift(focused).clickable(interaction, indication = null, onClick = onClick)
-}
-
 private fun traktValue(s: TraktStatus?) = when (s?.state) {
     null -> null
     "on" -> s.user.ifEmpty { "Connected" }
@@ -316,23 +265,3 @@ internal fun channelLayout(channels: Int): String? = when (channels) {
     else -> if (channels > 0) "$channels ch" else null
 }
 
-/** A selected option's mark: a drawn check, one stroke weight with the app's other marks (never a typed glyph). */
-@Composable
-internal fun CheckMark(color: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier) {
-    androidx.compose.foundation.Canvas(modifier.size(CHECK_SIZE)) {
-        val w = size.width
-        val path = androidx.compose.ui.graphics.Path().apply {
-            moveTo(w * 0.18f, w * 0.52f)
-            lineTo(w * 0.40f, w * 0.74f)
-            lineTo(w * 0.82f, w * 0.28f)
-        }
-        drawPath(
-            path, color,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(
-                width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round,
-            ),
-        )
-    }
-}
-
-private val CHECK_SIZE = 18.dp

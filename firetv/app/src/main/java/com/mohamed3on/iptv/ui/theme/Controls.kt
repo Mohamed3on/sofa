@@ -48,6 +48,26 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Text
 import com.mohamed3on.iptv.R
+import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.runtime.State
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.drawscope.Stroke
 
 /**
  * The one button style: a label that lifts on focus and presses in to 0.96 on OK, so the
@@ -57,8 +77,7 @@ import com.mohamed3on.iptv.R
 fun ActionButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val pressed by interaction.collectIsPressedAsState()
-    val press by animateFloatAsState(if (pressed) 0.96f else 1f, Motion.focus(), label = "press")
+    val press by pressScale(interaction)
     Text(
         label,
         style = Type.headline,
@@ -66,8 +85,15 @@ fun ActionButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifi
             .graphicsLayer { scaleX = press; scaleY = press }
             .focusLift(focused)
             .clickable(interaction, indication = null, onClick = onClick)
-            .padding(horizontal = Space.xl, vertical = Space.m),
+            .padding(horizontal = if (small) Space.l else Space.xl, vertical = if (small) Space.s else Space.m),
     )
+}
+
+/** A button's scale: 0.96 while OK holds it down, on the focus spring, so the press lands on the key's frame. */
+@Composable
+private fun pressScale(interaction: InteractionSource): State<Float> {
+    val pressed by interaction.collectIsPressedAsState()
+    return animateFloatAsState(if (pressed) 0.96f else 1f, Motion.focus(), label = "press")
 }
 
 /** True inside the focused row or card: the [FitText] lines in it scroll. */
@@ -192,4 +218,111 @@ fun ActivityLine(modifier: Modifier = Modifier, width: Dp = 160.dp) {
 @Composable
 fun Mark(modifier: Modifier = Modifier, size: Dp = 88.dp) {
     Image(painterResource(R.drawable.ic_mark), contentDescription = null, modifier = modifier.size(size, size * 0.86f))
+}
+
+/** A panel entry: a label, its current value at the right, and a check when it is the selected option. */
+@Composable
+fun PanelRow(
+    label: String,
+    value: String? = null,
+    checked: Boolean = false,
+    focus: FocusRequester? = null,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
+            .onFocusChanged { focused = it.isFocused }
+            .pressable(onClick)
+            .padding(horizontal = Space.l, vertical = Space.m),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.m),
+    ) {
+        FitText(label, style = Type.headline, active = focused, modifier = Modifier.weight(1f))
+        // A value that changes in place ("Refreshing…" → "Up to date") cross-fades.
+        if (value != null) AnimatedContent(
+            targetState = value,
+            transitionSpec = { fadeIn(Motion.fade()) togetherWith fadeOut(Motion.fade()) },
+            label = "value",
+        ) { Text(it, style = Type.body, maxLines = 1) }
+        if (checked) CheckMark(Palette.accent)
+    }
+}
+
+/** Focusable and pressed with OK, lifting toward the viewer while focused. */
+@Composable
+fun Modifier.pressable(onClick: () -> Unit): Modifier {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    return focusLift(focused).clickable(interaction, indication = null, onClick = onClick)
+}
+
+/** A selected option's mark: a drawn check, one stroke weight with the app's other marks (never a typed glyph). */
+@Composable
+fun CheckMark(color: Color, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier.size(CHECK_SIZE)) {
+        val w = size.width
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(w * 0.18f, w * 0.52f)
+            lineTo(w * 0.40f, w * 0.74f)
+            lineTo(w * 0.82f, w * 0.28f)
+        }
+        drawPath(
+            path, color,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(
+                width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round,
+            ),
+        )
+    }
+}
+
+private val CHECK_SIZE = 18.dp
+
+/** A remote key drawn as a small cap, so instructions point at the button itself. */
+@Composable
+fun KeyCap(label: String) {
+    Text(
+        label,
+        style = Type.caption.copy(color = Palette.textPrimary),
+        modifier = Modifier
+            .clip(RoundedCornerShape(Radius.chip))
+            .background(Palette.raised)
+            .border(1.dp, Palette.edge, RoundedCornerShape(Radius.chip))
+            .padding(horizontal = Space.s, vertical = 2.dp),
+    )
+}
+
+/**
+ * A title page's or Up next's button: a quiet translucent pill that turns solid light when focused, so
+ * the one OK will press reads from across the room. A [selected] one is outlined in the accent; a [small] one is a chip.
+ */
+@Composable
+fun PageButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false, small: Boolean = false) {
+    val reduced = LocalReducedMotion.current
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val lift = animateFloatAsState(if (focused) 1f else 0f, Motion.focus(), label = "lift")
+    val press by pressScale(interaction)
+    Text(
+        label,
+        style = (if (small) Type.body else Type.headline).copy(color = if (focused) Palette.ink else Palette.textPrimary),
+        maxLines = 1,
+        modifier = modifier
+            .graphicsLayer {
+                val s = (if (reduced) 1f else 1f + 0.06f * lift.value) * press
+                scaleX = s
+                scaleY = s
+            }
+            .drawBehind {
+                val p = lift.value.coerceIn(0f, 1f)
+                val r = CornerRadius(Radius.row.toPx())
+                drawRoundRect(lerp(Palette.material, Palette.textPrimary, p), cornerRadius = r)
+                if (p < 1f) drawRoundRect(if (selected) Palette.accent else Palette.edge, cornerRadius = r, style = Stroke((if (selected) 2 else 1).dp.toPx()), alpha = 1f - p)
+            }
+            .clickable(interaction, indication = null, onClick = onClick)
+            .padding(horizontal = if (small) Space.l else Space.xl, vertical = if (small) Space.s else Space.m),
+    )
 }

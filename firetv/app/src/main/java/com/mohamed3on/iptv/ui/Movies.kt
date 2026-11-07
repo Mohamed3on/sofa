@@ -1,20 +1,14 @@
 package com.mohamed3on.iptv.ui
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.runtime.SideEffect
-import com.mohamed3on.iptv.ui.theme.reveal
 import android.graphics.Bitmap
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.Shader
 import android.util.LruCache
-import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
@@ -23,17 +17,13 @@ import androidx.compose.ui.unit.IntSize
 import coil3.PlatformContext
 import coil3.request.allowHardware
 import coil3.toBitmap
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.background
 import androidx.compose.ui.text.font.FontWeight
 import coil3.SingletonImageLoader
@@ -110,7 +100,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.KeyEventType
@@ -205,6 +194,11 @@ import com.mohamed3on.iptv.ui.theme.Type
 import com.mohamed3on.iptv.ui.theme.edgeFade
 import com.mohamed3on.iptv.ui.theme.material
 import com.mohamed3on.iptv.ui.theme.slideFade
+import com.mohamed3on.iptv.ui.theme.pressable
+import com.mohamed3on.iptv.ui.theme.PageButton
+import com.mohamed3on.iptv.ui.theme.SlidePanel
+import com.mohamed3on.iptv.ui.theme.CardScrim
+import com.mohamed3on.iptv.ui.theme.TileScrim
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -217,8 +211,6 @@ import android.view.KeyEvent as AndroidKeyEvent
 
 private val CARD = DpSize(132.dp, 198.dp)
 private const val CARD_SCALE = 1.08f
-/** A poster fades in as it loads; Coil skips the fade for posters already in memory. */
-private const val POSTER_FADE_MS = 150
 private val CARD_SHAPE = RoundedCornerShape(Radius.row)
 private val RING = 3.dp
 private val EDGE = 48.dp
@@ -234,7 +226,6 @@ private val FADE = Space.l
 private const val HERO_REST_MS = 90L
 private const val FOCUS_FRAMES = 30
 /** Title pages and Up next set the name larger than anywhere else: the title is the screen's subject. */
-private val BIG_TITLE = Type.display.copy(fontSize = 36.sp, lineHeight = 42.sp)
 /** Up next's and a film page's text column: to 84% of the screen, where the backdrop's dense scrim reaches, so meta lines and plots rarely scroll. */
 private val PAGE_WIDTH = 760.dp
 private val SHOW_INFO_WIDTH = 420.dp
@@ -248,7 +239,6 @@ private val SEARCH_ROOM = 120.dp
 private const val SHOW_WATCHED = "movies.showWatched"
 /** Backdrops decode at 720p: darkened behind text, more pixels show nothing and cost the stick's memory. */
 private val BACKDROP_PX = 1280 to 720
-private const val BACKDROP_FADE_MS = 400
 /** How tall the backdrop's fade into the ground is, above where the rows start. */
 private val SOLID_BAND = 72.dp
 /** A dark band along the top, so Search reads over a white sky. */
@@ -680,7 +670,7 @@ private fun MoviesBrowse(
                     targetState = shownPage == BrowsePage.UpNext,
                     transitionSpec = {
                         when {
-                            reduced -> fadeIn(tween(Motion.FADE_MS)) togetherWith fadeOut(tween(Motion.FADE_MS))
+                            reduced -> fadeIn(Motion.fade()) togetherWith fadeOut(Motion.fade())
                             // Back to Up next: the rows sink back under the band.
                             targetState -> fadeIn(Motion.spring(0.3f)) togetherWith
                                 (slideOutVertically(Motion.panel()) { it / 3 } + fadeOut(Motion.panel()))
@@ -877,7 +867,7 @@ private fun Backdrop(url: String?, solidFrom: Dp?, modifier: Modifier = Modifier
         under = shown
         shown = next
         fade.snapTo(0f)
-        fade.animateTo(1f, tween(BACKDROP_FADE_MS))
+        fade.animateTo(1f, Motion.slowFade())
         under = null
     }
     // Up next to the rows: the ground rises from the bottom to [solidFrom].
@@ -994,7 +984,7 @@ private fun UpNextPage(
             label = "upnext",
         ) { (m, r, i) ->
             Column(Modifier.padding(start = EDGE).widthIn(max = PAGE_WIDTH), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                FitText(m.title.title, style = BIG_TITLE, active = true)
+                FitText(m.title.title, style = Type.pageTitle, active = true)
                 MetaLine(m, i)
                 Row(Modifier.padding(top = Space.xs), horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
                     Text(listOfNotNull(r.label, r.takeIf { it.dur > 0 && it.pos > 0 }?.let { leftLabel(it.dur - it.pos) }).joinToString(" · "), style = Type.headline, maxLines = 1)
@@ -1163,14 +1153,14 @@ private const val LETTERBOXD = "Letterboxd"
 /** The scores line's IMDb badge (black on its yellow) and Letterboxd's three dots, in place of their names. */
 private val SCORE_LOGOS = mapOf(
     IMDB to InlineTextContent(Placeholder(2.3.em, 1.1.em, PlaceholderVerticalAlign.Center)) {
-        Box(Modifier.fillMaxSize().background(Color(0xFFF5C518), RoundedCornerShape(3.dp)), contentAlignment = Alignment.Center) {
-            Text("IMDb", style = Type.caption.copy(color = Color.Black, fontSize = 10.sp, lineHeight = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.em))
+        Box(Modifier.fillMaxSize().background(Palette.imdb, RoundedCornerShape(3.dp)), contentAlignment = Alignment.Center) {
+            Text("IMDb", style = Type.imdbLogo)
         }
     },
     LETTERBOXD to InlineTextContent(Placeholder(1.45.em, 0.6.em, PlaceholderVerticalAlign.Center)) {
         Canvas(Modifier.fillMaxSize()) {
             val r = size.height / 2
-            listOf(Color(0xFFFF8000), Color(0xFF00E054), Color(0xFF40BCF4)).forEachIndexed { i, c -> drawCircle(c, r, Offset(r + i * (size.width / 2 - r), r)) }
+            Palette.letterboxd.forEachIndexed { i, c -> drawCircle(c, r, Offset(r + i * (size.width / 2 - r), r)) }
         }
     },
 )
@@ -1203,8 +1193,6 @@ private fun cardChip(scored: Scored): AnnotatedString? {
     }
 }
 
-/** Dark enough under the chip's 13 sp text to clear 4.5:1 over any poster. */
-private val CHIP_GROUND = Color(0xE00B0E12)
 /** Nested in the card's corner at a 4 dp inset: its radius is the card's less the inset. */
 private val CHIP_SHAPE = RoundedCornerShape(Radius.row - Space.xs)
 private val CHIP_TEXT = Type.caption.copy(color = Palette.textPrimary)
@@ -1257,39 +1245,6 @@ private val FLAGS = mapOf(
 )
 
 /**
- * A title page's or Up next's button: a quiet translucent pill that turns solid light when focused, so
- * the one OK will press reads from across the room. A [selected] one is outlined in the accent; a [small] one is a chip.
- */
-@Composable
-private fun PageButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false, small: Boolean = false) {
-    val reduced = LocalReducedMotion.current
-    val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
-    val pressed by interaction.collectIsPressedAsState()
-    val lift = animateFloatAsState(if (focused) 1f else 0f, Motion.focus(), label = "lift")
-    val press by animateFloatAsState(if (pressed) 0.96f else 1f, Motion.focus(), label = "press")
-    Text(
-        label,
-        style = (if (small) Type.body else Type.headline).copy(color = if (focused) Palette.ink else Palette.textPrimary),
-        maxLines = 1,
-        modifier = modifier
-            .graphicsLayer {
-                val s = (if (reduced) 1f else 1f + 0.06f * lift.value) * press
-                scaleX = s
-                scaleY = s
-            }
-            .drawBehind {
-                val p = lift.value.coerceIn(0f, 1f)
-                val r = CornerRadius(Radius.row.toPx())
-                drawRoundRect(lerp(Palette.material, Palette.textPrimary, p), cornerRadius = r)
-                if (p < 1f) drawRoundRect(if (selected) Palette.accent else Palette.edge, cornerRadius = r, style = Stroke((if (selected) 2 else 1).dp.toPx()), alpha = 1f - p)
-            }
-            .clickable(interaction, indication = null, onClick = onClick)
-            .padding(horizontal = if (small) Space.l else Space.xl, vertical = if (small) Space.s else Space.m),
-    )
-}
-
-/**
  * A title part-way through as a 16:9 card: its backdrop (else its poster), name and where it is
  * ("S1 E3"), how far along. Focus lifts it with the accent ring, like a poster.
  */
@@ -1304,7 +1259,7 @@ private fun WideCard(movie: Movie, saved: Resume, new: Boolean, onFocused: () ->
     val lift = animateFloatAsState(if (focused) 1f else 0f, Motion.focus(), label = "lift")
     val image = backdropOf(movie, info)?.let { tmdbAt(it, "w780") } ?: movie.poster.ifEmpty { null }?.let(::posterUrl)
     val request = remember(image) {
-        image?.let { with(density) { ImageRequest.Builder(context).data(it).size(WIDE.width.roundToPx(), WIDE.height.roundToPx()).crossfade(POSTER_FADE_MS).build() } }
+        image?.let { with(density) { ImageRequest.Builder(context).data(it).size(WIDE.width.roundToPx(), WIDE.height.roundToPx()).crossfade(Motion.IMAGE_FADE_MS).build() } }
     }
     Box(
         Modifier
@@ -1336,7 +1291,7 @@ private fun WideCard(movie: Movie, saved: Resume, new: Boolean, onFocused: () ->
     ) {
         if (request != null) AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         // The name and progress read over any picture.
-        Box(Modifier.fillMaxSize().drawBehind { drawRect(Brush.verticalGradient(0.4f to Color.Transparent, 1f to Color(0xE6000000))) })
+        Box(Modifier.fillMaxSize().drawBehind { drawRect(CardScrim) })
         Column(Modifier.align(Alignment.BottomStart).padding(horizontal = Space.s, vertical = Space.s), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
             if (new) Text(NEW_EPISODE, style = NEW_STYLE, maxLines = 1)
             FitText(listOfNotNull(movie.title.title, saved.label).joinToString(" · "), style = Type.caption.copy(color = Palette.textPrimary), active = focused)
@@ -1587,7 +1542,7 @@ private fun PosterCard(movie: Movie, progress: Float?, watched: Boolean = false,
     var failed by remember(movie.poster) { mutableStateOf(false) }
     val request = remember(movie.poster) {
         movie.poster.takeIf { it.isNotEmpty() }?.let {
-            with(density) { ImageRequest.Builder(context).data(posterUrl(it)).size(CARD.width.roundToPx(), CARD.height.roundToPx()).crossfade(POSTER_FADE_MS).build() }
+            with(density) { ImageRequest.Builder(context).data(posterUrl(it)).size(CARD.width.roundToPx(), CARD.height.roundToPx()).crossfade(Motion.IMAGE_FADE_MS).build() }
         }
     }
     Box(
@@ -1634,7 +1589,7 @@ private fun PosterCard(movie: Movie, progress: Float?, watched: Boolean = false,
         }
         if (label != null) {
             // Dark enough at the foot that the name reads over a poster's own lettering.
-            Box(Modifier.fillMaxSize().drawBehind { drawRect(Brush.verticalGradient(0.25f to Color.Transparent, 0.6f to Color(0xB3000000), 1f to Color(0xF2000000))) })
+            Box(Modifier.fillMaxSize().drawBehind { drawRect(TileScrim) })
             Text(label, style = Type.title, modifier = Modifier.align(Alignment.BottomStart).padding(Space.s))
             return@Box
         }
@@ -1646,13 +1601,13 @@ private fun PosterCard(movie: Movie, progress: Float?, watched: Boolean = false,
         val rt = movie.lib?.rt ?: 0
         if (rt > 0 && progress == null) Text(
             remember(rt) { if (rt >= 60) "${rt / 60}h %02d".format(Locale.ROOT, rt % 60).removeSuffix(" 00") else "${rt}m" }, style = CHIP_TEXT, maxLines = 1,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(Space.xs).background(CHIP_GROUND, CHIP_SHAPE).padding(horizontal = Space.xs + 2.dp, vertical = 1.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(Space.xs).background(Palette.chipGround, CHIP_SHAPE).padding(horizontal = Space.xs + 2.dp, vertical = 1.dp),
         )
         val learnt = movie.lib?.takeIf { !it.known }?.let { LocalContext.current.graph.titles.scores.collectAsState().value[movie.titleId] }
         val chip = remember(movie.lib, learnt) { movie.lib?.let { cardChip(learnt ?: it) } }
         if (chip != null) Text(
             chip, style = CHIP_TEXT, maxLines = 1,
-            modifier = Modifier.align(Alignment.TopStart).padding(Space.xs).background(CHIP_GROUND, CHIP_SHAPE).padding(horizontal = Space.xs + 2.dp, vertical = 1.dp),
+            modifier = Modifier.align(Alignment.TopStart).padding(Space.xs).background(Palette.chipGround, CHIP_SHAPE).padding(horizontal = Space.xs + 2.dp, vertical = 1.dp),
         )
     }
 }
@@ -1927,38 +1882,11 @@ private fun PlaysLine(title: TitleId, fallback: List<String>?, modifier: Modifie
 
 private val PLAYS_HEIGHT = 24.dp
 
-/**
- * A panel at the right edge that slides in from the right and back out to it, as Options and Recent do on the
- * live screen. A non-null [value] shows it; while it leaves, [content] keeps the last value. [content] gets
- * whether the panel is still open (passed on, so focus can leave a closing panel) and the modifier for the panel.
- */
-@Composable
-private fun <T : Any> BoxScope.SlidePanel(value: T?, content: @Composable (value: T, open: Boolean, modifier: Modifier) -> Unit) {
-    val reduced = LocalReducedMotion.current
-    val focusManager = LocalFocusManager.current
-    var last by remember { mutableStateOf(value) }
-    val holdsFocus = remember { booleanArrayOf(false) }
-    SideEffect {
-        if (value != null) last = value
-        // A closing panel lets focus go at once, so the page's own "focus is back with me" check moves it where it belongs.
-        else if (holdsFocus[0]) focusManager.clearFocus(force = true)
-    }
-    AnimatedVisibility(
-        visible = value != null,
-        enter = EnterTransition.None,
-        exit = ExitTransition.None,
-        modifier = Modifier.align(Alignment.CenterEnd).padding(Space.safe).onFocusChanged { holdsFocus[0] = it.hasFocus },
-    ) {
-        val shown = reveal()
-        (value ?: last)?.let { content(it, value != null, Modifier.slideFade({ shown.value }, Edge.Right, reduced)) }
-    }
-}
-
 /** A title page's name in display type, its original-language title under it when TMDB has one that differs. */
 @Composable
 private fun PageTitle(title: String, info: MovieInfo?, modifier: Modifier = Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-        ScrollText(title, style = BIG_TITLE, lines = 2)
+        ScrollText(title, style = Type.pageTitle, lines = 2)
         info?.originalTitle?.ifBlank { null }?.let { FitText(it, style = ORIGINAL_TITLE, active = true, modifier = Modifier.appear()) }
     }
 }
@@ -2045,7 +1973,7 @@ private fun Modifier.appear(): Modifier {
     LaunchedEffect(alpha) {
         // The lines it pushes up [glide] out of its way first, so the two never overlap.
         if (!reduced) delay(MAKE_ROOM_MS)
-        alpha.animateTo(1f, if (reduced) tween(Motion.FADE_MS) else Motion.spring(0.3f))
+        alpha.animateTo(1f, if (reduced) Motion.fade() else Motion.spring(0.3f))
     }
     return graphicsLayer {
         this.alpha = alpha.value
@@ -2257,7 +2185,7 @@ private fun PersonPage(person: Person, watched: Set<TitleId>, active: Boolean, h
         ) {
             item(key = "name", span = { GridItemSpan(maxLineSpan) }) {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    Text(person.name, style = BIG_TITLE, maxLines = 2)
+                    Text(person.name, style = Type.pageTitle, maxLines = 2)
                     // Something holds focus while there are no cards, so Back still answers.
                     if (list == null && !failed) Waiting("Loading their films and shows…", Modifier.focusRequester(status).focusable())
                     else Text(
@@ -2489,7 +2417,7 @@ private fun EpisodeRow(episode: Episode, watched: Boolean, rating: Int?, progres
     val context = LocalPlatformContext.current
     val density = LocalDensity.current
     val request = remember(episode.image) {
-        episode.image.ifEmpty { null }?.let { with(density) { ImageRequest.Builder(context).data(tmdbAt(it, "w300")).size(STILL.width.roundToPx(), STILL.height.roundToPx()).crossfade(POSTER_FADE_MS).build() } }
+        episode.image.ifEmpty { null }?.let { with(density) { ImageRequest.Builder(context).data(tmdbAt(it, "w300")).size(STILL.width.roundToPx(), STILL.height.roundToPx()).crossfade(Motion.IMAGE_FADE_MS).build() } }
     }
     // "Episode 4" says nothing a number doesn't.
     val title = episode.title.takeUnless { it.isEmpty() || GENERIC_EPISODE.matches(it) }?.replace("...", "…")
@@ -2553,7 +2481,7 @@ private fun WatchedMark(modifier: Modifier) {
                 lineTo(w * 0.44f, w * 0.68f)
                 lineTo(w * 0.73f, w * 0.36f)
             }
-            drawPath(check, Color.White, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(check, Palette.onAccent, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
         },
     )
 }
