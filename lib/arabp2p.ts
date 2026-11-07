@@ -98,8 +98,8 @@ export function searchRows(html: string): Row[] {
     const id = item.match(/torrent-details&amp;id=(\d+)/)?.[1]
     const link = item.match(/href="(download\.php\?[^"]+)"/)?.[1]
     if (!id || !link) return []
-    // The whole link's text: a title can open with a tag (a restored upload's label).
-    const title = text(item.match(/class="tor_link">([\s\S]*?)<\/a>/)?.[1] ?? '')
+    // A free download's title is a "tor_free_link".
+    const title = text(item.match(/class="tor_(?:free_)?link">([^<]*)/)?.[1] ?? '')
     const category = text(item.match(/<span class="category">([\s\S]*?)<\/span>/)?.[1] ?? '')
     return [{
       id, title, size: bytes(item.match(/<span class="size">([^<]*)/)?.[1] ?? ''),

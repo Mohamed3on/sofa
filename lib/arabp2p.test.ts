@@ -89,6 +89,7 @@ test("a show's file is its episode only when named for the show; an upload names
   expect(episodeOf('Bluey.Compilations.S01E01.Outdoor.Adventures.mkv', bluey)).toBeNull()
   expect(episodeOf('Bluey.S01E05.nfo', bluey)).toBeNull()
   expect(episodeOf('تيمون وبومبا الجزء 3 الحلقة 05.mp4', ['تيمون وبومبا'])).toEqual([3, 5])
+  expect(searchRows(`<div class="file-item"><a href="index.php?page=torrent-details&amp;id=69399"><span class="tor_free_link">[استعادة] بلوي [مدبلج] Bluey 2018 S01 02 03 </span></a><a href="download.php?id=69399&amp;f=b.torrent">`)[0].title).toBe('[استعادة] بلوي [مدبلج] Bluey 2018 S01 02 03')
   expect(namesSeason('[استعادة] بلوي [مدبلج][مترجم] Bluey.2018.S01-02-03.1080p', 3)).toBe(true)
   expect(namesSeason('[استعادة] بلوي [مدبلج][مترجم] Bluey.2018.S01-02-03.1080p', 4)).toBe(false)
   expect(namesSeason('بلوي [م2][مدبلج][1080p]', 2)).toBe(true)
