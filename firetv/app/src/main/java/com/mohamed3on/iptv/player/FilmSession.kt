@@ -310,9 +310,9 @@ class FilmSession(
     private fun candidate(): Ranked? = plan.state.value.pick(tried, iptvBusy)
 
     /** [copy]'s URL: IPTV's at once; a debrid copy's once ready, from a link fetched ahead or a fresh one. Null when it can't play. */
-    private suspend fun url(copy: Copy): String? {
+    private suspend fun url(copy: Copy, chosen: Boolean = false): String? {
         if (copy.source == Source.Iptv) return iptvUrl(copy)
-        ready(copy) ?: return null
+        ready(copy, chosen) ?: return null
         return try {
             plan.link(copy)
         } catch (e: DebridError) {
@@ -320,11 +320,11 @@ class FilmSession(
         }
     }
 
-    private suspend fun ready(copy: Copy): DebridCheck.Ready? {
+    private suspend fun ready(copy: Copy, chosen: Boolean = false): DebridCheck.Ready? {
         if (copy.id !in plan.state.value.debrid) {
             // While an IPTV copy could play instead, the debrid gets no longer than copies do, and at the start only
-            // what is left of Play's wait (KTD13).
-            val other = !iptvBusy && plan.state.value.ranking?.copies.orEmpty().any { it.copy.source == Source.Iptv && it.copy.id !in tried }
+            // what is left of Play's wait (KTD13); a copy chosen (Versions, an offer) waits, the one playing kept meanwhile.
+            val other = !chosen && !iptvBusy && plan.state.value.ranking?.copies.orEmpty().any { it.copy.source == Source.Iptv && it.copy.id !in tried }
             if (other) withTimeoutOrNull(if (current == null) startBy - now() else WAIT_MS) { plan.check(copy) } else plan.check(copy)
         }
         faults(plan.state.value)
@@ -436,7 +436,7 @@ class FilmSession(
     private fun switch(to: Copy, back: Copy?, trial: Boolean) {
         work?.cancel()
         work = jobs.launch {
-            val url = url(to) ?: return@launch
+            val url = url(to, chosen = true) ?: return@launch
             val place = here()
             this@FilmSession.back = back
             this@FilmSession.trial = trial

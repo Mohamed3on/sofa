@@ -68,12 +68,13 @@ internal class FakeFilm(private val scope: CoroutineScope, private val clock: ()
 }
 
 /** The debrid has the torrents [ready] names (every one by default); links count up so a fresh one is visible. */
-internal class FakeDebrid(private val ready: (String) -> Boolean = { true }) : Debrid {
+internal class FakeDebrid(private val answerMs: Long = 0, private val ready: (String) -> Boolean = { true }) : Debrid {
     override val status = MutableStateFlow(DebridStatus("Fake"))
     var links = 0
     var checks = 0
     override suspend fun check(candidates: List<DebridCandidate>): Map<DebridCandidate, DebridCheck> {
         checks++
+        if (answerMs > 0) kotlinx.coroutines.delay(answerMs)
         return candidates.associateWith { if (ready(it.hash)) DebridCheck.Ready(it.hash, "hoster/${it.hash}") else DebridCheck.NotCached }
     }
     override suspend fun link(ready: DebridCheck.Ready) = "https://rd.test/${ready.torrentId}/${++links}"

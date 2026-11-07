@@ -277,6 +277,21 @@ class FilmSessionTest {
         assertEquals(1, r.player.opens.size)
     }
 
+    // A copy chosen in Versions waits for its debrid check however long it takes, the copy playing kept meanwhile;
+    // only Play's own pick gives the check a short wait while an IPTV copy could play instead.
+    @Test fun aChosenDebridCopyWaitsForItsCheck() = runTest {
+        val r = rig(debrid = FakeDebrid(answerMs = 20_000))
+        val iptv2 = iptv1080.copy(id = "iptv:2")
+        play(r, rd4k, iptv1080, iptv2)
+        advance(FilmSession.WAIT_MS)
+        assertEquals(iptv1080, r.state.copy)
+        r.session.choose(rd4k.id)
+        advance(FilmSession.WAIT_MS + 1_000)
+        assertEquals(iptv1080, r.state.copy)
+        advance(20_000)
+        assertEquals(rd4k, r.state.copy)
+    }
+
     // KTD13: Real-Debrid's copies, still pending when Play started, join the play when the box has them.
     @Test fun copiesArrivingAfterPlayJoinIt() = runTest {
         val r = rig()
