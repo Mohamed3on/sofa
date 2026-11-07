@@ -76,8 +76,7 @@ import com.mohamed3on.iptv.ui.theme.slideFade
 import com.mohamed3on.iptv.update.updateRow
 import com.mohamed3on.iptv.data.displayName
 import com.mohamed3on.iptv.data.NowNext
-import com.mohamed3on.iptv.data.cleanTitle
-import com.mohamed3on.iptv.data.fixtureOf
+import com.mohamed3on.iptv.data.shownTitle
 import com.mohamed3on.iptv.data.groupName
 import com.mohamed3on.iptv.data.liveNow
 import com.mohamed3on.iptv.data.RouteKind
@@ -658,7 +657,7 @@ private fun Guide(channel: Channel, guide: GuideDb?, clock: State<Long>, describ
     if (now != null) {
         Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
             if (now.match) LiveMark()
-            Text(remember(now) { if (now.match) fixtureOf(now.title) else cleanTitle(now.title) }, style = Type.headline, maxLines = 2)
+            Text(remember(now) { shownTitle(now) }, style = Type.headline, maxLines = 2)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
             Text("${clockTime(now.start)} – ${clockTime(now.stop)}", style = Type.caption.tabular)
@@ -670,7 +669,7 @@ private fun Guide(channel: Channel, guide: GuideDb?, clock: State<Long>, describ
         if (describe && now.descr.isNotBlank()) ScrollText(now.descr, style = Type.prose, lines = 2, modifier = Modifier.widthIn(max = PROSE_WIDTH))
     }
     if (next != null && !next.synthetic) {
-        Text("Next · ${clockTime(next.start)} ${if (next.match) fixtureOf(next.title) else cleanTitle(next.title)}", style = Type.body, maxLines = 2)
+        Text("Next · ${clockTime(next.start)} ${shownTitle(next)}", style = Type.body, maxLines = 2)
     }
 }
 

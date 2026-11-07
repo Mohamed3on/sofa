@@ -68,6 +68,17 @@ private val SUPERSCRIPT = Regex("[\\u1D2C-\\u1DBF\\u2070-\\u209F\\u00B2\\u00B3\\
 internal fun cleanTitle(title: String): String = title.replace(SUPERSCRIPT, "").trim()
 
 /**
+ * A programme's title as the banner and rows show it: a live match by its fixture, and a re-run titled
+ * fixture first ("Leeds United vs Tottenham Hotspur - English Premier League 2026/2027 - Week 10") by
+ * the fixture too; a highlights or coverage title ("LALIGA Match Highlights: Real Betis v Malaga") stays whole.
+ */
+internal fun shownTitle(p: Programme): String {
+    if (p.match) return fixtureOf(p.title)
+    val head = p.title.substringBefore(" - ")
+    return cleanTitle(if (VERSUS.containsMatchIn(head) && ':' !in head) head else p.title)
+}
+
+/**
  * Just the fixture from a broadcaster's title: "LALIGA EA SPORTS 2026/2027 MD11 : Getafe CF vs
  * Sevilla FC" → "Getafe CF vs Sevilla FC", "Athletic Bilbao vs Real Sociedad - Spanish LaLiga
  * 2026/2027 - Week 11" → "Athletic Bilbao vs Real Sociedad". Other titles are cleaned like channel names.

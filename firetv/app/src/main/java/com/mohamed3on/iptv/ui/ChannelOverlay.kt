@@ -113,8 +113,7 @@ import com.mohamed3on.iptv.data.LiveNow
 import com.mohamed3on.iptv.data.SearchHit
 import com.mohamed3on.iptv.data.SearchResults
 import com.mohamed3on.iptv.data.TROPHY
-import com.mohamed3on.iptv.data.cleanTitle
-import com.mohamed3on.iptv.data.fixtureOf
+import com.mohamed3on.iptv.data.shownTitle
 import com.mohamed3on.iptv.data.groupName
 import com.mohamed3on.iptv.data.liveNow
 import com.mohamed3on.iptv.data.prepareSearch
@@ -1149,7 +1148,7 @@ internal fun ChannelRow(
                 lines?.noGuide == true -> Text("No guide", style = Type.body, maxLines = 1)
                 now != null -> {
                     if (now.match) LiveMark()
-                    FitText(remember(now) { if (now.match) fixtureOf(now.title) else cleanTitle(now.title) }, style = Type.body, modifier = Modifier.weight(1f))
+                    FitText(remember(now) { shownTitle(now) }, style = Type.body, modifier = Modifier.weight(1f))
                     Progress(now, clock)
                 }
                 else -> Text("", style = Type.body)
@@ -1157,7 +1156,7 @@ internal fun ChannelRow(
         }
         val next = lines?.next
         if (moving) Hint(MOVE_HINT) else LastLine(watchHint) {
-            FitText(remember(next) { next?.let { "Next · ${clockTime(it.start)} ${if (it.match) fixtureOf(it.title) else cleanTitle(it.title)}" } ?: "" }, style = Type.caption)
+            FitText(remember(next) { next?.let { "Next · ${clockTime(it.start)} ${shownTitle(it)}" } ?: "" }, style = Type.caption)
         }
     }
 }
