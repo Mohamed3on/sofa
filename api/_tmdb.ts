@@ -42,6 +42,12 @@ export interface TmdbTitle {
   /** Backdrop path ("/x.jpg"); "" when none. */
   backdrop: string
   genres: string[]
+  /** The genres' TMDB ids (films' and shows' differ). */
+  genreIds: number[]
+  /** TMDB popularity when last fetched. */
+  popularity?: number
+  /** An adult title: never shown. */
+  adult?: true
   /** A show's season numbers (specials left out); [] for a film. */
   seasons: number[]
   cast: { id: number; name: string; character: string }[]
@@ -76,7 +82,9 @@ interface Raw {
   poster_path?: string | null
   overview?: string
   backdrop_path?: string | null
-  genres?: { name: string }[]
+  genres?: { id: number; name: string }[]
+  popularity?: number
+  adult?: boolean
   seasons?: { season_number: number }[]
   created_by?: { id: number; name: string }[]
   external_ids?: { imdb_id?: string | null }
@@ -125,6 +133,9 @@ function trim(kind: Kind, r: Raw): TmdbTitle {
     plot: r.overview?.trim() ?? '',
     backdrop: r.backdrop_path ?? '',
     genres: (r.genres ?? []).map((g) => g.name),
+    genreIds: (r.genres ?? []).map((g) => g.id),
+    ...(r.popularity !== undefined && { popularity: r.popularity }),
+    ...(r.adult && { adult: true as const }),
     seasons: (r.seasons ?? []).map((x) => x.season_number).filter((n) => n > 0),
     cast: (r.credits?.cast ?? []).slice(0, 10).map(({ id, name, character }) => ({ id, name, character: character ?? '' })),
     directors: kind === 'tv'
@@ -175,11 +186,11 @@ export async function tmdbTitle(kind: Kind, id: string | number): Promise<TmdbTi
   if (!key || !tmdb) return null
   const k = `${kind}:${tmdb}`
   const all = await loaded()
-  // An entry kept before plots and backdrops, recommendations' votes, trailers, or original titles were is fetched again;
+  // An entry kept before plots and backdrops, recommendations' votes, trailers, original titles, or genre ids were is fetched again;
   // a running show's daily, as its next episode moves.
   const kept = all[k]?.t
   const maxAge = kept?.status === 'Returning Series' ? 864e5 : MAX_AGE_MS
-  if (all[k] && Date.now() - all[k].at < maxAge && (!kept || (kept.plot !== undefined && (kept.recommendations[0] ?? { votes: 0 }).votes !== undefined && kept.trailer !== undefined && kept.originalTitle !== undefined))) return kept ?? null
+  if (all[k] && Date.now() - all[k].at < maxAge && (!kept || (kept.plot !== undefined && (kept.recommendations[0] ?? { votes: 0 }).votes !== undefined && kept.trailer !== undefined && kept.originalTitle !== undefined && kept.genreIds !== undefined))) return kept ?? null
   let job = pending.get(k)
   if (!job) {
     job = tmdbGet<Raw>(`${kind}/${tmdb}?append_to_response=external_ids,credits,recommendations,videos&include_video_language=${VIDEO_LANGUAGES}`, key)

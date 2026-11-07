@@ -27,13 +27,13 @@ import { iptvCopies, markInfringing, titleCopies } from './_copies.js'
 import { appTokenOk, fetchCuratedChannels, saneFps, vodChannels, withBackupFeeds, withCompetitionGroups } from './_lib.js'
 import { backupConfigFromEnv, configFromEnv } from './_provider.js'
 import { currentHistory, historyAnswer, loadHistory, saveHistory, watchedOf, watchlistOf, withMark } from './_history.js'
-import { knownTitles, providerLibrary, ranked, rescoredLibrary, servedLibrary } from './_library.js'
+import { currentLibrary, knownTitles } from './_library.js'
 import { recordBitrate, recordReading, type Meta } from './_quality.js'
 import { curatedGuide } from './epg.js'
 import { movieInfo, saveMeasuredFilm, showEpisodes, showList, titleIds as mapTitleIds } from './_shows.js'
 import { subtitleFile, subtitlesFor } from './_subtitles.js'
 import { personTitles, searchTitles, titleDetails } from './_browse.js'
-import { loadScores, scoreTitles, storeAt, watchStore } from './_scores.js'
+import { watchStore } from './_ratings.js'
 import { episodeTitle, parseTitleId, tmdbEpisodes, tmdbFacts, tmdbGet, tmdbTitle } from './_tmdb.js'
 import * as trakt from './_trakt.js'
 import { blurayMovies, filmTitleOf, searchVod } from './_vod.js'
@@ -247,8 +247,7 @@ export async function episodes(req: Request): Promise<Response> {
   }
 }
 
-// The provider's rows are cut and sorted like the built library's, so the fallback stays small.
-const libraryNow = () => servedLibrary(async () => ranked(await providerLibrary(configFromEnv()), scoreTitles(await loadScores())), async () => rescoredLibrary(watchedOf(await loadHistory())), storeAt)
+const libraryNow = () => currentLibrary(async () => watchedOf(await loadHistory()))
 // A score TrueScore's extension adds reaches the library's rows a second or so after it lands in the store.
 watchStore(() => void libraryNow().catch(() => {}))
 

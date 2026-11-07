@@ -4,7 +4,8 @@
 // (_titles.ts LibTitle) with the tier and score the library knows for it.
 import type { XtreamConfig } from './_provider.js'
 import { knownTitles } from './_library.js'
-import { due, histogramShare, scoreNow, scoreOf, scoreTitles } from './_scores.js'
+import { letterboxdFilms, scoreNow } from './_ratings.js'
+import { due, histogramShare, scoreOf, scoreTitles } from './_scores.js'
 import { showList } from './_shows.js'
 import { episodeTitle, parseTitleId, tmdbCollection, tmdbEpisodes, tmdbImage, tmdbTitle } from './_tmdb.js'
 import { byScore, decorate, fromRecommendation, fromTmdb, fromVod, personCard, type Known, type LibTitle, type TmdbItem } from './_titles.js'
@@ -29,7 +30,7 @@ export async function titleDetails(cfg: XtreamConfig, id: string) {
     void scoreNow(id, t.imdb || undefined, process.env.MDBLIST_KEY, cache[id]).then((e) => {
       if (!e) return
       cache[id] = { ...cache[id], ...e }
-      const s = scoreTitles({ [id]: cache[id] }).get(id)
+      const s = scoreTitles({ [id]: cache[id] }, letterboxdFilms()).get(id)
       if (s) k.scores.set(id, s)
     })
   }
@@ -50,8 +51,8 @@ export async function titleDetails(cfg: XtreamConfig, id: string) {
     people: [...people.values()],
     // The franchise's own films are its row, not More like this.
     more: t.recommendations.filter((r) => !parts.some((x) => r.title === `movie:${x.id}`)).map((r) => decorate(k, fromRecommendation(r))),
-    ...scoreOf(id, cache),
-    ...histogramShare(id, cache),
+    ...scoreOf(id, cache ?? {}, letterboxdFilms()),
+    ...histogramShare(id, cache ?? {}, letterboxdFilms()),
     ...(t.trailer && { trailer: t.trailer }),
     ...(languageOf(t.originalLanguage) && { language: languageOf(t.originalLanguage) }),
     // Only when it says more than the name does ("Amélie" → "Le fabuleux destin d'Amélie Poulain", never "Léon" → "Leon").

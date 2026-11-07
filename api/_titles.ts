@@ -2,8 +2,8 @@
 // and person pages), every conversion into it, and the enrichment every card gets ([decorate]: the tier the
 // library knows for it, its score and its kept runtime, from [Known]).
 import type { Library } from './_library.js'
-import { scoreTitles, type Score, type ScoreCache } from './_scores.js'
-import { filmTitle, imagePath, showTitle, type Kind, type TmdbTitle } from './_tmdb.js'
+import { scoreTitles, type Score, type ScoreCache, type Store } from './_scores.js'
+import { filmTitle, imagePath, parseTitleId, showTitle, tmdbTitle, type Kind, type TmdbTitle } from './_tmdb.js'
 import type { Tier } from './_quality-labels.js'
 import type { VodItem } from './_vod.js'
 
@@ -71,6 +71,20 @@ export function fromTmdb(kind: Kind, r: TmdbItem): LibTitle {
   }
 }
 
+/**
+ * A film's or show's card as a TMDB list result gives it, from its details (TMDB's disk cache, _tmdb.ts [tmdbTitle]):
+ * how the library looks up a title no list brought; null for one TMDB doesn't know, an adult one, or an episode.
+ */
+export async function titleCard(id: string): Promise<LibTitle | null> {
+  const p = parseTitleId(id)
+  const t = p && p.season == null ? await tmdbTitle(p.kind, p.tmdb) : null
+  if (!p || !t || t.adult) return null
+  return fromTmdb(p.kind, {
+    id: Number(p.tmdb), title: t.name, release_date: t.year, poster_path: imagePath(t.poster) || null, backdrop_path: t.backdrop || null,
+    original_language: t.originalLanguage, genre_ids: t.genreIds, popularity: t.popularity,
+  })
+}
+
 const kindOf = (id: string) => (id.startsWith('tv:') ? 't' as const : 'm' as const)
 
 /** A title from its kept TMDB details ([tmdbTitle]), for one the library doesn't hold. */
@@ -99,11 +113,11 @@ export const unscored = (t: LibTitle): LibTitle => Object.fromEntries(Object.ent
 /** The built library (null when missing), every title it has seen with its tier (the uncut build), scores (with what the APIs said) and kept runtimes. */
 export interface Known { lib: Library | null; titles: Map<string, LibTitle>; scores: Map<string, Score>; cache?: ScoreCache; rt?: (id: string) => number | undefined }
 
-/** [Known] from the served library, the uncut build (whose titles it overlays), the score cache and the kept runtimes. */
-export function knownOf(lib: Library | null, full: Library | null, cache: ScoreCache, rt?: (id: string) => number | undefined): Known {
+/** [Known] from the served library, the uncut build (whose titles it overlays), the score cache, TrueScore's store and the kept runtimes. */
+export function knownOf(lib: Library | null, full: Library | null, cache: ScoreCache, films: Store, rt?: (id: string) => number | undefined): Known {
   const titles = new Map<string, LibTitle>()
   for (const t of [...(full?.titles ?? []), ...(lib?.titles ?? [])]) titles.set(t.id, { ...titles.get(t.id), ...t })
-  return { lib, titles, scores: scoreTitles(cache), cache, rt }
+  return { lib, titles, scores: scoreTitles(cache, films), cache, rt }
 }
 
 /** [t] with the tier, score and runtime the library knows for it. */

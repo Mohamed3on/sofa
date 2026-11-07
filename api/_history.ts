@@ -11,6 +11,7 @@ import { readFile } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { writeAtomic } from './_fs.js'
+import { ROW_CAP } from './_library.js'
 import { decorate, fromDetails, type Known, type LibTitle } from './_titles.js'
 import { episodeTitle, parseTitleId, tmdbEpisodes, tmdbTitle, type Kind, type TmdbEpisode } from './_tmdb.js'
 import { accessToken, revoked, status, traktHeaders } from './_trakt.js'
@@ -260,7 +261,6 @@ async function pool<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Prom
   return out
 }
 
-const ROW_CAP = 60
 const FOLLOW_CAP = 30
 /** Titles the Watchlist can show, which the nightly build scores whatever the library rows hold. */
 export const historyTitles = (h: Kept | null) => watchlistOf(h).slice(0, ROW_CAP * 2)

@@ -1,4 +1,4 @@
-// The Movies & Shows library (KTD17): title-first rows built nightly by scripts/build-library.ts from TMDB
+// The Movies & Shows library (KTD17): title-first rows built nightly ([rebuildLibrary], run by scripts/build-library.ts) from TMDB
 // (trending, new releases, genres, then original language: English, Arabic, Russian, everything else), with
 // the provider's 4K and Blu-ray films and its shows merged in, each title with its best known picture tier.
 // Kept in .cache/library.json; /api/app/library serves it from memory, or the provider's own rows when it
@@ -8,12 +8,13 @@ import { readFile, stat } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { writeAtomic } from './_fs.js'
 import { vodChannels } from './_lib.js'
-import { claims4K, type XtreamConfig } from './_provider.js'
+import { claims4K, configFromEnv, type XtreamConfig } from './_provider.js'
 import { measuredStream, pictureTier, probedPicture, type Tier } from './_quality-labels.js'
-import { loadScores, scoreTitles, trueScoreRows, type Score } from './_scores.js'
+import { letterboxdFilms, loadScores, storeAt } from './_ratings.js'
+import { scoreTitles, trueScoreRows, trueScoreShows, type Score, type Store } from './_scores.js'
 import { measuredFilms, showList } from './_shows.js'
-import { keptRuntimes, parseTitleId, TMDB_IMG, tmdbGet, type Kind } from './_tmdb.js'
-import { fromTmdb, knownOf, providerCard, unscored, type Known, type LibTitle, type TmdbItem } from './_titles.js'
+import { keptRuntimes, parseTitleId, TMDB_IMG, type Kind } from './_tmdb.js'
+import { fromTmdb, knownOf, providerCard, titleCard, unscored, type Known, type LibTitle, type TmdbItem } from './_titles.js'
 import { bestFilmCopies, blurayMovies, filmTitleOf } from './_vod.js'
 
 export interface Row { id: string; n: string; /** Indexes into Library.titles. */ i: number[] }
@@ -38,13 +39,13 @@ export function rowDefs(today = new Date()): RowDef[] {
   const films = (q: string): [Kind, string] => ['movie', `discover/movie?${pop}&${q}`]
   const shows = (q: string): [Kind, string] => ['tv', `discover/tv?${pop}&${q}&${NO_TALK}`]
   return [
-    // TrueScore's films by its recent-adjusted, then its all-time score: filled and ordered by scripts/build-library.ts.
+    // TrueScore's films by its recent-adjusted, then its all-time score: filled and ordered by [rebuildLibrary] and [showLibrary].
     { id: 'ts-recent', n: 'TrueScore · recent', q: [] },
     { id: 'ts-all', n: 'TrueScore · all-time', q: [] },
-    // IMDb's Top 250 and Most Popular TV shows by TrueScore's net score on IMDb's histogram: filled and ordered by scripts/build-library.ts.
+    // IMDb's Top 250 and Most Popular TV shows by TrueScore's net score on IMDb's histogram: filled and ordered by [rebuildLibrary].
     { id: 'ts-shows', n: 'TrueScore · shows', q: [] },
     { id: 'trending', n: 'Trending', q: [['movie', 'trending/movie/week'], ['tv', 'trending/tv/week']] },
-    // Animated films with an Arabic dub TorBox holds (api/_arabp2p.ts): filled by scripts/build-library.ts.
+    // Animated films with an Arabic dub TorBox holds (api/_arabp2p.ts): filled by [rebuildLibrary].
     { id: 'ar-dub', n: 'Dubbed in Arabic', q: [] },
     // Films out on digital or disc in the last 60 days; shows with an episode out in them.
     { id: 'new', n: 'New releases', q: [films(`with_release_type=4%7C5&release_date.gte=${day(60)}&release_date.lte=${day(0)}&vote_count.gte=20`), shows(`air_date.gte=${day(60)}&air_date.lte=${day(0)}&vote_count.gte=100`)] },
@@ -83,7 +84,7 @@ function toLibrary(src: Library['src'], titles: Map<string, LibTitle>, rows: { i
 /** A row that comes in its own order (TrueScore's, by one exact score), kept as built, whole, rather than sorted by [s] and cut (the app leaves out watched titles, then shows 60). */
 export const ordered = (rowId: string) => rowId.startsWith('ts-')
 
-/** Candidates a row keeps, the most convincing first (api/_scores.ts [s]; TMDB popularity after, for titles without), before scoring cuts it to ROW_CAP. */
+/** Candidates a row keeps, the most convincing first (api/_scores.ts [s]; TMDB popularity after, for titles without), before ranking cuts it to ROW_CAP. */
 export const ROW_CANDIDATES = 150
 
 /** One copy the provider has: a 4K or Blu-ray film, or a show, with the row it sits in today. */
@@ -168,30 +169,140 @@ export function onScreen(lib: Library): string[] {
   return [...ids]
 }
 
-const lookedUp = new Map<string, LibTitle | null>()
+/** [fn] over [items], [n] at a time (TMDB allows about 40 requests a second). */
+async function pool<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = []
+  let next = 0
+  await Promise.all(Array.from({ length: n }, async () => {
+    for (let i = next++; i < items.length; i = next++) out[i] = await fn(items[i])
+  }))
+  return out
+}
+
+/** What showing a built library needs: the owner's watched titles, TrueScore's store, the scores, TMDB cards and runtimes. */
+export interface ShowDeps {
+  /** Titles the owner watched: TrueScore's rows count them out (and keep them, for the app to hide). */
+  seen: Set<string>
+  /** TrueScore's store (_ratings.ts [letterboxdFilms]). */
+  films: Store
+  scores: Map<string, Score>
+  /** A title's card from TMDB ([titleCard]); null for one it doesn't know or an adult one. */
+  card: (id: string) => Promise<LibTitle | null>
+  /** A title's runtime in minutes; undefined or 0 when unknown. */
+  runtime: (id: string) => Promise<number | undefined>
+}
+
 /**
- * The nightly build's library (library-full.json) with TrueScore's rows (the owner's [seen] titles counted out) and
- * every score as its store and the score cache have them now, ranked and cut as the build does: what the server
- * serves between builds once the store changes. A film new to the rows is looked up on TMDB once; titles carry their
- * kept runtimes.
+ * The library as served from a build ([full], library-full.json): TrueScore's rows as its store has them now (a film
+ * new to them looked up, one without a poster left out) leading, every row ranked by [ShowDeps.scores] and cut, the
+ * titles with their runtimes. The nightly build and the server between builds (once the store changes) both show it so.
  */
-export async function rescoredLibrary(seen: Set<string>): Promise<Library> {
-  const [full, cache, rt] = await Promise.all([readFile(LIBRARY_FULL_FILE, 'utf8').then((s) => JSON.parse(s) as Library), loadScores(), keptRuntimes()])
+export async function showLibrary(full: Library, d: ShowDeps): Promise<Library> {
   const titles = [...full.titles], index = new Map(titles.map((t, i) => [t.id, i]))
-  const ts = trueScoreRows(seen)
-  await Promise.all(ts.flatMap(([, ids]) => ids).filter((id) => !index.has(id) && !lookedUp.has(id)).map((id) =>
-    tmdbGet<TmdbItem>(`movie/${parseTitleId(id)!.tmdb}`).then((r) => lookedUp.set(id, r.adult ? null : fromTmdb('movie', r)), () => {})))
-  const names = new Map(rowDefs().map((d) => [d.id, d.n]))
+  const ts = trueScoreRows(d.seen, d.films)
+  const looked = new Map(await pool([...new Set(ts.flatMap(([, ids]) => ids))].filter((id) => !index.has(id)), 6, async (id) => [id, await d.card(id)] as const))
+  const names = new Map(rowDefs().map((r) => [r.id, r.n]))
   const rows = [
     ...ts.map(([id, ids]) => ({ id, n: names.get(id)!, i: [...new Set(ids.flatMap((x) => {
-      const t = lookedUp.get(x)
+      const t = looked.get(x)
       if (!index.has(x) && t?.p) index.set(x, titles.push(t) - 1)
       return titles[index.get(x) ?? -1]?.p ? [index.get(x)!] : []
     }))] })).filter((r) => r.i.length),
     ...full.rows.filter((r) => !ts.some(([id]) => id === r.id)),
   ]
-  const shown = ranked({ ...full, titles, rows }, scoreTitles(cache))
-  return { ...shown, titles: shown.titles.map((t) => ({ ...t, ...(rt(t.id) && { rt: rt(t.id) }) })) }
+  const shown = ranked({ ...full, titles, rows }, d.scores)
+  return { ...shown, titles: await pool(shown.titles, 6, async (t) => ({ ...t, ...(await d.runtime(t.id).then((rt) => rt && { rt })) })) }
+}
+
+/** What the nightly rebuild reads, each source behind a function so a test can fake it. */
+export interface RebuildDeps extends Omit<ShowDeps, 'scores'> {
+  /** TMDB GET: the rows' lists and the genres' names. */
+  tmdb: <T>(path: string) => Promise<T>
+  /** The provider's titles ([providerTitles]). */
+  provider: ProviderTitle[]
+  /** [lib] with each film's best provider copy ([withProviderCopies]). */
+  copies: (lib: Library) => Promise<Library>
+  /** The last build (library-full.json): its titles' TMDB details and tiers carry over. */
+  prev: Library | null
+  /** Scores for [ids] (in the order the app shows them), once whatever is due was asked ([fresh]: new releases, daily). */
+  score: (ids: string[], fresh: Set<string>) => Promise<Map<string, Score>>
+  /** IMDb's Top 250 and Most Popular TV shows as tv: ids (_ratings.ts [imdbTopShows]). */
+  topShows: string[]
+  /** Films with an Arabic dub TorBox holds (_arabp2p.ts [dubbedFilms]). */
+  dubbed: string[]
+  today?: Date
+}
+
+const PAGES = 2
+
+/**
+ * The nightly build: TMDB's rows (two pages of each query, a row's queries interleaved), the provider's titles (each
+ * looked up on TMDB once; a title the last build knew keeps its details), the scores, then TrueScore's rows, the
+ * "Dubbed in Arabic" row and the TrueScore shows row, each title looked up where new; every row keeps its
+ * ROW_CANDIDATES ([full], library-full.json), then [showLibrary] ranks and cuts it ([shown], library.json).
+ * Throws when TMDB answered no list.
+ */
+export async function rebuildLibrary(d: RebuildDeps): Promise<{ full: Library; shown: Library; failed: number; lookedUp: number }> {
+  let failed = 0
+  const list = async ([kind, path]: [Kind, string]): Promise<LibTitle[]> => {
+    const pages = await Promise.all(Array.from({ length: PAGES }, (_, i) =>
+      d.tmdb<{ results: TmdbItem[] }>(`${path}${path.includes('?') ? '&' : '?'}page=${i + 1}`).catch(() => (failed++, { results: [] }))))
+    return pages.flatMap((p) => p.results).filter((r) => (r.media_type ?? kind) === kind && r.poster_path && !r.adult).map((r) => fromTmdb(kind, r))
+  }
+  const defs = rowDefs(d.today)
+  const at = (row: string) => defs.findIndex((r) => r.id === row)
+  // A row's queries interleaved (film, show, film, …), so a mixed row isn't all films first.
+  const seeds = await pool(defs, 3, async (r) => {
+    const lists = await Promise.all(r.q.map(list))
+    return Array.from({ length: Math.max(0, ...lists.map((l) => l.length)) }, (_, i) => lists.map((l) => l[i])).flat().filter((t): t is LibTitle => !!t)
+  })
+  if (!seeds.some((s) => s.length)) throw new Error(`TMDB answered no list (${failed} failed): library kept as it was`)
+  const gn: Record<string, string> = Object.fromEntries((await Promise.all(['movie', 'tv'].map((k) =>
+    d.tmdb<{ genres: { id: number; name: string }[] }>(`genre/${k}/list`).then((r) => r.genres, () => [])))).flat().map((g) => [g.id, g.name]))
+
+  // TMDB details by title id: this run's rows, then the last build's (without its tiers and scores; looked up again
+  // when it predates popularity, which picks row candidates).
+  const known = new Map<string, LibTitle>()
+  for (const { t: _t, e: _e, ...rest } of [...seeds.flat(), ...(d.prev?.titles ?? [])]) {
+    const meta = unscored(rest)
+    if (meta.l && meta.pp !== undefined && !known.has(meta.id)) known.set(meta.id, meta)
+  }
+  /** Looks up the titles in [ids] the build doesn't know yet. */
+  const lookUp = (ids: string[]) => pool(ids.filter((id) => parseTitleId(id) && !known.has(id)), 6, async (id) => {
+    const t = await d.card(id)
+    if (t) known.set(id, t)
+  })
+  const missing = [...new Set(d.provider.map((p) => p.t.id))].filter((id) => parseTitleId(id) && !known.has(id))
+  await lookUp(missing)
+
+  // Scores first, what is on screen now ahead of the rest.
+  const fresh = new Set(seeds[at('new')]?.map((t) => t.id))
+  const scores = await d.score([...new Set([...(d.prev ? onScreen(d.prev) : []), ...seeds.flat().map((t) => t.id), ...d.provider.map((p) => p.t.id), ...d.topShows])], fresh)
+  const seed = async (row: string, ids: string[]) => {
+    await lookUp(ids)
+    seeds[at(row)] = ids.flatMap((id) => (known.get(id)?.p ? [known.get(id)!] : []))
+  }
+  // TrueScore's films seed their rows here, so each also joins its genre's and language's rows; [showLibrary] lays the rows out.
+  for (const [row, ids] of trueScoreRows(d.seen, d.films)) await seed(row, ids)
+  await seed('ar-dub', d.dubbed)
+  await seed('ts-shows', trueScoreShows(d.topShows, scores, d.seen))
+  const provider = d.provider.map(({ t, group }) => ({ group, t: known.has(t.id) ? { ...known.get(t.id)!, ...(t.t && { t: t.t }), ...(t.e && { e: t.e }) } : t }))
+  const full = await d.copies(assemble(defs, seeds, provider, d.prev, gn, scores))
+  return { full, shown: await showLibrary(full, { ...d, scores }), failed, lookedUp: missing.length }
+}
+
+/** The library as the server answers it now ([servedLibrary]), [seen] the owner's watched titles: the route and TrueScore's store watcher both ask it. */
+export function currentLibrary(seen: () => Promise<Set<string>>): Promise<Served> {
+  return servedLibrary(
+    // The provider's rows are cut and sorted like the built library's, so the fallback stays small.
+    async () => ranked(await providerLibrary(configFromEnv()), scoreTitles(await loadScores(), letterboxdFilms())),
+    async () => {
+      const [full, cache, rt, watched] = await Promise.all([readFile(LIBRARY_FULL_FILE, 'utf8').then((s) => JSON.parse(s) as Library), loadScores(), keptRuntimes(), seen()])
+      const films = letterboxdFilms()
+      return showLibrary(full, { seen: watched, films, scores: scoreTitles(cache, films), card: titleCard, runtime: async (id) => rt(id) })
+    },
+    storeAt,
+  )
 }
 
 const KNOWN_MS = 10 * 60e3
@@ -201,7 +312,7 @@ let known: { at: number; job: Promise<Known> } | null = null
 export function knownTitles(): Promise<Known> {
   if (known && Date.now() - known.at < KNOWN_MS) return known.job
   const read = (f: string) => readFile(f, 'utf8').then((s) => JSON.parse(s) as Library, () => null)
-  const job = Promise.all([read(LIBRARY_FILE), read(LIBRARY_FULL_FILE), loadScores(), keptRuntimes()]).then(([lib, full, cache, rt]) => knownOf(lib, full, cache, rt))
+  const job = Promise.all([read(LIBRARY_FILE), read(LIBRARY_FULL_FILE), loadScores(), keptRuntimes()]).then(([lib, full, cache, rt]) => knownOf(lib, full, cache, letterboxdFilms(), rt))
   known = { at: Date.now(), job }
   return job
 }
