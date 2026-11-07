@@ -12,7 +12,7 @@ import { dubbedFilms } from '../api/_arabp2p.js'
 import { historyTitles, loadHistory, refreshHistory, saveHistory, watchedOf, watchlistRuntimes } from '../api/_history.js'
 import { LIBRARY_FILE, LIBRARY_FULL_FILE, providerTitles, rebuildLibrary, saveLibrary, withProviderCopies, type Library } from '../api/_library.js'
 import { configFromEnv } from '../api/_provider.js'
-import { imdbTopShows, letterboxdFilms, loadScores, refreshScores, saveScores } from '../api/_ratings.js'
+import { imdbTopShows, letterboxdFilms, letterboxdLists, loadScores, refreshScores, saveScores } from '../api/_ratings.js'
 import { scoreTitles } from '../api/_scores.js'
 import { titleCard } from '../api/_titles.js'
 import { runtimeOf, tmdbGet } from '../api/_tmdb.js'
@@ -38,7 +38,6 @@ if (history) {
 
 const cfg = configFromEnv()
 const cache = await loadScores()
-const films = letterboxdFilms()
 let asked = { mdblist: 0, imdb: 0 }
 const { full, shown, failed, lookedUp } = await rebuildLibrary({
   tmdb: (path) => tmdbGet(path),
@@ -47,12 +46,12 @@ const { full, shown, failed, lookedUp } = await rebuildLibrary({
   copies: (lib) => withProviderCopies(lib, cfg),
   prev: await readFile(LIBRARY_FULL_FILE, 'utf8').catch(() => readFile(LIBRARY_FILE, 'utf8')).then((s) => JSON.parse(s) as Library, () => null),
   seen: watchedOf(history),
-  films,
+  store: () => ({ films: letterboxdFilms(), lists: letterboxdLists() }),
   // A few hundred batched requests at most; the owner's titles first.
   score: async (ids, fresh) => {
     asked = await refreshScores([...new Set([...historyTitles(history), ...ids])], fresh, cache, process.env.MDBLIST_KEY, { save: () => saveScores(cache) })
     await saveScores(cache)
-    return scoreTitles(cache, films)
+    return scoreTitles(cache, letterboxdFilms())
   },
   topShows: await imdbTopShows(cache),
   // The films ArabP2P has an Arabic dub of that TorBox holds (the server's crawl keeps the list).

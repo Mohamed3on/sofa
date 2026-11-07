@@ -49,21 +49,34 @@ export function scoreOf(id: string, cache: ScoreCache, films: Store) {
   return scoreTitles({ [id]: cache[id] ?? {} }, new Map(f ? [[id, f]] : [])).get(id)
 }
 
-/** [ids] (best first) up to and including the 90th the owner hasn't watched ([seen]). */
-function untilUnseen(ids: string[], seen: Set<string>) {
+/** [ids] (best first) up to and including the [n]th the owner hasn't watched ([seen]). */
+export function untilUnseen(ids: string[], seen: Set<string>, n = 90) {
   let unseen = 0
-  return ids.filter((id) => unseen < 90 && (seen.has(id) || ++unseen, true))
+  return ids.filter((id) => unseen < n && (seen.has(id) || ++unseen, true))
 }
 
 /**
- * TrueScore's rows by id: the films its store has that exact score for (recent-adjusted, all-time), best first, until
- * 90 the owner hasn't watched are in ([seen]; the rows keep this order and length, so the app can leave watched titles out, its
- * own new marks too, and still show 60).
+ * TrueScore's rows by id: the films its store has a recent-adjusted score for, best first, then the classics: by the
+ * all-time score, those not in the first row. Each runs until 90 the owner hasn't watched are in ([seen]; the rows keep
+ * this order and length, so the app can leave watched titles out, its own new marks too, and still show 60).
  */
 export function trueScoreRows(seen: Set<string>, films: Store): [string, string[]][] {
-  return ([['ts-recent', 'adjusted'], ['ts-all', 'score']] as const).map(([row, by]) =>
-    [row, untilUnseen([...films].filter(([, f]) => f[by] !== undefined).sort(([, a], [, b]) => b[by]! - a[by]!).map(([id]) => id), seen)])
+  const by = (key: 'adjusted' | 'score', skip = new Set<string>()) =>
+    untilUnseen([...films].filter(([id, f]) => f[key] !== undefined && !skip.has(id)).sort(([, a], [, b]) => b[key]! - a[key]!).map(([id]) => id), seen)
+  const recent = by('adjusted')
+  return [['ts-recent', recent], ['ts-all', by('score', new Set(recent))]]
 }
+
+/** A Letterboxd list TrueScore's extension read its picks from (_ratings.ts [letterboxdLists]): its row id, name, films by title id, when last sent (ms). */
+export type StoreList = { id: string; n: string; ids: string[]; at: number }
+/** Lists shown as rows: the newest sent. */
+const LIST_ROWS = 4
+/** Fewer films the owner hasn't watched than this, and a list makes no row. */
+const LIST_MIN = 10
+
+/** The newest [LIST_ROWS] lists with at least [LIST_MIN] films the owner hasn't watched ([seen]), as rows (the library sorts them by score). */
+export const listRows = (lists: StoreList[], seen: Set<string>) =>
+  lists.filter((l) => l.ids.filter((id) => !seen.has(id)).length >= LIST_MIN).sort((a, b) => b.at - a.at).slice(0, LIST_ROWS)
 
 /**
  * The TrueScore shows row by id: IMDb's Top 250 and Most Popular TV shows ([shows]) by TrueScore's net score on IMDb's histogram

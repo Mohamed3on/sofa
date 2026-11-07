@@ -25,6 +25,10 @@ test('rows sort by score, then titles with only s10, a title with neither at its
   expect(out.titles.map((t) => t.id)).toEqual(['none', 'a', 'b', 'c', 'x'])
   expect(out.titles[0]).not.toHaveProperty('sn') // an older build's fields go
   expect(ranked(lib, new Map()).rows[0].i).toEqual([0, 1, 5, 2, 3])
+  // Watched titles don't count toward the cut: they stay, for the app to hide, and the row runs on to 4 unwatched.
+  const ids = (l: Library) => l.rows[0].i.map((i) => l.titles[i].id)
+  expect(ids(ranked(lib, new Map(), 4, new Set(['none', 'b'])))).toEqual(['none', 'a', 'avg', 'b', 'c'])
+  expect(ids(ranked(lib, new Map(), 2, new Set(['none'])))).toEqual(['none', 'a', 'avg'])
 })
 
 test('MDBList is asked in batches and gives the IMDb id IMDb is then asked with; an exhausted quota fills the rest next night', async () => {

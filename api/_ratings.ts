@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeAtomic } from './_fs.js'
-import { due, sum, type ScoreCache, type ScoreEntry, type StoreFilm } from './_scores.js'
+import { due, sum, type ScoreCache, type ScoreEntry, type StoreFilm, type StoreList } from './_scores.js'
 import { parseTitleId, tmdbGet } from './_tmdb.js'
 
 /** MDBList requests kept each day for title pages ([scoreNow]); the nightly job stops before them. */
@@ -16,7 +16,9 @@ const ONDEMAND = Number(process.env.MDBLIST_ONDEMAND) || 200
 const MDB = 'https://api.mdblist.com'
 
 const LBX_FILE = process.env.LETTERBOXD_HISTOGRAMS || '/var/lib/truescore/letterboxd.json'
-const lbx = { at: 0, mtime: 0, watched: false, byId: new Map<string, StoreFilm>() }
+/** The Letterboxd lists the extension's picks came from, by link ("/user/list/name/"), written by TrueScore beside its films. */
+const LISTS_FILE = `${dirname(LBX_FILE)}/letterboxd-lists.json`
+const lbx = { at: 0, mtime: 0, watched: false, byId: new Map<string, StoreFilm>(), lists: [] as StoreList[] }
 /**
  * TrueScore's score and Letterboxd's histogram (½★ to 5★) by movie:<tmdb>, from TrueScore's store on this box (what
  * its extension saw on letterboxd.com), the busiest histogram per id; read again when the store changes ([watchStore],
@@ -32,17 +34,29 @@ export function letterboxdFilms(now = Date.now()) {
  */
 export const storeAt = () => (letterboxdFilms(), readStore(), lbx.mtime)
 
-/** Reads the store when it changed since the last read; true when it did. */
+/** The lists in TrueScore's store ([StoreList]; films by the ids their store entries resolved to), read with [letterboxdFilms]. */
+export function letterboxdLists(now = Date.now()) {
+  letterboxdFilms(now)
+  return lbx.lists
+}
+
+/** Reads the store (films and lists) when either changed since the last read; true when it did. */
 function readStore() {
   try {
-    const mtime = statSync(LBX_FILE).mtimeMs
+    const mtime = Math.max(statSync(LBX_FILE).mtimeMs, statSync(LISTS_FILE, { throwIfNoEntry: false })?.mtimeMs ?? 0)
     if (mtime === lbx.mtime) return false
+    const store = JSON.parse(readFileSync(LBX_FILE, 'utf8')) as Record<string, StoreFilm & { tmdb?: number | null }>
     const byId = new Map<string, StoreFilm>()
-    for (const { h, score, adjusted, ratio, tmdb } of Object.values(JSON.parse(readFileSync(LBX_FILE, 'utf8')) as Record<string, StoreFilm & { tmdb?: number | null }>)) {
+    for (const { h, score, adjusted, ratio, tmdb } of Object.values(store)) {
       if (!tmdb) continue
       const id = `movie:${tmdb}`, was = byId.get(id) ?? {}
       byId.set(id, { score: score ?? was.score, adjusted: adjusted ?? was.adjusted, ratio: ratio ?? was.ratio, h: h && sum(h) > sum(was.h ?? []) ? h : was.h })
     }
+    const lists = (() => { try { return JSON.parse(readFileSync(LISTS_FILE, 'utf8')) as Record<string, { name: string; slugs: string[]; at: number }> } catch { return {} } })()
+    lbx.lists = Object.entries(lists).map(([link, l]) => ({
+      id: `lb-${link.split('/').filter((x) => x && x !== 'list').join('-')}`, n: l.name, at: l.at,
+      ids: [...new Set(l.slugs.flatMap((slug) => (store[slug]?.tmdb ? [`movie:${store[slug].tmdb}`] : [])))],
+    }))
     lbx.byId = byId
     lbx.mtime = mtime
     return true
@@ -58,7 +72,7 @@ export function watchStore(changed: () => void) {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     const w = watch(dirname(LBX_FILE), (_, name) => {
-      if (name && name !== basename(LBX_FILE)) return
+      if (name && name !== basename(LBX_FILE) && name !== basename(LISTS_FILE)) return
       clearTimeout(timer)
       timer = setTimeout(() => readStore() && changed(), 1000)
     })
