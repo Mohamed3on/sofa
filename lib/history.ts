@@ -27,6 +27,10 @@ export interface Kept {
   /** Trakt's last_activities.all when its parts were read. */
   acts?: string
   movies: string[]
+  /** Each watched film's last watch, epoch ms; 0 where only the day it came out is known (a film logged without a date). */
+  filmAt?: Record<string, number>
+  /** Films watched more than once: how many times. */
+  plays?: Record<string, number>
   /** Watched episodes, the most recently watched first (U17 reads the owner's latest from here). */
   eps: string[]
   /** Each watched show's last watch, epoch ms. */
@@ -47,10 +51,10 @@ export interface Kept {
   /** Watchlist titles' runtimes in minutes (a show's episode), from TMDB nightly ([watchlistRuntimes]). */
   runtimes?: Record<string, number>
 }
-type TraktPart = Pick<Kept, 'trakt' | 'acts' | 'movies' | 'eps' | 'shows' | 'hidden' | 'watchlist' | 'rated'>
+type TraktPart = Pick<Kept, 'trakt' | 'acts' | 'movies' | 'filmAt' | 'plays' | 'eps' | 'shows' | 'hidden' | 'watchlist' | 'rated'>
 
-const NONE = { movies: [], eps: [], shows: {}, hidden: [], watchlist: [], rated: {} }
-const traktOf = (h: Kept | null) => ({ ...NONE, ...(h && { acts: h.acts, movies: h.movies, eps: h.eps, shows: h.shows, hidden: h.hidden, watchlist: h.watchlist, rated: h.rated ?? {} }) })
+const NONE = { movies: [], filmAt: {}, plays: {}, eps: [], shows: {}, hidden: [], watchlist: [], rated: {} }
+const traktOf = (h: Kept | null) => ({ ...NONE, ...(h && { acts: h.acts, movies: h.movies, filmAt: h.filmAt ?? {}, plays: h.plays ?? {}, eps: h.eps, shows: h.shows, hidden: h.hidden, watchlist: h.watchlist, rated: h.rated ?? {} }) })
 
 type Ids = { ids?: { tmdb?: number | null } }
 const film = (m?: Ids) => (m?.ids?.tmdb ? `movie:${m.ids.tmdb}` : null)
@@ -60,16 +64,25 @@ const known = (x: string | null): x is string => !!x
 class Refused extends Error {}
 
 async function readTrakt(access: string, prev: Kept | null, full: boolean): Promise<TraktPart> {
-  const get = async <T>(path: string): Promise<T> => {
+  const page = async (path: string) => {
     const r = await fetch(API + path, { headers: traktHeaders(access), signal: AbortSignal.timeout(20_000) })
     if (r.status === 401) throw new Refused()
     if (!r.ok) throw new Error(`Trakt ${r.status} on ${path}`)
-    return r.json() as Promise<T>
+    return { body: await r.json(), pages: Number(r.headers.get('x-pagination-page-count') ?? 1) }
+  }
+  // Every page: Trakt answers lists 100 at a time (250 at most), so the first page alone held 100 of 756 watched films.
+  const get = async <T>(path: string): Promise<T> => {
+    const sep = path.includes('?') ? '&' : '?'
+    const first = await page(path.includes('limit=') ? path : `${path}${sep}limit=250`)
+    if (!Array.isArray(first.body) || first.pages <= 1) return first.body as T
+    const rest = []
+    for (let p = 2; p <= first.pages; p++) rest.push(...(await page(`${path}${sep}page=${p}${path.includes('limit=') ? '' : '&limit=250'}`)).body)
+    return [...first.body, ...rest] as T
   }
   const acts = (await get<{ all?: string }>('/sync/last_activities')).all
-  if (!full && prev?.trakt === 'on' && acts && prev.acts === acts && prev.rated) return { ...traktOf(prev), trakt: 'on' }
+  if (!full && prev?.trakt === 'on' && acts && prev.acts === acts && prev.rated && prev.filmAt) return { ...traktOf(prev), trakt: 'on' }
   const [movies, shows, hidden, watchlist, ratings] = await Promise.all([
-    get<{ movie: Ids }[]>('/sync/watched/movies'),
+    get<{ movie: Ids; plays: number; last_watched_at: string }[]>('/sync/watched/movies'),
     get<{ last_watched_at: string; show: Ids; seasons?: { number: number; episodes: { number: number; last_watched_at: string }[] }[] }[]>('/sync/watched/shows'),
     get<{ show?: Ids }[]>('/users/hidden/progress_watched?type=show&limit=1000'),
     get<{ type: string; movie?: Ids; show?: Ids }[]>('/sync/watchlist'),
@@ -83,6 +96,9 @@ async function readTrakt(access: string, prev: Kept | null, full: boolean): Prom
     trakt: 'on',
     acts,
     movies: movies.map((m) => film(m.movie)).filter(known),
+    // A watch at midnight UTC on the dot is a film logged by its release day (the 2026-11-07 Letterboxd/IMDb backfill), not a time.
+    filmAt: Object.fromEntries(movies.flatMap((m) => (film(m.movie) ? [[film(m.movie)!, m.last_watched_at.endsWith('T00:00:00.000Z') ? 0 : Date.parse(m.last_watched_at)]] : []))),
+    plays: Object.fromEntries(movies.flatMap((m) => (film(m.movie) && m.plays > 1 ? [[film(m.movie)!, m.plays]] : []))),
     eps: eps.sort((a, b) => b.at - a.at).map((e) => e.id),
     shows: Object.fromEntries(shows.map((s) => [show(s.show), Date.parse(s.last_watched_at)]).filter(([id]) => id)),
     hidden: hidden.map((h) => show(h.show)).filter(known),
@@ -284,6 +300,7 @@ export function withMark(h: Kept, title: string, covered: string[], watched?: bo
     const key = title.startsWith('movie:') ? 'movies' : 'eps'
     const ids = new Set(covered)
     out[key] = [...(watched ? covered : []), ...h[key].filter((x) => !ids.has(x))]
+    if (key === 'movies') out.filmAt = { ...Object.fromEntries(Object.entries(h.filmAt ?? {}).filter(([id]) => !ids.has(id))), ...(watched && Object.fromEntries(covered.map((id) => [id, Date.now()]))) }
   }
   if (rating !== undefined) {
     const rest = Object.fromEntries(Object.entries(h.rated ?? {}).filter(([id]) => id !== title))
@@ -291,6 +308,12 @@ export function withMark(h: Kept, title: string, covered: string[], watched?: bo
   }
   return out
 }
+
+/** [historyAnswer]'s seen: films by their last watch and plays, shows by their last episode's watch. */
+export const seenOf = (h: Kept | null): Record<string, [number, number]> => ({
+  ...Object.fromEntries(Object.entries(h?.filmAt ?? {}).map(([id, at]) => [id, [Math.round(at / 1000), h?.plays?.[id] ?? 1]])),
+  ...Object.fromEntries(Object.entries(h?.shows ?? {}).map(([id, at]) => [id, [Math.round(at / 1000), 1]])),
+})
 
 /** Every title the owner watched: Trakt's films, episodes and shows (one episode is enough), Letterboxd's diary, and anything rated on Trakt, Letterboxd or IMDb. */
 export const watchedOf = (h: Kept | null) =>
@@ -329,6 +352,8 @@ export async function historyAnswer(h: Kept | null, local: string[], k: Known) {
     lbw: (h?.lbw ?? []).filter((id) => !h?.watchlist.includes(id)),
     // The owner's rating per title, out of 10 (see [yours]).
     ratings: Object.fromEntries(yours(h)),
+    // When each title was last watched and how often, where Trakt knows: [epoch seconds (0: watched, day unknown), plays].
+    seen: seenOf(h),
     next: next.flatMap(({ show: _s, ...n }, i) => (shows[i] ? [{ t: shows[i], ...n }] : [])),
   }
 }
