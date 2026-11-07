@@ -40,15 +40,15 @@ export function rowDefs(today = new Date()): RowDef[] {
   const shows = (q: string): [Kind, string] => ['tv', `discover/tv?${pop}&${q}&${NO_TALK}`]
   return [
     // TrueScore's films by its recent-adjusted score, then the classics by its all-time one: filled and ordered by [rebuildLibrary] and [showLibrary].
-    { id: 'ts-recent', n: 'TrueScore · recent', q: [] },
+    { id: 'ts-recent', n: 'TrueScore · top rated', q: [] },
     { id: 'ts-all', n: 'TrueScore · classics', q: [] },
     // IMDb's Top 250 and Most Popular TV shows by TrueScore's net score on IMDb's histogram: filled and ordered by [rebuildLibrary].
     { id: 'ts-shows', n: 'TrueScore · shows', q: [] },
     { id: 'trending', n: 'Trending', q: [['movie', 'trending/movie/week'], ['tv', 'trending/tv/week']] },
-    // Animated films with an Arabic dub TorBox holds (api/_arabp2p.ts): filled by [rebuildLibrary].
-    { id: 'ar-dub', n: 'Dubbed in Arabic', q: [] },
     // Films out on digital or disc in the last 60 days; shows with an episode out in them, kept by [rebuildLibrary] only for a season that began in them.
     { id: 'new', n: 'New releases', q: [films(`with_release_type=4%7C5&release_date.gte=${day(NEW_DAYS)}&release_date.lte=${day(0)}&vote_count.gte=20`), shows(`air_date.gte=${day(NEW_DAYS)}&air_date.lte=${day(0)}&vote_count.gte=100`)] },
+    // Animated films with an Arabic dub TorBox holds (api/_arabp2p.ts): filled by [rebuildLibrary]; shown beside Arabic from DUB_MIN films.
+    { id: 'ar-dub', n: 'Dubbed in Arabic', q: [] },
     ...LANGS.map(([l, n, votes]): RowDef => ({
       id: l, n,
       q: [films(`with_original_language=${l}&vote_count.gte=${votes}`), shows(`with_original_language=${l}&vote_count.gte=${Math.ceil(votes / 3)}`)],
@@ -141,6 +141,9 @@ export async function providerLibrary(cfg: XtreamConfig): Promise<Library> {
   return withProviderCopies(toLibrary('provider', titles, [...rows].map(([n, ids], i) => ({ id: `p${i}`, n, ids })), {}), cfg)
 }
 
+/** Films the Dubbed in Arabic row waits for: fewer looks like a broken row. */
+const DUB_MIN = 8
+
 /** Titles a row keeps after sorting that the owner hasn't watched (the rest stay findable through search). */
 export const ROW_CAP = 60
 
@@ -219,7 +222,7 @@ export async function showLibrary(full: Library, d: ShowDeps): Promise<Library> 
   const rest = full.rows.filter((r) => !ts.some(({ id }) => id === r.id))
   // The lists after the TrueScore shows row (the app puts Continue watching between).
   const after = rest.findIndex((r) => r.id === 'ts-shows') + 1
-  const rows = [...ts.map(row), ...rest.slice(0, after), ...lists.map(row), ...rest.slice(after)].filter((r) => r.i.length)
+  const rows = [...ts.map(row), ...rest.slice(0, after), ...lists.map(row), ...rest.slice(after)].filter((r) => r.i.length >= (r.id === 'ar-dub' ? DUB_MIN : 1))
   const shown = ranked({ ...full, titles, rows }, d.scores, ROW_CAP, d.seen)
   return { ...shown, titles: await pool(shown.titles, 6, async (t) => ({ ...t, ...(await d.runtime(t.id).then((rt) => rt && { rt })) })) }
 }

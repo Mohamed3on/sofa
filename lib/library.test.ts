@@ -58,7 +58,8 @@ test('the nightly rebuild leads with TrueScore\'s rows in its store\'s order (th
   const row = (lib: Library, id: string) => lib.rows.find((r) => r.id === id)?.i.map((i) => lib.titles[i].id)
   expect(row(shown, 'ts-recent')).toEqual(['movie:3']) // by adjusted score; the watched 3 kept for the app to hide; 4 has no poster
   expect(row(shown, 'ts-all')).toEqual(['movie:1']) // by all-time score, 3 being in the recent row
-  expect(row(shown, 'ar-dub')).toEqual(['movie:5'])
+  expect(row(shown, 'ar-dub')).toBeUndefined() // 1 film, under DUB_MIN: the row waits
+  expect(row(full, 'ar-dub')).toEqual(['movie:5'])
   expect(row(shown, 'trending')).toEqual(['movie:1', 'movie:2'])
   // A looked-up TrueScore film (3) and dubbed film (5) join their genre's row; the unscored sit at the row's median score (90).
   expect(row(shown, 'comedy')).toEqual(['movie:3', 'movie:2', 'movie:5', 'movie:1'])
