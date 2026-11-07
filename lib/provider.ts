@@ -186,6 +186,8 @@ export interface ProviderName {
   dubbed?: string
   /** ISO 639-1 subtitle language the tag claims (a subtitling market's), if any. */
   subbed?: string
+  /** A camcorder copy ("AR-CAM - …"), filmed in a cinema. */
+  cam?: true
 }
 
 /** What a provider name means, read with its category ("ES - PELÍCULAS", "NETFLIX MOVIES ⁴ᴷ ³⁸⁴⁰ᴾ"). */
@@ -199,10 +201,11 @@ export function readName(raw: string, category = ''): ProviderName {
   s = s.replace(/^4K[\s-]*[A-Z]{2,3}\s+(?=\S)/, '').replace(/^\d{1,3}\.\s*/, '')
   if (!s.includes(' ') && s.includes('.')) s = s.replace(/\.((?:19|20)\d{2})$/, ' ($1)').replace(/\./g, ' ')
   const fromCategory = category.match(/^([A-Z]{2})\b/)?.[1] ?? ''
-  const lang = tags.find(isLanguage) ?? (isLanguage(fromCategory) ? fromCategory : '')
+  // "IN-EN": a section's English copy, its audio English.
+  const lang = (tags.includes('EN') ? 'EN' : tags.find(isLanguage)) ?? (isLanguage(fromCategory) ? fromCategory : '')
   const claim = languageClaim(lang)
   // "AR-DUB": a subtitling market's dub has its language for audio.
-  return { title: s.replace(/\s+/g, ' ') || raw.trim(), lang, ...(tags.includes('DUB') && claim.subbed ? { dubbed: claim.subbed } : claim) }
+  return { title: s.replace(/\s+/g, ' ') || raw.trim(), lang, ...(tags.includes('DUB') && claim.subbed ? { dubbed: claim.subbed } : claim), ...(tags.includes('CAM') && { cam: true as const }) }
 }
 
 // Decorative Unicode the provider uses for tags (superscript digits + modifier letters:

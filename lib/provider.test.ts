@@ -12,6 +12,7 @@ describe('provider names', () => {
     ['4K-ES-HDR - Scary Movie (2026)', 'ES - PELÍCULAS', 'Scary Movie (2026)', 'ES', 'es', undefined],
     ['AR-SUBS - Love in 39 Degrees (2024)', '', 'Love in 39 Degrees (2024)', 'AR', undefined, 'ar'],
   ['AR-DUB - Finding Nemo (2003) البحث عن نيمو', '', 'Finding Nemo (2003) البحث عن نيمو', 'AR', 'ar', undefined],
+  ['IN-EN - The Odyssey (2026)', '', 'The Odyssey (2026)', 'EN', undefined, undefined],
     ['4K-D+  -Pita Hall (2025)', 'DISNEY+ ⁴ᴷ', 'Pita Hall (2025)', '', undefined, undefined],
     ['4M-AMZ - The Neverending Wedding (2025)', '', 'The Neverending Wedding (2025)', '', undefined, undefined],
     ['4K-DE - Severance (2022) (US)', 'GERMANY APPLE ⁴ᴷ ³⁸⁴⁰ᴾ', 'Severance (2022) (US)', 'DE', 'de', undefined],

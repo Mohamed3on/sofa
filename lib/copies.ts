@@ -95,7 +95,8 @@ export async function iptvCopies(cfg: XtreamConfig, title: string): Promise<Iptv
     })
   }
   const [entries, measured] = await Promise.all([filmEntries(cfg, title), measuredFilms()])
-  return entries.map((e) => filmCopy(e, measured[String(e.id)]))
+  // A camcorder copy is left out, as Torrentio's are.
+  return entries.filter((e) => !readName(e.name, e.category).cam).map((e) => filmCopy(e, measured[String(e.id)]))
 }
 
 interface Stream { name?: string; title?: string; infoHash?: string; fileIdx?: number; url?: string; behaviorHints?: { filename?: string } }

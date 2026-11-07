@@ -52,7 +52,8 @@ function tail(line: string): string {
 
 export function parseRelease(text: string): Attrs {
   const t = text.normalize('NFKC').split('\n').map(tail).join('\n').toLowerCase()
-  const named = Number(t.match(/(?<!\d)(2160|1080|720|576|480)[pi](?![a-z0-9])/)?.[1] ?? (/\b(?:4k|uhd)\b/.test(t) ? 2160 : 0))
+  // Unnamed, a 4K/UHD release is 2160, a Blu-ray remux 1080 and a DVD rip 480.
+  const named = Number(t.match(/(?<!\d)(2160|1080|720|576|480)[pi](?![a-z0-9])/)?.[1] ?? (/\b(?:4k|uhd)\b/.test(t) ? 2160 : /\bremux\b/.test(t) ? 1080 : /\bdvd(?:rip|5|9)?\b/.test(t) ? 480 : 0))
   // AI upscales ("Ai-Enhanced", "AI Upscaled") are a lower-resolution source stretched up: rank them a step down.
   const res = named === 2160 && /\bai[ ._-]?(?:enhanced|upscal)|\bupscal/.test(t) ? 1080 : named
   const fel = /\b(?:fel|mel)\b/.test(t)
