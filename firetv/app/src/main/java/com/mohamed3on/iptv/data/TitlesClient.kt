@@ -160,9 +160,10 @@ class TitlesClient(
     /**
      * What a film really is, measured while it played ([reading] from player.filmReading), so the server knows its
      * quality rather than its category's claim (/api/app/film-quality). Once per film per app session; best effort.
+     * True when the box kept it (it changed what was known).
      */
-    suspend fun reportFilmQuality(id: Int, reading: Map<String, Any>) = withContext(Dispatchers.IO) {
-        if (!filmsReported.add(id)) return@withContext
+    suspend fun reportFilmQuality(id: Int, reading: Map<String, Any>): Boolean = withContext(Dispatchers.IO) {
+        if (!filmsReported.add(id)) return@withContext false
         val body = JsonObject((reading + ("id" to id)).mapValues { (_, v) ->
             when (v) {
                 is Number -> JsonPrimitive(v)
@@ -170,7 +171,7 @@ class TitlesClient(
                 else -> JsonPrimitive(v.toString())
             }
         })
-        server.post("film-quality", body) {}.onSuccess { movieInfos.remove(id) }
+        server.post("film-quality", body) { it.string() }.onSuccess { movieInfos.remove(id) }.getOrNull()?.contains("\"stored\":true") == true
     }
     private val filmsReported = java.util.Collections.synchronizedSet(HashSet<Int>())
 

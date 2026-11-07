@@ -259,6 +259,11 @@ class FilmCopies(
         plan(title)
     }
 
+    /** Asks the box for [title]'s copies again (a play measured one), keeping its plan and debrid answers. */
+    fun refresh(title: String) {
+        plans[title]?.let { scope.launch { gather(it) } }
+    }
+
     /** Ranks [title] again after a pin, mark or correction outside a play. */
     fun rerank(title: String) {
         plans[title]?.let { scope.launch { it.rerank() } }

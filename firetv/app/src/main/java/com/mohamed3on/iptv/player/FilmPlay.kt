@@ -22,6 +22,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.emptyFlow
@@ -240,12 +241,16 @@ fun openFilmPlay(
                 delay(1_000)
             }
         }
-        // A film's first play measures what it really is (an episode's is known already); only an IPTV copy is the provider's.
+        // Each IPTV copy of a film that plays (the first, or one chosen in Versions) is measured for what it really is
+        // (an episode's is known already), once; a reading the box keeps refreshes the title's copies, so Versions shows it.
         if (of.episode == null) launch {
-            session.state.first { it.phase == FilmPhase.Playing }
-            delay(FILM_READING_MS) // past the first frames, so the formats have settled
-            val id = session.state.value.copy?.takeIf { it.source == Capacity.Source.Iptv }?.id?.removePrefix("iptv:")?.toIntOrNull() ?: return@launch
-            filmReading(exo, fileBytes.get())?.let { graph.titles.reportFilmQuality(id, it) }
+            session.state.map { s -> s.copy?.takeIf { s.phase == FilmPhase.Playing && it.source == Capacity.Source.Iptv } }
+                .distinctUntilChanged()
+                .collectLatest { copy ->
+                    val id = copy?.id?.removePrefix("iptv:")?.toIntOrNull() ?: return@collectLatest
+                    delay(FILM_READING_MS) // past the first frames, so the formats have settled
+                    filmReading(exo, fileBytes.get())?.let { if (graph.titles.reportFilmQuality(id, it)) graph.films.refresh(title) }
+                }
         }
     }
     play = FilmPlay(
