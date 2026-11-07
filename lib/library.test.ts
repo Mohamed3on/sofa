@@ -38,7 +38,7 @@ test('the endpoint serves library.json while fresh, else the provider rows', asy
   expect((await servedLibrary(provider, provider, () => 0, file)).etag).toBe(fresh.etag)
 })
 
-test('the nightly rebuild leads with TrueScore\'s rows in its store\'s order (the classics without the recent ones), looks up their new films, and the rescore of its build splices a new one and the newest Letterboxd lists the same way', async () => {
+test('the nightly rebuild leads with TrueScore\'s row in its store\'s order (recent-adjusted score, else all-time), looks up their new films, and the rescore of its build splices a new one and the newest Letterboxd lists the same way', async () => {
   const film = (id: number, lang = 'en', genres = [35]): TmdbItem => ({ id, title: `F${id}`, release_date: '2020-01-01', original_language: lang, poster_path: `/${id}.jpg`, genre_ids: genres, popularity: 100 - id })
   const tmdb = async <T>(path: string) => (path.startsWith('genre/') ? { genres: [{ id: 35, name: 'Comedy' }] }
     : { results: path.startsWith('trending/movie/week?page=1') ? [film(1), film(2, 'ar')] : [] }) as T
@@ -56,8 +56,7 @@ test('the nightly rebuild leads with TrueScore\'s rows in its store\'s order (th
   }
   const { full, shown } = await rebuildLibrary(deps)
   const row = (lib: Library, id: string) => lib.rows.find((r) => r.id === id)?.i.map((i) => lib.titles[i].id)
-  expect(row(shown, 'ts-recent')).toEqual(['movie:3']) // by adjusted score; the watched 3 kept for the app to hide; 4 has no poster
-  expect(row(shown, 'ts-all')).toEqual(['movie:1']) // by all-time score, 3 being in the recent row
+  expect(row(shown, 'ts-recent')).toEqual(['movie:3', 'movie:1']) // 3 by adjusted score, 1 by all-time; the watched 3 kept for the app to hide; 4 has no poster
   expect(row(shown, 'ar-dub')).toBeUndefined() // 1 film, under DUB_MIN: the row waits
   expect(row(full, 'ar-dub')).toEqual(['movie:5'])
   expect(row(shown, 'trending')).toEqual(['movie:1', 'movie:2'])
@@ -71,9 +70,8 @@ test('the nightly rebuild leads with TrueScore\'s rows in its store\'s order (th
   // A Letterboxd list too: films TMDB has no poster for left out, the rest by score (the unscored at its median, 1's), after the TrueScore shows row.
   const list = { id: 'lb-u-x', n: 'X', at: 1, ids: ['movie:5', 'movie:2', 'movie:1', ...[20, 21, 22, 23, 24, 25, 26].map((n) => `movie:${n}`)] }
   const rescored = await showLibrary(full, { ...deps, films: store, lists: [list], scores: scoreTitles({}, store) })
-  expect(row(rescored, 'ts-recent')).toEqual(['movie:6', 'movie:3'])
-  expect(row(rescored, 'ts-all')).toEqual(['movie:1'])
-  expect(rescored.rows.map((r) => r.id).slice(0, 3)).toEqual(['ts-recent', 'ts-all', 'lb-u-x'])
+  expect(row(rescored, 'ts-recent')).toEqual(['movie:6', 'movie:3', 'movie:1'])
+  expect(rescored.rows.map((r) => r.id).slice(0, 2)).toEqual(['ts-recent', 'lb-u-x'])
   expect(row(rescored, 'lb-u-x')).toEqual(['movie:5', 'movie:2', 'movie:1'])
   expect(row(rescored, 'comedy')).toEqual(row(shown, 'comedy'))
 })

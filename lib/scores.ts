@@ -56,15 +56,14 @@ export function untilUnseen(ids: string[], seen: Set<string>, n = 90) {
 }
 
 /**
- * TrueScore's rows by id: the films its store has a recent-adjusted score for, best first, then the classics: by the
- * all-time score, those not in the first row. Each runs until 90 the owner hasn't watched are in ([seen]; the rows keep
- * this order and length, so the app can leave watched titles out, its own new marks too, and still show 60).
+ * TrueScore's film row by id: the films in its store by recent-adjusted score (else all-time), best first, until 90 the
+ * owner hasn't watched are in ([seen]; the row keeps this order and length, so the app can leave watched titles out, its
+ * own new marks too, and still show 60).
  */
 export function trueScoreRows(seen: Set<string>, films: Store): [string, string[]][] {
-  const by = (key: 'adjusted' | 'score', skip = new Set<string>()) =>
-    untilUnseen([...films].filter(([id, f]) => f[key] !== undefined && !skip.has(id)).sort(([, a], [, b]) => b[key]! - a[key]!).map(([id]) => id), seen)
-  const recent = by('adjusted')
-  return [['ts-recent', recent], ['ts-all', by('score', new Set(recent))]]
+  const key = (f: StoreFilm) => f.adjusted ?? f.score
+  const ranked = [...films].filter(([, f]) => key(f) !== undefined).sort(([, a], [, b]) => key(b)! - key(a)!)
+  return [['ts-recent', untilUnseen(ranked.map(([id]) => id), seen)]]
 }
 
 /** A Letterboxd list TrueScore's extension read its picks from (_ratings.ts [letterboxdLists]): its row id, name, films by title id, likes, when last sent (ms). */

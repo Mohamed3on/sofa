@@ -42,9 +42,8 @@ export function rowDefs(today = new Date()): RowDef[] {
   const films = (q: string): [Kind, string] => ['movie', `discover/movie?${pop}&${q}`]
   const shows = (q: string): [Kind, string] => ['tv', `discover/tv?${pop}&${q}&${NO_TALK}`]
   return [
-    // TrueScore's films by its recent-adjusted score, then the classics by its all-time one: filled and ordered by [rebuildLibrary] and [showLibrary].
-    { id: 'ts-recent', n: 'TrueScore · top rated', q: [] },
-    { id: 'ts-all', n: 'TrueScore · classics', q: [] },
+    // TrueScore's films by its recent-adjusted score (else all-time): filled and ordered by [rebuildLibrary] and [showLibrary].
+    { id: 'ts-recent', n: 'TrueScore', q: [] },
     // IMDb's Top 250 and Most Popular TV shows by TrueScore's net score on IMDb's histogram: filled and ordered by [rebuildLibrary].
     { id: 'ts-shows', n: 'TrueScore · shows', q: [] },
     { id: 'trending', n: 'Trending', q: [['movie', 'trending/movie/week'], ['tv', 'trending/tv/week']] },
