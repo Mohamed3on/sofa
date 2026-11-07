@@ -59,7 +59,9 @@ export function parseRelease(text: string): Attrs {
   const dv = fel || /\b(?:dv|dovi|dolby[ .]?vision)\b/.test(t)
   const plus = /\bhdr10(?:\+|plus)/.test(t)
   const hdr = [dv && 'dv', plus && 'hdr10+', (plus || /\bhdr(?:10)?\b/.test(t)) && 'hdr10', /\bhlg\b/.test(t) && 'hlg'].filter((h): h is string => !!h)
-  const profile = fel ? 7 : Number(t.match(/\b(?:dv|dovi|vision)[ .]?(?:p|profile[ .]?)(\d)\b/)?.[1] ?? 0)
+  // A streaming service's Dolby Vision (a WEB release) is profile 5, or 8 with an HDR10 layer named; never a disc's 7.
+  const web = /\bweb(?:[ .-]?(?:dl|rip))?\b/.test(t) && !/\b(?:blu-?ray|remux|bdrip|bd)\b/.test(t)
+  const profile = fel ? 7 : Number(t.match(/\b(?:dv|dovi|vision)[ .]?(?:p|profile[ .]?)(\d)\b/)?.[1] ?? 0) || (web ? (hdr.includes('hdr10') ? 8 : 5) : 0)
   const codec = CODEC[t.match(/\b(x26[45]|h[ .]?26[45]|hevc|avc|av1|vc-?1|mpeg-?2)\b/)?.[1].replace(/[ .-]/g, '') ?? ''] ?? ''
   const ch = t.match(/(?<!\d)([25-7])[ .]([01])(?!\d)/)
   const chWord = t.match(/\b([2-8])ch\b/)
