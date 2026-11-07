@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { writeAtomic } from './_fs.js'
-import { ROW_CAP } from './_library.js'
+import { pool, ROW_CAP } from './_library.js'
 import { decorate, fromDetails, type Known, type LibTitle } from './_titles.js'
 import { episodeTitle, parseTitleId, tmdbEpisodes, tmdbTitle, type Kind, type TmdbEpisode } from './_tmdb.js'
 import { accessToken, revoked, status, traktHeaders } from './_trakt.js'
@@ -249,16 +249,6 @@ export async function nextEpisodes(follow: Map<string, Followed>, episodes: (sho
     return e && { show: id, ep: episodeTitle(id, e.season, e.episode), c: `S${e.season} E${e.episode}`, ...(e.title && { en: e.title }), air: e.air, ...(Date.parse(e.air) > f.last && { new: 1 as const }) }
   }))
   return next.filter((n): n is Next => !!n).sort((a, b) => b.air.localeCompare(a.air))
-}
-
-/** [fn] over [items], [n] at a time. */
-async function pool<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = []
-  let i = 0
-  await Promise.all(Array.from({ length: n }, async () => {
-    for (let j = i++; j < items.length; j = i++) out[j] = await fn(items[j])
-  }))
-  return out
 }
 
 const FOLLOW_CAP = 30

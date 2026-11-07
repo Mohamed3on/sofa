@@ -95,15 +95,15 @@ export function trueScoreShows(shows: string[], scores: Map<string, Score>, seen
  * (share × |share| × votes, which is [netScore] when the histogram is IMDb's own). A film in TrueScore's store also carries
  * what its page shows: [ta] the adjusted score, [tr] the all-time net-loved ratio, [tq] the recent one (adjusted / |all-time|).
  */
-export function scoreTitles(cache: ScoreCache, lbxFilms: Store): Map<string, Score> {
+export function scoreTitles(cache: ScoreCache, films: Store): Map<string, Score> {
   const out = new Map<string, Score>()
-  for (const id of new Set([...Object.keys(cache), ...lbxFilms.keys()])) {
+  for (const id of new Set([...Object.keys(cache), ...films.keys()])) {
     const e = cache[id] ?? {}
     const src = ([[e.ir, e.iv, 3000], [e.lb && e.lb * 2, e.lv, 1000]] as number[][]).filter(([r, v]) => r && v)
     const votes = sum(src.map(([, v]) => v))
     const raw = votes && sum(src.map(([r, v, m]) => (v * (v * r + m * 6.5)) / (v + m))) / votes
     const shown = { ...(e.ir && { ir: e.ir }), ...(e.iv && { iv: e.iv }), ...(e.lb && { lb: e.lb }), ...(e.lv && { lv: e.lv }) }
-    const lf = lbxFilms.get(id), h = lf?.h ?? e.h, total = h ? sum(h) : 0
+    const lf = films.get(id), h = lf?.h ?? e.h, total = h ? sum(h) : 0
     // TrueScore's adjusted score (all-time × its newest reviews' net-loved ratio), else its all-time one, else a histogram's, else IMDb's.
     if (lf?.adjusted !== undefined) out.set(id, { s: lf.adjusted })
     else if (lf?.score !== undefined) out.set(id, { s: lf.score })

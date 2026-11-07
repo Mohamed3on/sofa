@@ -176,7 +176,7 @@ export function onScreen(lib: Library): string[] {
 }
 
 /** [fn] over [items], [n] at a time (TMDB allows about 40 requests a second). */
-async function pool<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+export async function pool<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Promise<R[]> {
   const out: R[] = []
   let next = 0
   await Promise.all(Array.from({ length: n }, async () => {
