@@ -54,8 +54,11 @@ interface Store {
   bare?: Record<string, 1>
   /** The dubbed films' TMDB vote counts: the best-known are hashed first, as TorBox most likely holds them. */
   votes?: Record<string, number>
-  /** Dubbed shows' rows by TMDB id, like films'; their torrents by id, `none` when no file is one of the show's episodes. */
-  shows?: Record<string, { at: number; ar: string; rows: Row[] }>
+  /** Dubbed shows' rows by TMDB id, like films' (with the names their files go by); their torrents by id, `none` when no file is one of the show's episodes. */
+  shows?: Record<string, { at: number; ar: string; rows: Row[]; names?: string[] }>
+  /** The dubbed-shows category as crawled: torrent id → the TMDB show it is (0: none found), and when it was last crawled. */
+  showDubs?: Record<string, number>
+  showsCrawled?: number
   packs?: Record<string, Pack | { none: true }>
 }
 const storeFile = () => process.env.ARABP2P_CACHE_FILE ?? fileURLToPath(new URL('../.cache/arabp2p.json', import.meta.url))
@@ -477,9 +480,10 @@ let crawling: Promise<void> | null = null
 // Extra crawls (for the allowance) are 30 min apart at least, so a failing download can't repeat on every ask.
 let crawlStarted = 0
 /**
- * Reads the dubbed-films category (FIRST_PAGES the first time, then the newest pages until a known upload),
- * files each new upload under its TMDB film, gives each dubbed film's best copy a hash (the best-known films
- * first, leaving KEEP_FOR_ASKED downloads), then notes which of their hashes TorBox holds.
+ * Reads the dubbed-films and dubbed-shows categories (FIRST_PAGES the first time, then the newest pages until a known
+ * upload), files each new upload under its TMDB film or show, gives each dubbed film's best copy and each dubbed show's
+ * best pack a hash (the best-known first, films and shows in turn, leaving KEEP_FOR_ASKED downloads), then notes which
+ * of their hashes TorBox holds.
  */
 function crawl(): Promise<void> {
   crawling ??= (async () => {
@@ -493,6 +497,7 @@ function crawl(): Promise<void> {
       fresh.push(...unseen)
       if (!unseen.length) break
     }
+    await crawlShows(s)
     for (const r of fresh) {
       const tmdb = PACK.test(r.title) ? 0 : await tmdbFilm(r.title)
       dubs[r.id] = tmdb
@@ -508,7 +513,13 @@ function crawl(): Promise<void> {
       if (n !== undefined) votes[id] = n
     }
     await save()
-    for (const r of unhashed(s)) if (!s.bare?.[r.id] || allowance(s, true) > KEEP_FOR_ASKED) await resolve(r, true, KEEP_FOR_ASKED)
+    // Films and shows take turns: shows have far fewer votes than films, and would never get one.
+    const films = unhashed(s), shows = unhashedShows(s)
+    for (let i = 0; i < Math.max(films.length, shows.length); i++) {
+      const film = films[i], show = shows[i]
+      if (film && (!s.bare?.[film.id] || allowance(s, true) > KEEP_FOR_ASKED)) await resolve(film, true, KEEP_FOR_ASKED)
+      if (show && (!s.bare?.[show.row.id] || allowance(s, true) > KEEP_FOR_ASKED)) await resolvePack(show.row, show.names, KEEP_FOR_ASKED)
+    }
     await onTorBox(dubHashes(s), s)
     await save()
   })()
@@ -522,6 +533,64 @@ const unhashed = (s: Store) => [...new Set(Object.values(s.dubs ?? {}).filter(Bo
   .flatMap((id) => wanted(s.films[id]?.rows ?? [], s.torrents).slice(0, 1).filter((r) => !s.torrents[r.id]).map((r) => ({ r, votes: s.votes?.[id] ?? 0 })))
   .sort((a, b) => b.votes - a.votes || Number(b.r.egyptian) - Number(a.r.egyptian) || Number(b.r.id) - Number(a.r.id))
   .map((x) => x.r)
+
+/** The tracker's names for a show's upload without its seasons and episodes ("Bluey S01-02-03" → "Bluey"), as uploadNames reads them. */
+export function showNames(title: string): string[] {
+  const t = digits(decode(title))
+    .replace(/(?<![a-z])s\d{1,2}(?:[ ._-]*(?:s|e)?\d{1,3})*(?![\d])/gi, ' ')
+    .replace(/(?:الموسم|الجزء|الحلقة|الحلقات)\s*\d*|\bE\d{1,3}\b|كامل/g, ' ')
+  return uploadNames(t).names
+}
+
+/** Of TMDB's answers for [q], the animated show: the one named [q] exactly, else (for a name of two words or more) the first. */
+export function pickShow(results: { id: number; name?: string; original_name?: string; genre_ids?: number[] }[], q: string): number {
+  const fits = results.filter((x) => x.genre_ids?.includes(16))
+  return (fits.find((x) => [x.name, x.original_name].some((n) => n && norm(n) === norm(q))) ?? (norm(q).includes(' ') ? fits[0] : undefined))?.id ?? 0
+}
+
+/**
+ * Reads the dubbed-shows category (FIRST_PAGES the first time, then the newest pages until a known upload) and files
+ * each new upload under its TMDB show, with the show's names (Arabic too) and TMDB vote count, once.
+ */
+async function crawlShows(s: Store): Promise<void> {
+  const seen = (s.showDubs ??= {})
+  const fresh: Row[] = []
+  for (let n = 1; n <= (s.showsCrawled ? DAILY_PAGES : FIRST_PAGES); n++) {
+    const rows = searchRows(await page(`index.php?page=torrents&category=${DUBBED_SHOWS}&active=0&internel=0&order=3&by=2&pages=${n}`))
+    const unseen = rows.filter((r) => seen[r.id] === undefined && !fresh.some((x) => x.id === r.id))
+    fresh.push(...unseen)
+    if (!unseen.length) break
+  }
+  const shows = (s.shows ??= {}), votes = (s.votes ??= {})
+  for (const r of fresh) {
+    let tmdb = 0
+    for (const q of showNames(r.title).slice(0, 3)) {
+      const found = await tmdbGet<{ results: Parameters<typeof pickShow>[0] }>(`search/tv?query=${encodeURIComponent(q)}`).catch(() => null)
+      if ((tmdb = found ? pickShow(found.results, q) : 0)) break
+    }
+    seen[r.id] = tmdb
+    if (!tmdb) continue
+    if (!shows[tmdb]?.names) {
+      const [en, ar] = await Promise.all([`tv/${tmdb}`, `tv/${tmdb}?language=ar`].map((p) => tmdbGet<{ name?: string; original_name?: string; vote_count?: number }>(p).catch(() => null)))
+      if (!en) continue
+      votes[`tv:${tmdb}`] = en.vote_count ?? 0
+      shows[tmdb] = { at: shows[tmdb]?.at ?? 0, ar: ar?.name ?? '', rows: shows[tmdb]?.rows ?? [], names: [...new Set([ar?.name, en.name, en.original_name].filter((n): n is string => !!n))] }
+    }
+    if (!shows[tmdb].rows.some((x) => x.id === r.id)) shows[tmdb].rows.push(r)
+  }
+  s.showsCrawled = Date.now()
+  await save()
+}
+
+/** Each crawled dubbed show still without an episode-holding pack: its best pack yet unread (season 1's first), the best-known shows first. */
+const unhashedShows = (s: Store) => [...new Set(Object.values(s.showDubs ?? {}).filter(Boolean).map(String))]
+  .flatMap((id) => {
+    const show = s.shows?.[id]
+    if (!show?.names || show.rows.some((r) => { const p = s.packs?.[r.id]; return p && 'hash' in p })) return []
+    const row = wantedPacks(show.rows, 1, s.packs).find((r) => !s.packs?.[r.id])
+    return row ? [{ row, names: show.names, votes: s.votes?.[`tv:${id}`] ?? 0 }] : []
+  })
+  .sort((a, b) => b.votes - a.votes)
 
 /** The hashes of every dubbed copy known: films' and shows' packs. */
 const dubHashes = (s: Store) => [
@@ -565,7 +634,7 @@ export async function arabp2pCopies(tmdb: string, t: TmdbTitle): Promise<{ copie
   const s = await db()
   // Any film asked for starts the day's crawl of the dubbed films, in the background, and another (one page)
   // whenever the allowance has room again while dubbed films wait for a hash.
-  if (Date.now() >= pausedUntil && (Date.now() - (s.crawled ?? 0) > DAY_MS || (Date.now() - crawlStarted > 30 * 60_000 && allowance(s, true) > KEEP_FOR_ASKED && unhashed(s).length))) crawl()
+  if (Date.now() >= pausedUntil && (Date.now() - (s.crawled ?? 0) > DAY_MS || (Date.now() - crawlStarted > 30 * 60_000 && allowance(s, true) > KEEP_FOR_ASKED && (unhashed(s).length || unhashedShows(s).length)))) crawl()
   if (!arabic && !t.genres.includes('Animation')) return { copies: [], pending: false }
   if (Date.now() >= pausedUntil && due(s, tmdb, !arabic)) refresh(tmdb, t, arabic)
   const known = (s.films[tmdb]?.rows ?? []).flatMap((row) => {
@@ -607,6 +676,16 @@ function wantedPacks(rows: Row[], season: number, packs: Store['packs'] = {}): R
 /** The tracker's category of Arabic-dubbed animated shows (beside the films' 98): a search in all of them gives a show's newest uploads, mostly subtitled. */
 const DUBBED_SHOWS = 100
 
+/** A show's torrent's hash and episodes (by the show's [names]), as fetchHash finds them. */
+async function resolvePack(row: Row, names: string[], keep: number): Promise<void> {
+  const held = await fetchHash(row, true, keep)
+  if (!held) return
+  const s = await db()
+  const eps = packEpisodes(held.files, names)
+  ;(s.packs ??= {})[row.id] = Object.keys(eps).length ? { hash: held.hash, eps } : { none: true }
+  await save()
+}
+
 const showJobs = new Map<string, Promise<void>>()
 /** Brings a show's rows (its dubbed uploads, by name) and [season]'s packs up to date, in the background. */
 function refreshShow(tmdb: string, t: TmdbTitle, season: number): Promise<void> {
@@ -620,22 +699,17 @@ function refreshShow(tmdb: string, t: TmdbTitle, season: number): Promise<void> 
       const ar = show?.ar ?? await tmdbGet<{ name?: string }>(`tv/${tmdb}?language=ar`).then((r) => r.name ?? '', () => '')
       const names = [...new Set([ar, t.name, t.originalTitle].filter(Boolean))]
       if (stale(show)) {
+        const crawled = show?.rows ?? []
         const rows = new Map<string, Row>()
         for (const q of names.slice(0, 2)) {
           const html = await page(`index.php?page=torrents&search=${encodeURIComponent(q)}&category=${DUBBED_SHOWS}&active=0&internel=0&order=3&by=2`)
           for (const r of searchRows(html)) if (names.some((n) => ` ${norm(r.title)} `.includes(` ${norm(n)} `))) rows.set(r.id, r)
         }
-        show = shows[tmdb] = { at: Date.now(), ar, rows: [...rows.values()] }
+        // Rows the crawl added are kept alongside what the search finds.
+        show = shows[tmdb] = { at: Date.now(), ar, names, rows: [...rows.values(), ...crawled.filter((r) => !rows.has(r.id))] }
         await save()
       }
-      for (const r of wantedPacks(show!.rows, season, packs)) {
-        if (packs[r.id]) continue
-        const held = await fetchHash(r, true, 0)
-        if (!held) continue
-        const eps = packEpisodes(held.files, names)
-        packs[r.id] = Object.keys(eps).length ? { hash: held.hash, eps } : { none: true }
-        await save()
-      }
+      for (const r of wantedPacks(show!.rows, season, packs)) if (!packs[r.id]) await resolvePack(r, names, 0)
     })()
       .catch((e) => void (e instanceof Paused || console.warn(`arabp2p: tv ${tmdb} failed (${e instanceof Error ? e.message : e})`)))
       .finally(() => showJobs.delete(tmdb))
