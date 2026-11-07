@@ -4,7 +4,7 @@
 // (EN > AR > DE/ES), dead PPV slots dropped, catch-up flags passed through.
 // UFC PPV replays + the provider's 4K/UHD movie libraries (all languages) are
 // appended as on-demand VOD entries. Live kids channels (EN/US/AR/ES/DE, plus
-// Russian kids pulled by name from the general RU category) get their own buckets.
+// Russian kids pulled by name from the general RU category) share one Kids group.
 // Per-competition "🏆" groups (withCompetitionGroups) copy football channels from
 // every region under the league/cup they carry, quality first.
 // Credentials come from env (XTREAM_HOST, XTREAM_USER, XTREAM_PASS, PLAYLIST_TOKEN); a backup
@@ -151,11 +151,15 @@ export const KEEP: number[] = [
 // Viewer-facing buckets, in display order — by how often each is the way in, most
 // used first at stable positions: the 🏆 competition groups lead (see
 // withCompetitionGroups), then the match-day trio (Sky/UK, the live-match PPV pool,
-// beIN), the other regions by preference, replays, other sports, non-sport, VOD.
+// beIN), tennis and fights (no 🏆 shortcut of their own), the other regions by
+// preference, replays, non-sport, VOD.
 const B = {
   uk: '🏴 Sky Sports & UK Sports',
   fbPpv: '⚽ Football — Match PPV',
   ar: '🇸🇦 beIN & Arabic Sports',
+  tennis: '🎾 Tennis',
+  ufc: '🥊 UFC & Fight PPV',
+  ufcVod: '🎬 UFC PPV Replays (VOD)',
   de: '🇩🇪 German Sports',
   es: '🇪🇸 Spanish Sports',
   it: '🇮🇹 Italian Sports',
@@ -163,17 +167,10 @@ const B = {
   // SG/NZ/HK Premier League channels — listed only under 🏆 Premier League
   plAbroad: '🌏 Premier League abroad',
   fbReplay: '📼 Football — Replays',
-  tennis: '🎾 Tennis',
-  ufc: '🥊 UFC & Fight PPV',
-  ufcVod: '🎬 UFC PPV Replays (VOD)',
   ru: '🇷🇺 Russian Channels',
-  kidsEn: '🧒 Kids — English',
-  kidsAr: '🧒 Kids — Arabic',
-  kidsEs: '🧒 Kids — Spanish',
-  kidsDe: '🧒 Kids — German',
-  kidsRu: '🧒 Kids — Russian',
-  cartoon247: '📺 24/7 Cartoons',
-  kidsFamily247: '📺 24/7 Kids & Family',
+  // Every language's kids channels in one group, by language (English, Arabic, then the rest)
+  kids: '🧒 Kids',
+  kids247: '📺 24/7 Cartoons & Kids',
 } as const
 const BUCKET_ORDER: string[] = Object.values(B)
 
@@ -198,8 +195,8 @@ const CAT_BUCKET: Record<number, string> = {
   1429: B.tennis, 1096: B.tennis, 1927: B.tennis,
   1139: B.ufc, 929: B.ufc, 903: B.ufc, 380: B.ufc,
   6: B.ru,
-  304: B.kidsEn, 490: B.kidsEn, 105: B.kidsAr, 42: B.kidsEs, 334: B.kidsDe,
-  2063: B.cartoon247, 2064: B.kidsFamily247,
+  304: B.kids, 490: B.kids, 105: B.kids, 42: B.kids, 334: B.kids,
+  2063: B.kids247, 2064: B.kids247,
 }
 
 // A few of the home provider's categories, by id and exact name: two still there means KEEP's ids are its.
@@ -787,7 +784,7 @@ export async function fetchCuratedChannels(cfg: XtreamConfig, vod = true): Promi
       const q = qualityScore(name, group)
       if (q === 0) continue // explicit SD/LQ feeds
       // Russian kids channels ride in the general RU category — route them to the kids group.
-      const chBucket = home && id === 6 && RU_KIDS.test(name) ? B.kidsRu : bucket
+      const chBucket = home && id === 6 && RU_KIDS.test(name) ? B.kids : bucket
       // Feeds that only light up during a match (PPV slots, beIN's "(EVENT ONLY)"
       // 4K slots) keep their marker tier when probed low — that's idle filler.
       const { h: rh, fps: rf } = realRes(s.stream_id, q, isEventSlot || EVENT_ONLY.test(name), name)
@@ -833,9 +830,10 @@ export async function fetchCuratedChannels(cfg: XtreamConfig, vod = true): Promi
     // language, US demoted below UK, primaries before backups, and finally sibling
     // feeds grouped + numbered (FOX 1/2, 4K 1/2/3) so equal feeds don't scatter.
     const isArabic = bucket === B.ar
+    const isKids = bucket === B.kids
     items.sort(
       (a, b) =>
-        (isArabic ? a.bein - b.bein : 0) ||
+        (isArabic ? a.bein - b.bein : 0) || (isKids ? a.lang - b.lang : 0) ||
         b.rh - a.rh || b.rf - a.rf || audio(b.c.streamId) - audio(a.c.streamId) || b.q - a.q ||
         a.lang - b.lang || a.region - b.region || a.backup - b.backup ||
         a.nkey.localeCompare(b.nkey, 'en', { numeric: true }) || a.idx - b.idx,
