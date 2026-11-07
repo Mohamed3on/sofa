@@ -67,16 +67,16 @@ export function trueScoreRows(seen: Set<string>, films: Store): [string, string[
   return [['ts-recent', recent], ['ts-all', by('score', new Set(recent))]]
 }
 
-/** A Letterboxd list TrueScore's extension read its picks from (_ratings.ts [letterboxdLists]): its row id, name, films by title id, when last sent (ms). */
-export type StoreList = { id: string; n: string; ids: string[]; at: number }
-/** Lists shown as rows: the newest sent. */
-const LIST_ROWS = 4
+/** A Letterboxd list TrueScore's extension read its picks from (_ratings.ts [letterboxdLists]): its row id, name, films by title id, likes, when last sent (ms). */
+export type StoreList = { id: string; n: string; ids: string[]; likes?: number; at: number }
+/** Lists shown as rows: the most liked. */
+const LIST_ROWS = 6
 /** Fewer films the owner hasn't watched than this, and a list makes no row. */
 const LIST_MIN = 10
 
-/** The newest [LIST_ROWS] lists with at least [LIST_MIN] films the owner hasn't watched ([seen]), as rows (the library sorts them by score). */
+/** The [LIST_ROWS] most liked lists (the newest first among equals, a list without a count last) with at least [LIST_MIN] films the owner hasn't watched ([seen]), as rows (the library sorts them by score). */
 export const listRows = (lists: StoreList[], seen: Set<string>) =>
-  lists.filter((l) => l.ids.filter((id) => !seen.has(id)).length >= LIST_MIN).sort((a, b) => b.at - a.at).slice(0, LIST_ROWS)
+  lists.filter((l) => l.ids.filter((id) => !seen.has(id)).length >= LIST_MIN).sort((a, b) => (b.likes ?? -1) - (a.likes ?? -1) || b.at - a.at).slice(0, LIST_ROWS)
 
 /**
  * The TrueScore shows row by id: IMDb's Top 250 and Most Popular TV shows ([shows]) by TrueScore's net score on IMDb's histogram

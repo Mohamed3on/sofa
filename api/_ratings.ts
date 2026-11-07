@@ -52,9 +52,9 @@ function readStore() {
       const id = `movie:${tmdb}`, was = byId.get(id) ?? {}
       byId.set(id, { score: score ?? was.score, adjusted: adjusted ?? was.adjusted, ratio: ratio ?? was.ratio, h: h && sum(h) > sum(was.h ?? []) ? h : was.h })
     }
-    const lists = (() => { try { return JSON.parse(readFileSync(LISTS_FILE, 'utf8')) as Record<string, { name: string; slugs: string[]; at: number }> } catch { return {} } })()
+    const lists = (() => { try { return JSON.parse(readFileSync(LISTS_FILE, 'utf8')) as Record<string, { name: string; slugs: string[]; likes?: number; at: number }> } catch { return {} } })()
     lbx.lists = Object.entries(lists).map(([link, l]) => ({
-      id: `lb-${link.split('/').filter((x) => x && x !== 'list').join('-')}`, n: l.name, at: l.at,
+      id: `lb-${link.split('/').filter((x) => x && x !== 'list').join('-')}`, n: l.name, at: l.at, ...(l.likes !== undefined && { likes: l.likes }),
       ids: [...new Set(l.slugs.flatMap((slug) => (store[slug]?.tmdb ? [`movie:${store[slug].tmdb}`] : [])))],
     }))
     lbx.byId = byId

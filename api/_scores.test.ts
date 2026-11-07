@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { ranked, type Library } from './_library'
 import { refreshScores } from './_ratings'
-import { scoreTitles, type ScoreCache } from './_scores'
+import { listRows, scoreTitles, type ScoreCache } from './_scores'
 
 /** IMDb votes 1..10 with [loved] 10s, [hated] 1s, the rest 7s. */
 const votes = (total: number, loved: number, hated = 0) => [hated, 0, 0, 0, 0, 0, total - loved - hated, 0, 0, loved]
@@ -55,4 +55,12 @@ test('MDBList is asked in batches and gives the IMDb id IMDb is then asked with;
   mdbLeft = 5
   await refreshScores(['movie:1', 'movie:2', 'tv:3'], new Set(), cache, 'm', { fetch: fake, gap: 0, now: now + 864e5 })
   expect(asked).toEqual(['https://api.mdblist.com/tmdb/show?apikey=m {"ids":["3"]}'])
+})
+
+test('list rows: the 6 most liked lists with 10 unwatched films, the newest first among equals, one without a count last', () => {
+  const ids = Array.from({ length: 10 }, (_, i) => `movie:${i}`)
+  const list = (id: string, likes: number | undefined, at: number, watched = false) => ({ id, n: id, ids: watched ? ids.slice(0, 9) : ids, ...(likes !== undefined && { likes }), at })
+  const lists = [list('a', 5, 1), list('b', 900, 1), list('c', undefined, 9), list('d', 5, 2), list('e', 70, 1), list('f', 3, 1), list('g', 1, 1), list('h', 10_000, 1, true)]
+  expect(listRows(lists, new Set()).map((l) => l.id)).toEqual(['b', 'e', 'd', 'a', 'f', 'g'])
+  expect(listRows(lists.slice(0, 3), new Set(['movie:0'])).map((l) => l.id)).toEqual([])
 })

@@ -191,7 +191,7 @@ export interface ShowDeps {
   seen: Set<string>
   /** TrueScore's store (_ratings.ts [letterboxdFilms]). */
   films: Store
-  /** The Letterboxd lists in it (_ratings.ts [letterboxdLists]): the newest make rows after TrueScore's ([listRows]). */
+  /** The Letterboxd lists in it (_ratings.ts [letterboxdLists]): the most liked make rows after TrueScore's ([listRows]). */
   lists?: StoreList[]
   scores: Map<string, Score>
   /** A title's card from TMDB ([titleCard]); null for one it doesn't know or an adult one. */
@@ -202,7 +202,7 @@ export interface ShowDeps {
 
 /**
  * The library as served from a build ([full], library-full.json): TrueScore's rows as its store has them now (a film
- * new to them looked up, one without a poster left out) leading, the newest Letterboxd lists after the TrueScore shows row,
+ * new to them looked up, one without a poster left out) leading, the most liked Letterboxd lists after the TrueScore shows row,
  * every row ranked by [ShowDeps.scores] and cut once 60 the owner hasn't watched are in, the titles with their runtimes. The nightly build and the server between builds (once the store changes) both show it so.
  */
 export async function showLibrary(full: Library, d: ShowDeps): Promise<Library> {
