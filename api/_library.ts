@@ -10,88 +10,14 @@ import { writeAtomic } from './_fs.js'
 import { vodChannels } from './_lib.js'
 import { claims4K, type XtreamConfig } from './_provider.js'
 import { measuredStream, pictureTier, probedPicture, type Tier } from './_quality-labels.js'
+import { loadScores, scoreTitles, trueScoreRows, type Score } from './_scores.js'
 import { measuredFilms, showList } from './_shows.js'
-import { filmTitle, showTitle, type Kind } from './_tmdb.js'
+import { keptRuntimes, parseTitleId, TMDB_IMG, tmdbGet, type Kind } from './_tmdb.js'
+import { fromTmdb, knownOf, providerCard, unscored, type Known, type LibTitle, type TmdbItem } from './_titles.js'
 import { bestFilmCopies, blurayMovies, filmTitleOf } from './_vod.js'
 
-/** A film or show; empty fields are left out. */
-export interface LibTitle {
-  /** Title id (see _tmdb.ts). */
-  id: string
-  /** 'm' a film, 't' a show. */
-  k: 'm' | 't'
-  n: string
-  y?: number
-  /** Poster: a TMDB path ("/abc.jpg", shown at img + size + path) or a full URL (the provider's own). */
-  p?: string
-  /** Backdrop, a TMDB path. */
-  b?: string
-  /** Original language, ISO 639-1. */
-  l?: string
-  /** TMDB genre ids (films' and shows' differ; names in Library.gn). */
-  g?: number[]
-  /** The best picture tier of any copy seen; absent when none is known. */
-  t?: Tier
-  /** 1 when [t] is a category's claim (its resolution's ceiling), not measured. */
-  e?: 1
-  /** Combined score (api/_scores.ts) on /10, one decimal, and × 10 as an integer (the sort key); absent when unknown. */
-  s10?: number
-  s?: number
-  /** IMDb average (/10) and votes, Letterboxd average (0–5) and votes, from MDBList. */
-  ir?: number
-  iv?: number
-  lb?: number
-  lv?: number
-  /** TrueScore's adjusted score, all-time and recent net-loved ratios (0–1), for a film in its store (api/_scores.ts). */
-  ta?: number
-  tr?: number
-  tq?: number
-  /** A film the provider has: its best copy's VOD id and container, which Play starts when the box can't answer (KTD13). */
-  v?: number
-  x?: string
-  /** Runtime in minutes (a show's: an episode's), from TMDB's kept details; absent when unknown. */
-  rt?: number
-  /** TMDB popularity: picks a row's candidates without a score in the build (library-full.json); not served. */
-  pp?: number
-}
 export interface Row { id: string; n: string; /** Indexes into Library.titles. */ i: number[] }
 export interface Library { v: 1; src: 'tmdb' | 'provider'; at: string; img: string; gn: Record<string, string>; titles: LibTitle[]; rows: Row[] }
-
-const IMG = 'https://image.tmdb.org/t/p/'
-/** A TMDB image URL as its path, so the app picks the size; any other URL as is. */
-const image = (url: string) => url.match(/^https?:\/\/image\.tmdb\.org\/t\/p\/[^/]+(\/[^/]+)$/)?.[1] ?? url
-
-/** A TMDB list result or details, as far as the library needs it. */
-export interface TmdbItem {
-  id: number
-  title?: string
-  name?: string
-  release_date?: string
-  first_air_date?: string
-  poster_path?: string | null
-  backdrop_path?: string | null
-  original_language?: string
-  genre_ids?: number[]
-  genres?: { id: number }[]
-  media_type?: string
-  adult?: boolean
-  popularity?: number
-}
-
-export function fromTmdb(kind: Kind, r: TmdbItem): LibTitle {
-  const g = r.genre_ids ?? r.genres?.map((x) => x.id) ?? []
-  return {
-    id: kind === 'tv' ? showTitle(r.id, 0) : filmTitle(r.id, 0),
-    k: kind === 'tv' ? 't' : 'm',
-    n: r.title ?? r.name ?? '',
-    y: Number((r.release_date || r.first_air_date || '').slice(0, 4)) || undefined,
-    p: r.poster_path || undefined,
-    b: r.backdrop_path || undefined,
-    l: r.original_language || undefined,
-    g: g.length ? g : undefined,
-    pp: r.popularity,
-  }
-}
 
 /** A row: TMDB queries whose results lead it, then every library title it [has]. */
 export interface RowDef { id: string; n: string; q: [Kind, string][]; has?: (t: LibTitle) => boolean }
@@ -149,7 +75,7 @@ function toLibrary(src: Library['src'], titles: Map<string, LibTitle>, rows: { i
   const list = [...titles.values()]
   const index = new Map(list.map((t, i) => [t.id, i]))
   return {
-    v: 1, src, at: new Date().toISOString(), img: IMG, gn, titles: list,
+    v: 1, src, at: new Date().toISOString(), img: TMDB_IMG, gn, titles: list,
     rows: rows.map(({ id, n, ids }) => ({ id, n, i: [...new Set(ids.map((x) => index.get(x)!))] })).filter((r) => r.i.length),
   }
 }
@@ -186,12 +112,12 @@ export async function providerTitles(cfg: XtreamConfig): Promise<ProviderTitle[]
   const film = (vodId: number, id: string, n: string, poster: string, group: string, claim: Tier): ProviderTitle => {
     const m = measured[String(vodId)]
     const t = m && pictureTier(probedPicture(measuredStream(m, m.kbps))!)
-    return { t: { id, k: 'm', n, ...(poster && { p: image(poster) }), ...(t ? { t } : { t: claim, e: 1 as const }) }, group }
+    return { t: { ...providerCard(id, 'm', n, poster), ...(t ? { t } : { t: claim, e: 1 as const }) }, group }
   }
   return [
     ...vod.filter((c) => claims4K(c.group)).map((c) => film(c.streamId, titleOf(c.streamId), c.name, c.logo, c.group, 'Reference')),
     ...bluray.map((m) => film(m.id, m.titleId, m.name, m.poster, m.group, 'Great')),
-    ...(shows?.movies ?? []).map((s) => ({ t: { id: s.titleId, k: 't' as const, n: s.name, ...(s.poster && { p: image(s.poster) }) }, group: s.group })),
+    ...(shows?.movies ?? []).map((s) => ({ t: providerCard(s.titleId, 't', s.name, s.poster), group: s.group })),
   ]
 }
 
@@ -210,6 +136,74 @@ export async function providerLibrary(cfg: XtreamConfig): Promise<Library> {
     rows.get(group)?.push(t.id) ?? rows.set(group, [t.id])
   }
   return withProviderCopies(toLibrary('provider', titles, [...rows].map(([n, ids], i) => ({ id: `p${i}`, n, ids })), {}), cfg)
+}
+
+/** Titles a row keeps after sorting (the rest stay findable through search). */
+export const ROW_CAP = 60
+
+const median = (xs: number[]) => xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)]
+
+/**
+ * [lib] with [scores] on its titles and each row sorted by score (one with only [s10] after those, by it; one with
+ * neither at the row's median),
+ * cut to [cap] titles, then only the titles some row still holds.
+ */
+export function ranked(lib: Library, scores: Map<string, Score>, cap = ROW_CAP): Library {
+  const all = lib.titles.map(({ pp: _p, ...t }) => ({ ...unscored(t), ...scores.get(t.id) }))
+  const rows = lib.rows.map((r) => {
+    const known = r.i.map((i) => all[i].s).filter((s): s is number => s !== undefined)
+    const mid = known.length ? median(known) : 0, lo = Math.min(0, ...known)
+    const key = (i: number) => all[i].s ?? (all[i].s10 !== undefined ? lo - 10 + all[i].s10! : mid)
+    return { ...r, i: (!ordered(r.id) && r.i.some((i) => all[i].s10 !== undefined || all[i].s !== undefined) ? r.i.slice().sort((a, b) => key(b) - key(a)) : r.i).slice(0, ordered(r.id) ? undefined : cap) }
+  })
+  const kept = [...new Set(rows.flatMap((r) => r.i))].sort((a, b) => a - b)
+  const index = new Map(kept.map((old, i) => [old, i]))
+  return { ...lib, titles: kept.map((i) => all[i]), rows: rows.map((r) => ({ ...r, i: r.i.map((i) => index.get(i)!) })) }
+}
+
+/** Title ids as the app shows them: every row's first card, then every row's second, and so on. */
+export function onScreen(lib: Library): string[] {
+  const ids = new Set<string>()
+  for (let p = 0; p < Math.max(0, ...lib.rows.map((r) => r.i.length)); p++) for (const r of lib.rows) if (p < r.i.length) ids.add(lib.titles[r.i[p]].id)
+  return [...ids]
+}
+
+const lookedUp = new Map<string, LibTitle | null>()
+/**
+ * The nightly build's library (library-full.json) with TrueScore's rows (the owner's [seen] titles counted out) and
+ * every score as its store and the score cache have them now, ranked and cut as the build does: what the server
+ * serves between builds once the store changes. A film new to the rows is looked up on TMDB once; titles carry their
+ * kept runtimes.
+ */
+export async function rescoredLibrary(seen: Set<string>): Promise<Library> {
+  const [full, cache, rt] = await Promise.all([readFile(LIBRARY_FULL_FILE, 'utf8').then((s) => JSON.parse(s) as Library), loadScores(), keptRuntimes()])
+  const titles = [...full.titles], index = new Map(titles.map((t, i) => [t.id, i]))
+  const ts = trueScoreRows(seen)
+  await Promise.all(ts.flatMap(([, ids]) => ids).filter((id) => !index.has(id) && !lookedUp.has(id)).map((id) =>
+    tmdbGet<TmdbItem>(`movie/${parseTitleId(id)!.tmdb}`).then((r) => lookedUp.set(id, r.adult ? null : fromTmdb('movie', r)), () => {})))
+  const names = new Map(rowDefs().map((d) => [d.id, d.n]))
+  const rows = [
+    ...ts.map(([id, ids]) => ({ id, n: names.get(id)!, i: [...new Set(ids.flatMap((x) => {
+      const t = lookedUp.get(x)
+      if (!index.has(x) && t?.p) index.set(x, titles.push(t) - 1)
+      return titles[index.get(x) ?? -1]?.p ? [index.get(x)!] : []
+    }))] })).filter((r) => r.i.length),
+    ...full.rows.filter((r) => !ts.some(([id]) => id === r.id)),
+  ]
+  const shown = ranked({ ...full, titles, rows }, scoreTitles(cache))
+  return { ...shown, titles: shown.titles.map((t) => ({ ...t, ...(rt(t.id) && { rt: rt(t.id) }) })) }
+}
+
+const KNOWN_MS = 10 * 60e3
+let known: { at: number; job: Promise<Known> } | null = null
+
+/** [Known] (api/_titles.ts) from the library files, the scores and the kept runtimes, read again at most every 10 minutes (the nightly build rewrites them). */
+export function knownTitles(): Promise<Known> {
+  if (known && Date.now() - known.at < KNOWN_MS) return known.job
+  const read = (f: string) => readFile(f, 'utf8').then((s) => JSON.parse(s) as Library, () => null)
+  const job = Promise.all([read(LIBRARY_FILE), read(LIBRARY_FULL_FILE), loadScores(), keptRuntimes()]).then(([lib, full, cache, rt]) => knownOf(lib, full, cache, rt))
+  known = { at: Date.now(), job }
+  return job
 }
 
 export const LIBRARY_FILE = fileURLToPath(new URL('../.cache/library.json', import.meta.url))

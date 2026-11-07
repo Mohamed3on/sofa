@@ -1,44 +1,14 @@
 // What the app's title pages, search and person pages ask beyond the library (U13): a title's TMDB details
 // with More like this, cast and director (and a TMDB-only show's episodes, so Real-Debrid can play them),
 // search over titles and category words, and a person's titles. Every title comes in the library's shape
-// (_library.ts LibTitle) with the tier and score the library knows for it.
-import { readFile } from 'node:fs/promises'
+// (_titles.ts LibTitle) with the tier and score the library knows for it.
 import type { XtreamConfig } from './_provider.js'
-import { fromTmdb, LIBRARY_FILE, LIBRARY_FULL_FILE, type LibTitle, type Library, type TmdbItem } from './_library.js'
-import { due, histogramShare, loadScores, scoreNow, scoreOf, scoreTitles, type Score, type ScoreCache } from './_scores.js'
+import { knownTitles } from './_library.js'
+import { due, histogramShare, scoreNow, scoreOf, scoreTitles } from './_scores.js'
 import { showList } from './_shows.js'
-import { episodeTitle, keptRuntimes, parseTitleId, tmdbCollection, tmdbEpisodes, tmdbTitle } from './_tmdb.js'
+import { episodeTitle, parseTitleId, tmdbCollection, tmdbEpisodes, tmdbImage, tmdbTitle } from './_tmdb.js'
+import { byScore, decorate, fromRecommendation, fromTmdb, fromVod, personCard, type Known, type LibTitle, type TmdbItem } from './_titles.js'
 import type { VodItem } from './_vod.js'
-
-/** The built library (null when missing), every title it has seen with its tier (the uncut build), scores (with what the APIs said) and kept runtimes. */
-export interface Known { lib: Library | null; titles: Map<string, LibTitle>; scores: Map<string, Score>; cache?: ScoreCache; rt?: (id: string) => number | undefined }
-
-const KNOWN_MS = 10 * 60e3
-let known: { at: number; job: Promise<Known> } | null = null
-
-/** [Known], read again at most every 10 minutes (the nightly build rewrites the files). */
-export function knownTitles(): Promise<Known> {
-  if (known && Date.now() - known.at < KNOWN_MS) return known.job
-  const read = (f: string) => readFile(f, 'utf8').then((s) => JSON.parse(s) as Library, () => null)
-  const job = Promise.all([read(LIBRARY_FILE), read(LIBRARY_FULL_FILE), loadScores(), keptRuntimes()]).then(([lib, full, cache, rt]) => {
-    const titles = new Map<string, LibTitle>()
-    for (const t of [...(full?.titles ?? []), ...(lib?.titles ?? [])]) titles.set(t.id, { ...titles.get(t.id), ...t })
-    return { lib, titles, scores: scoreTitles(cache), cache, rt }
-  })
-  known = { at: Date.now(), job }
-  return job
-}
-
-/** [t] with the tier, score and runtime the library knows for it. */
-export function decorate(k: Known, t: LibTitle): LibTitle {
-  const base = k.titles.get(t.id), rt = t.rt ?? base?.rt ?? k.rt?.(t.id)
-  return { ...t, ...(base?.t && { t: base.t, ...(base.e && { e: base.e }) }), ...k.scores.get(t.id), ...(rt && { rt }) }
-}
-
-/** Best score first, then those with only [s10] by it; unscored titles keep their order after them. */
-export const byScore = <T extends LibTitle>(list: T[]) => list.map((t, i) => [t, i] as const).sort(([a, i], [b, j]) => (b.s ?? -Infinity) - (a.s ?? -Infinity) || (b.s10 ?? 0) - (a.s10 ?? 0) || i - j).map(([t]) => t)
-
-const IMG = 'https://image.tmdb.org/t/p/'
 
 /**
  * A film's or show's page beyond its card, in the app's MovieInfo shape: plot, runtime, genres, backdrop,
@@ -74,12 +44,12 @@ export async function titleDetails(cfg: XtreamConfig, id: string) {
     plot: t.plot,
     secs: kind === 'movie' ? t.runtime * 60 : 0,
     genre: t.genres.slice(0, 2).join(', '),
-    backdrop: t.backdrop && `${IMG}w1280${t.backdrop}`,
+    backdrop: tmdbImage(t.backdrop, 'w1280'),
     cast: t.cast.slice(0, 4).map((c) => c.name).join(', '),
     director: t.directors.map((d) => d.name).join(', '),
     people: [...people.values()],
     // The franchise's own films are its row, not More like this.
-    more: t.recommendations.filter((r) => !parts.some((x) => r.title === `movie:${x.id}`)).map((r) => decorate(k, { id: r.title, k: r.title.startsWith('tv:') ? 't' : 'm', n: r.name, ...(Number(r.year) && { y: Number(r.year) }), ...(r.poster && { p: r.poster }) })),
+    more: t.recommendations.filter((r) => !parts.some((x) => r.title === `movie:${x.id}`)).map((r) => decorate(k, fromRecommendation(r))),
     ...scoreOf(id, cache),
     ...histogramShare(id, cache),
     ...(t.trailer && { trailer: t.trailer }),
@@ -171,12 +141,12 @@ export async function searchTitles(query: string, d: SearchDeps): Promise<LibTit
   const people = found
     .filter((r) => r.media_type === 'person' && r.profile_path && named(r.name ?? ''))
     .slice(0, 3)
-    .map((r): LibTitle => ({ id: `person:${r.id}`, k: 'p', n: r.name ?? '', p: r.profile_path! }))
+    .map(personCard)
   for (const r of found) if ((r.media_type === 'movie' || r.media_type === 'tv') && r.poster_path) out.set(fromTmdb(r.media_type, r).id, fromTmdb(r.media_type, r))
   const provider = new Set<string>()
   for (const v of vod) {
     provider.add(v.titleId)
-    if (!out.has(v.titleId)) out.set(v.titleId, { id: v.titleId, k: 'm', n: v.name, ...(v.poster && { p: v.poster }) })
+    if (!out.has(v.titleId)) out.set(v.titleId, fromVod(v))
   }
   for (const t of d.known.titles.values()) if (out.size < 60 && !out.has(t.id) && named(t.n)) out.set(t.id, t)
   // Titles: named like the search (whole name or its start), then by its words, then the rest; within each, the

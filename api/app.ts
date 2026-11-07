@@ -16,7 +16,7 @@
 // POST /api/app/rd-infringing?t=TOKEN — torrents Real-Debrid refused, left out of copies from then on.
 // GET /api/app/subtitles?t=TOKEN&title=…&hash=…&size=…&name=… — English and Arabic subtitles for the copy playing.
 // GET /api/app/subtitle?t=TOKEN&id=… — one of them as SRT.
-// GET /api/app/title, /api/app/search, /api/app/person ?t=TOKEN — title pages, search and person pages (see _browse.ts).
+// GET /api/app/title, /api/app/search, /api/app/person ?t=TOKEN — title pages, search and person pages (see _browse.ts; cards from _titles.ts).
 // GET /api/app/trakt?t=TOKEN — the Trakt sign-in; POST it { action: connect | cancel | disconnect } to change it.
 // POST /api/app/trakt-history?t=TOKEN — { title, at } a film or episode finished on the stick, for Trakt history.
 // POST /api/app/mark?t=TOKEN — { title, watched?, rating? } a mark or rating made on the stick, for Trakt.
@@ -26,14 +26,14 @@ import { buildAppFeed, buildAppGuide } from './_app-feed.js'
 import { iptvCopies, markInfringing, titleCopies } from './_copies.js'
 import { appTokenOk, fetchCuratedChannels, saneFps, vodChannels, withBackupFeeds, withCompetitionGroups } from './_lib.js'
 import { backupConfigFromEnv, configFromEnv } from './_provider.js'
-import { currentHistory, historyAnswer, loadHistory, saveHistory, watchlistOf, withMark } from './_history.js'
-import { providerLibrary, servedLibrary } from './_library.js'
+import { currentHistory, historyAnswer, loadHistory, saveHistory, watchedOf, watchlistOf, withMark } from './_history.js'
+import { knownTitles, providerLibrary, ranked, rescoredLibrary, servedLibrary } from './_library.js'
 import { recordBitrate, recordReading, type Meta } from './_quality.js'
 import { curatedGuide } from './epg.js'
 import { movieInfo, saveMeasuredFilm, showEpisodes, showList, titleIds as mapTitleIds } from './_shows.js'
 import { subtitleFile, subtitlesFor } from './_subtitles.js'
-import { knownTitles, personTitles, searchTitles, titleDetails } from './_browse.js'
-import { loadScores, ranked, rescoredLibrary, scoreTitles, storeAt, watchStore } from './_scores.js'
+import { personTitles, searchTitles, titleDetails } from './_browse.js'
+import { loadScores, scoreTitles, storeAt, watchStore } from './_scores.js'
 import { episodeTitle, parseTitleId, tmdbEpisodes, tmdbFacts, tmdbGet, tmdbTitle } from './_tmdb.js'
 import * as trakt from './_trakt.js'
 import { blurayMovies, filmTitleOf, searchVod } from './_vod.js'
@@ -248,7 +248,7 @@ export async function episodes(req: Request): Promise<Response> {
 }
 
 // The provider's rows are cut and sorted like the built library's, so the fallback stays small.
-const libraryNow = () => servedLibrary(async () => ranked(await providerLibrary(configFromEnv()), scoreTitles(await loadScores())), async () => rescoredLibrary(await loadHistory()), storeAt)
+const libraryNow = () => servedLibrary(async () => ranked(await providerLibrary(configFromEnv()), scoreTitles(await loadScores())), async () => rescoredLibrary(watchedOf(await loadHistory())), storeAt)
 // A score TrueScore's extension adds reaches the library's rows a second or so after it lands in the store.
 watchStore(() => void libraryNow().catch(() => {}))
 

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import type { Library } from './_library'
-import { ranked, refreshScores, scoreTitles, type ScoreCache } from './_scores'
+import { ranked, type Library } from './_library'
+import { refreshScores, scoreTitles, type ScoreCache } from './_scores'
 
 /** IMDb votes 1..10 with [loved] 10s, [hated] 1s, the rest 7s. */
 const votes = (total: number, loved: number, hated = 0) => [hated, 0, 0, 0, 0, 0, total - loved - hated, 0, 0, loved]

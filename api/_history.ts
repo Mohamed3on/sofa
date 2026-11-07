@@ -11,8 +11,7 @@ import { readFile } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { writeAtomic } from './_fs.js'
-import { decorate, type Known } from './_browse.js'
-import type { LibTitle } from './_library.js'
+import { decorate, fromDetails, type Known, type LibTitle } from './_titles.js'
 import { episodeTitle, parseTitleId, tmdbEpisodes, tmdbTitle, type Kind, type TmdbEpisode } from './_tmdb.js'
 import { accessToken, revoked, status, traktHeaders } from './_trakt.js'
 
@@ -317,8 +316,8 @@ export async function historyAnswer(h: Kept | null, local: string[], k: Known) {
     if (titles.has(id)) return titles.get(id)!
     const [kind, tmdb] = id.split(':') as [Kind, string]
     const t = k.titles.has(id) ? null : await tmdbTitle(kind, tmdb)
-    const base = k.titles.get(id) ?? (t && { id, k: kind === 'tv' ? 't' : 'm', n: t.name, ...(Number(t.year) && { y: Number(t.year) }), ...(t.poster && { p: t.poster }), ...(t.backdrop && { b: t.backdrop }), ...(t.originalLanguage && { l: t.originalLanguage }) })
-    const out = base ? decorate(k, { ...base, ...(h?.runtimes?.[id] && { rt: h.runtimes[id] }) } as LibTitle) : null
+    const base = k.titles.get(id) ?? (t && fromDetails(id, t))
+    const out = base ? decorate(k, { ...base, ...(h?.runtimes?.[id] && { rt: h.runtimes[id] }) }) : null
     titles.set(id, out)
     return out
   }

@@ -11,9 +11,7 @@ import { readFile } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { writeAtomic } from './_fs.js'
-import { watchedOf, type Kept } from './_history.js'
-import { fromTmdb, LIBRARY_FULL_FILE, ordered, rowDefs, type LibTitle, type Library, type TmdbItem } from './_library.js'
-import { keptRuntimes, parseTitleId, tmdbGet } from './_tmdb.js'
+import { parseTitleId, tmdbGet } from './_tmdb.js'
 
 /**
  * What was said about one title, times in ms: IMDb average (/10) and votes, Letterboxd average (0–5) and votes,
@@ -21,18 +19,27 @@ import { keptRuntimes, parseTitleId, tmdbGet } from './_tmdb.js'
  */
 export interface ScoreEntry { ir?: number; iv?: number; lb?: number; lv?: number; ma?: number; im?: string; h?: number[]; ha?: number }
 export type ScoreCache = Record<string, ScoreEntry>
-/** A title's score as the library carries it: [s] = [s10] × 10, the sort key, plus the averages and votes shown. */
-export type Score = Pick<LibTitle, 's' | 's10' | 'ir' | 'iv' | 'lb' | 'lv' | 'ta' | 'tr' | 'tq'>
-
-/** Titles a row keeps after sorting (the rest stay findable through search). */
-export const ROW_CAP = 60
+/** A title's score as a card carries it; absent fields are unknown. */
+export interface Score {
+  /** Combined score (see the top) on /10, one decimal, and the sort key [s]. */
+  s10?: number
+  s?: number
+  /** IMDb average (/10) and votes, Letterboxd average (0–5) and votes, from MDBList. */
+  ir?: number
+  iv?: number
+  lb?: number
+  lv?: number
+  /** TrueScore's adjusted score, all-time and recent net-loved ratios (0–1), for a film in its store. */
+  ta?: number
+  tr?: number
+  tq?: number
+}
 /** MDBList requests kept each day for title pages ([scoreNow]); the nightly job stops before them. */
 const ONDEMAND = Number(process.env.MDBLIST_ONDEMAND) || 200
 const DAY = 864e5
 const MDB = 'https://api.mdblist.com'
 
 const sum = (d: number[]) => d.reduce((a, b) => a + b, 0)
-const median = (xs: number[]) => xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)]
 
 /** TrueScore's net score: net × (net / total), sign kept. */
 export const netScore = (net: number, total: number) => (total > 0 ? Math.sign(net) * Math.round((net * net) / total) : 0)
@@ -105,11 +112,10 @@ function untilUnseen(ids: string[], seen: Set<string>) {
 
 /**
  * TrueScore's rows by id: the films its store has that exact score for (recent-adjusted, all-time), best first, until
- * 90 the owner hasn't watched are in (the rows keep this order and length, so the app can leave watched titles out, its
+ * 90 the owner hasn't watched are in ([seen]; the rows keep this order and length, so the app can leave watched titles out, its
  * own new marks too, and still show 60).
  */
-export function trueScoreRows(h: Kept | null, films = letterboxdFilms()): [string, string[]][] {
-  const seen = watchedOf(h)
+export function trueScoreRows(seen: Set<string>, films = letterboxdFilms()): [string, string[]][] {
   return ([['ts-recent', 'adjusted'], ['ts-all', 'score']] as const).map(([row, by]) =>
     [row, untilUnseen([...films].filter(([, f]) => f[by] !== undefined).sort(([, a], [, b]) => b[by]! - a[by]!).map(([id]) => id), seen)])
 }
@@ -118,9 +124,9 @@ export function trueScoreRows(h: Kept | null, films = letterboxdFilms()): [strin
  * The TrueScore shows row by id: IMDb's Top 250 and Most Popular TV shows ([shows]) by TrueScore's net score on IMDb's histogram
  * ([scoreTitles]' [s]; a show without one last, in IMDb's order), until 90 the owner hasn't watched are in, like [trueScoreRows].
  */
-export function trueScoreShows(shows: string[], scores: Map<string, Score>, h: Kept | null): string[] {
+export function trueScoreShows(shows: string[], scores: Map<string, Score>, seen: Set<string>): string[] {
   const s = (id: string) => scores.get(id)?.s ?? -Infinity
-  return untilUnseen(shows.slice().sort((a, b) => s(b) - s(a)), watchedOf(h))
+  return untilUnseen(shows.slice().sort((a, b) => s(b) - s(a)), seen)
 }
 
 const TOP_TV_Q = 'query { top: chartTitles(first: 250, chart: { chartType: TOP_RATED_TV_SHOWS }) { edges { node { id } } } popular: chartTitles(first: 100, chart: { chartType: MOST_POPULAR_TV_SHOWS }) { edges { node { id } } } }'
@@ -142,31 +148,6 @@ export async function imdbTopShows(cache: ScoreCache, get: typeof fetch = fetch)
     return `tv:${n}`
   }))
   return [...new Set(ids.filter((id): id is string => !!id))]
-}
-
-const lookedUp = new Map<string, LibTitle | null>()
-/**
- * The nightly build's library (library-full.json) with TrueScore's rows and every score as its store and the score
- * cache have them now, ranked and cut as the build does: what the server serves between builds once the store changes.
- * A film new to the rows is looked up on TMDB once; titles carry their kept runtimes.
- */
-export async function rescoredLibrary(h: Kept | null): Promise<Library> {
-  const [full, cache, rt] = await Promise.all([readFile(LIBRARY_FULL_FILE, 'utf8').then((s) => JSON.parse(s) as Library), loadScores(), keptRuntimes()])
-  const titles = [...full.titles], index = new Map(titles.map((t, i) => [t.id, i]))
-  const ts = trueScoreRows(h)
-  await Promise.all(ts.flatMap(([, ids]) => ids).filter((id) => !index.has(id) && !lookedUp.has(id)).map((id) =>
-    tmdbGet<TmdbItem>(`movie/${parseTitleId(id)!.tmdb}`).then((r) => lookedUp.set(id, r.adult ? null : fromTmdb('movie', r)), () => {})))
-  const names = new Map(rowDefs().map((d) => [d.id, d.n]))
-  const rows = [
-    ...ts.map(([id, ids]) => ({ id, n: names.get(id)!, i: [...new Set(ids.flatMap((x) => {
-      const t = lookedUp.get(x)
-      if (!index.has(x) && t?.p) index.set(x, titles.push(t) - 1)
-      return titles[index.get(x) ?? -1]?.p ? [index.get(x)!] : []
-    }))] })).filter((r) => r.i.length),
-    ...full.rows.filter((r) => !ts.some(([id]) => id === r.id)),
-  ]
-  const shown = ranked({ ...full, titles, rows }, scoreTitles(cache))
-  return { ...shown, titles: shown.titles.map((t) => ({ ...t, ...(rt(t.id) && { rt: rt(t.id) }) })) }
 }
 
 /**
@@ -211,35 +192,6 @@ export function histogramShare(id: string, cache: ScoreCache = {}): { hn?: numbe
   const h = lf?.h ?? cache[id]?.h, total = h ? sum(h) : 0
   if (!total) return {}
   return { hn: Math.round(((h![8] + h![9] - h![0] - h![1]) / total) * 1000) / 1000, hs: lf?.h ? 'l' : 'i' }
-}
-
-const SCORE_KEYS = new Set(['s', 's10', 'sn', 'se', 'ir', 'iv', 'lb', 'lv', 'ta', 'tr', 'tq'])
-/** [t] without the scores a build gave it (older builds' sn and se too). */
-export const unscored = (t: LibTitle): LibTitle => Object.fromEntries(Object.entries(t).filter(([k]) => !SCORE_KEYS.has(k))) as LibTitle
-
-/**
- * [lib] with [scores] on its titles and each row sorted by score (one with only [s10] after those, by it; one with
- * neither at the row's median),
- * cut to [cap] titles, then only the titles some row still holds.
- */
-export function ranked(lib: Library, scores: Map<string, Score>, cap = ROW_CAP): Library {
-  const all = lib.titles.map(({ pp: _p, ...t }) => ({ ...unscored(t), ...scores.get(t.id) }))
-  const rows = lib.rows.map((r) => {
-    const known = r.i.map((i) => all[i].s).filter((s): s is number => s !== undefined)
-    const mid = known.length ? median(known) : 0, lo = Math.min(0, ...known)
-    const key = (i: number) => all[i].s ?? (all[i].s10 !== undefined ? lo - 10 + all[i].s10! : mid)
-    return { ...r, i: (!ordered(r.id) && r.i.some((i) => all[i].s10 !== undefined || all[i].s !== undefined) ? r.i.slice().sort((a, b) => key(b) - key(a)) : r.i).slice(0, ordered(r.id) ? undefined : cap) }
-  })
-  const kept = [...new Set(rows.flatMap((r) => r.i))].sort((a, b) => a - b)
-  const index = new Map(kept.map((old, i) => [old, i]))
-  return { ...lib, titles: kept.map((i) => all[i]), rows: rows.map((r) => ({ ...r, i: r.i.map((i) => index.get(i)!) })) }
-}
-
-/** Title ids as the app shows them: every row's first card, then every row's second, and so on. */
-export function onScreen(lib: Library): string[] {
-  const ids = new Set<string>()
-  for (let p = 0; p < Math.max(0, ...lib.rows.map((r) => r.i.length)); p++) for (const r of lib.rows) if (p < r.i.length) ids.add(lib.titles[r.i[p]].id)
-  return [...ids]
 }
 
 interface Mdb { ids?: { tmdb?: number; imdb?: string }; ratings?: { source: string; value?: number | null; score?: number | null; votes?: number | null }[] }

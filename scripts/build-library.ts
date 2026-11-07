@@ -13,10 +13,11 @@
 import { readFile } from 'node:fs/promises'
 import { dubbedFilms } from '../api/_arabp2p.js'
 import { configFromEnv } from '../api/_provider.js'
-import { assemble, fromTmdb, LIBRARY_FILE, LIBRARY_FULL_FILE, providerTitles, rowDefs, saveLibrary, withProviderCopies, type Library, type LibTitle, type TmdbItem } from '../api/_library.js'
-import { imdbTopShows, loadScores, onScreen, ranked, refreshScores, saveScores, scoreTitles, trueScoreRows, trueScoreShows, unscored } from '../api/_scores.js'
+import { assemble, LIBRARY_FILE, LIBRARY_FULL_FILE, onScreen, providerTitles, ranked, rowDefs, saveLibrary, withProviderCopies, type Library } from '../api/_library.js'
+import { imdbTopShows, loadScores, refreshScores, saveScores, scoreTitles, trueScoreRows, trueScoreShows } from '../api/_scores.js'
+import { fromTmdb, unscored, type LibTitle, type TmdbItem } from '../api/_titles.js'
 import { parseTitleId, runtimeOf, tmdbGet, type Kind } from '../api/_tmdb.js'
-import { historyTitles, loadHistory, refreshHistory, saveHistory, watchlistRuntimes } from '../api/_history.js'
+import { historyTitles, loadHistory, refreshHistory, saveHistory, watchedOf, watchlistRuntimes } from '../api/_history.js'
 import { readOnlyTokens } from '../api/_trakt.js'
 
 // The owner's history first (seconds): Trakt read whole, recommendations included, and the Letterboxd feed.
@@ -94,7 +95,7 @@ const asked = await refreshScores([...new Set([...historyTitles(history), ...(pr
 await saveScores(scores)
 const scored = scoreTitles(scores)
 // TrueScore's rows (the server redoes them, and the scores, from library-full.json whenever the store changes).
-for (const [row, ids] of trueScoreRows(history)) {
+for (const [row, ids] of trueScoreRows(watchedOf(history))) {
   await lookUp(ids)
   seeds[defs.findIndex((d) => d.id === row)] = ids.flatMap((id) => (known.get(id)?.p ? [known.get(id)!] : []))
 }
@@ -102,7 +103,7 @@ for (const [row, ids] of trueScoreRows(history)) {
 const dubbed = await dubbedFilms()
 await lookUp(dubbed)
 seeds[defs.findIndex((d) => d.id === 'ar-dub')] = dubbed.flatMap((id) => (known.get(id)?.p ? [known.get(id)!] : []))
-const showIds = trueScoreShows(topShows, scored, history)
+const showIds = trueScoreShows(topShows, scored, watchedOf(history))
 await lookUp(showIds)
 seeds[defs.findIndex((d) => d.id === 'ts-shows')] = showIds.flatMap((id) => (known.get(id)?.p ? [known.get(id)!] : []))
 const full =await withProviderCopies(assemble(defs, seeds, provider.map(({ t, group }) => ({ group, t: known.has(t.id) ? { ...known.get(t.id)!, ...(t.t && { t: t.t }), ...(t.e && { e: t.e }) } : t })), prev, gn, scored), cfg)

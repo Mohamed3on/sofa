@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
-import { personTitles, searchTitles, type Known } from './_browse'
+import { personTitles, searchTitles } from './_browse'
 import type { Library } from './_library'
+import type { Known } from './_titles'
 
 const lib: Library = {
   v: 1, src: 'tmdb', at: '', img: '', gn: { '35': 'Comedy' },

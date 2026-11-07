@@ -2,7 +2,8 @@ import { expect, test } from 'bun:test'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { assemble, fromTmdb, rowDefs, servedLibrary, type Library } from './_library'
+import { assemble, rowDefs, servedLibrary, type Library } from './_library'
+import { fromTmdb } from './_titles'
 
 test('films land in their language rows (ko under Other), provider tiers join TMDB titles, a title with no copy has none', () => {
   const defs = rowDefs(new Date('2026-11-05'))

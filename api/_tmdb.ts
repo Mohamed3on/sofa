@@ -105,7 +105,13 @@ export function pickTrailer(videos: Video[], originalLanguage: string): string {
   return best?.key ?? ''
 }
 
-const poster = (p: string | null | undefined) => (p ? `https://image.tmdb.org/t/p/w342${p}` : '')
+/** TMDB's image host: an image path ("/abc.jpg") is shown at TMDB_IMG + size + path. */
+export const TMDB_IMG = 'https://image.tmdb.org/t/p/'
+/** A TMDB image path's URL at [size] ("w342"); "" for none. */
+export const tmdbImage = (path: string | null | undefined, size: string) => (path ? `${TMDB_IMG}${size}${path}` : '')
+/** A TMDB image URL as its path, so the app picks the size; any other URL as is. */
+export const imagePath = (url: string) => url.match(/^https?:\/\/image\.tmdb\.org\/t\/p\/[^/]+(\/[^/]+)$/)?.[1] ?? url
+const poster = (p: string | null | undefined) => tmdbImage(p, 'w342')
 const yearOf = (r: Raw) => (r.release_date || r.first_air_date || '').slice(0, 4)
 
 function trim(kind: Kind, r: Raw): TmdbTitle {
@@ -264,7 +270,7 @@ export async function tmdbEpisodes(id: string | number, seasons: number[]): Prom
     const e = parts
       .flatMap((p) => Object.entries(p).filter(([n]) => n.startsWith('season/')).flatMap(([, s]) => s?.episodes ?? []))
       .filter((x) => x.air_date && x.air_date <= today)
-      .map((x) => ({ season: x.season_number, episode: x.episode_number, title: x.name ?? '', secs: (x.runtime ?? 0) * 60, image: x.still_path ? `https://image.tmdb.org/t/p/w300${x.still_path}` : '', air: x.air_date! }))
+      .map((x) => ({ season: x.season_number, episode: x.episode_number, title: x.name ?? '', secs: (x.runtime ?? 0) * 60, image: tmdbImage(x.still_path, 'w300'), air: x.air_date! }))
       .sort((a, b) => a.season - b.season || a.episode - b.episode)
     all[k] = { at: Date.now(), e }
     save(all)
