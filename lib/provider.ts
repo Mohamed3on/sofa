@@ -200,7 +200,9 @@ export function readName(raw: string, category = ''): ProviderName {
   if (!s.includes(' ') && s.includes('.')) s = s.replace(/\.((?:19|20)\d{2})$/, ' ($1)').replace(/\./g, ' ')
   const fromCategory = category.match(/^([A-Z]{2})\b/)?.[1] ?? ''
   const lang = tags.find(isLanguage) ?? (isLanguage(fromCategory) ? fromCategory : '')
-  return { title: s.replace(/\s+/g, ' ') || raw.trim(), lang, ...languageClaim(lang) }
+  const claim = languageClaim(lang)
+  // "AR-DUB": a subtitling market's dub has its language for audio.
+  return { title: s.replace(/\s+/g, ' ') || raw.trim(), lang, ...(tags.includes('DUB') && claim.subbed ? { dubbed: claim.subbed } : claim) }
 }
 
 // Decorative Unicode the provider uses for tags (superscript digits + modifier letters:

@@ -59,16 +59,15 @@ export interface Copies {
   copies: (IptvCopy | RdCopy)[]
 }
 
-// The provider's language tag ("4K-DE - …", "AR-SUBS - …", category "ES - PELÍCULAS") adds the audio
-// or subtitles it claims (see languageClaim).
-function withTag(a: Attrs, tag: string): Attrs {
-  const { dubbed, subbed } = languageClaim(tag)
+// The provider's language tag ("4K-DE - …", "AR-SUBS - …", "AR-DUB - …", category "ES - PELÍCULAS") adds the
+// audio or subtitles it claims (see languageClaim, readName).
+function withTag(a: Attrs, { dubbed, subbed }: { dubbed?: string; subbed?: string }): Attrs {
   if (dubbed) return { ...a, langs: [...new Set([dubbed, ...a.langs])] }
   if (subbed) return { ...a, subs: [...new Set([subbed, ...(a.subs ?? [])])] }
   return a
 }
 
-const tagOf = (name: string, category: string) => readName(name, category).lang
+const tagOf = (name: string, category: string) => readName(name, category)
 
 /** A probed stream's attributes, read through its labels ("4K", "Dolby Vision", "HEVC", "Atmos", "E-AC3 5.1"), with the probe's Dolby Vision profile. */
 function probed(s: ProbedStream): Attrs {
@@ -92,7 +91,7 @@ export async function iptvCopies(cfg: XtreamConfig, title: string): Promise<Iptv
   if (ep) {
     return (await episodeEntries(cfg, ep[1], Number(ep[2]), Number(ep[3]))).map((e) => {
       const known = !!(e.probe?.video && Object.keys(e.probe.video).length)
-      return { src: 'iptv', id: e.id, ext: e.ext, name: e.category, basis: known ? 'probed' : 'claimed', ...withTag(known ? probed(e.probe!) : parseRelease(e.category), e.lang), kbps: Math.round(Number(e.probe?.bitrate) || 0) }
+      return { src: 'iptv', id: e.id, ext: e.ext, name: e.category, basis: known ? 'probed' : 'claimed', ...withTag(known ? probed(e.probe!) : parseRelease(e.category), languageClaim(e.lang)), kbps: Math.round(Number(e.probe?.bitrate) || 0) }
     })
   }
   const [entries, measured] = await Promise.all([filmEntries(cfg, title), measuredFilms()])
