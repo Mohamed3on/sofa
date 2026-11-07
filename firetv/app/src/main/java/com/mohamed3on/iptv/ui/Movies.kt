@@ -792,7 +792,7 @@ private fun MoviesBrowse(
 private class Actions(val movie: Movie, val removable: Boolean = false, val row: String? = null)
 
 /**
- * ☰ on a card or a title page: Add to / Remove from Watchlist (not a title only Letterboxd's list holds), Mark watched or
+ * ☰ on a card or a title page: Add to / Remove from Watchlist (Trakt's, and Letterboxd's through the owner's browser), Mark watched or
  * unwatched, Rate, then Remove from Up next ([onRemove]), the rows' Hide watched titles setting ([hideWatched]) and the
  * card's row's own actions ([rowActions]) where they apply.
  */
@@ -804,13 +804,12 @@ private fun TitleActions(
     val graph = LocalContext.current.graph
     val id = movie.titleId
     val onList = id in graph.watchlist.ids.collectAsState().value
-    val letterboxdOnly = onList && id in graph.watchlist.letterboxd.collectAsState().value
     val seen = id in graph.marks.watched.collectAsState().value
     val markable = graph.marks.canMark(id)
     MarksPanel(
         movie.title.title,
         listOfNotNull(
-            if (graph.watchlist.canHold(id) && !letterboxdOnly) (if (onList) "Remove from Watchlist" else "Add to Watchlist") to { graph.watchlist.toggle(id); onClose() } else null,
+            if (graph.watchlist.canHold(id)) (if (onList) "Remove from Watchlist" else "Add to Watchlist") to { graph.watchlist.toggle(id); onClose() } else null,
             if (markable) (if (seen) "Mark unwatched" else "Mark watched") to { graph.marks.setWatched(id, !seen); onClose() } else null,
         ),
         graph.marks.ratings.collectAsState().value[id],
@@ -1245,7 +1244,7 @@ private fun playTrailer(context: Context, key: String) {
 }
 
 /**
- * The audio languages a film's copies have, as flagged chips (🇬🇧 English, 🇪🇬 Egyptian, 🇸🇦 Arabic; only with two or more): the
+ * The audio languages a film's copies have, as flagged chips (🇬🇧 English, 🇪🇬 Egyptian, 🇪🇬 Arabic; only with two or more): the
  * chosen one (else the default: "Arabic dub first" or the original) is outlined; OK on another makes Play open its best copy on that
  * track, for this film from then on.
  */
@@ -1266,7 +1265,7 @@ private fun AudioChips(title: TitleId, prepared: Prepared) {
 
 /** A language's flag, for the chips: the country most of its films come from. */
 private val FLAGS = mapOf(
-    "en" to "🇬🇧", EGYPTIAN to "🇪🇬", "ar" to "🇸🇦", "fr" to "🇫🇷", "es" to "🇪🇸", "de" to "🇩🇪", "it" to "🇮🇹", "pt" to "🇵🇹",
+    "en" to "🇬🇧", EGYPTIAN to "🇪🇬", "ar" to "🇪🇬", "fr" to "🇫🇷", "es" to "🇪🇸", "de" to "🇩🇪", "it" to "🇮🇹", "pt" to "🇵🇹",
     "ja" to "🇯🇵", "ko" to "🇰🇷", "zh" to "🇨🇳", "hi" to "🇮🇳", "ru" to "🇷🇺", "tr" to "🇹🇷", "nl" to "🇳🇱", "da" to "🇩🇰", "sv" to "🇸🇪", "no" to "🇳🇴",
 )
 
@@ -2469,7 +2468,7 @@ private fun ShowPage(
                 MarksPanel(
                     show.title.title,
                     listOfNotNull(
-                        if (graph.watchlist.canHold(show.titleId) && !(show.titleId in graph.watchlist.letterboxd.value && show.titleId in graph.watchlist.ids.value))
+                        if (graph.watchlist.canHold(show.titleId))
                             (if (show.titleId in graph.watchlist.ids.value) "Remove from Watchlist" else "Add to Watchlist") to { graph.watchlist.toggle(show.titleId); close() } else null,
                         season?.let { s -> "Mark season $s watched" to { graph.marks.setWatched("${show.titleId}:s$s", true, all.filter { it.season == s }.map { it.titleId }); close() } },
                         "Mark show watched" to { graph.marks.setWatched(show.titleId, true, all.map { it.titleId }); close() },
