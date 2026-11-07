@@ -50,6 +50,8 @@ interface Store {
   tb?: Record<string, number>
   /** Torrents whose detail page shows no magnet: only their .torrent gives the hash. */
   bare?: Record<string, 1>
+  /** The dubbed films' TMDB vote counts: the best-known are hashed first, as TorBox most likely holds them. */
+  votes?: Record<string, number>
 }
 const storeFile = () => process.env.ARABP2P_CACHE_FILE ?? fileURLToPath(new URL('../.cache/arabp2p.json', import.meta.url))
 // One copy in memory (only the server writes the file; the library build only reads it), saved whole after each change.
@@ -431,7 +433,7 @@ let crawling: Promise<void> | null = null
 let crawlStarted = 0
 /**
  * Reads the dubbed-films category (FIRST_PAGES the first time, then the newest pages until a known upload),
- * files each new upload under its TMDB film, gives each dubbed film's best copy a hash (Egyptian dubs and newest
+ * files each new upload under its TMDB film, gives each dubbed film's best copy a hash (the best-known films
  * first, leaving KEEP_FOR_ASKED downloads), then notes which of their hashes TorBox holds.
  */
 function crawl(): Promise<void> {
@@ -454,6 +456,12 @@ function crawl(): Promise<void> {
       if (!f.rows.some((x) => x.id === r.id)) f.rows.push({ ...r, dub: true })
     }
     s.crawled = Date.now()
+    const votes = (s.votes ??= {})
+    for (const id of new Set(Object.values(dubs).filter(Boolean).map(String))) {
+      if (votes[id] !== undefined) continue
+      const n = await tmdbGet<{ vote_count?: number }>(`movie/${id}`).then((r) => r.vote_count, () => undefined)
+      if (n !== undefined) votes[id] = n
+    }
     await save()
     for (const r of unhashed(s)) if (!s.bare?.[r.id] || allowance(s, true) > KEEP_FOR_ASKED) await resolve(r, true, KEEP_FOR_ASKED)
     await onTorBox(dubHashes(s), s)
@@ -464,10 +472,11 @@ function crawl(): Promise<void> {
   return crawling
 }
 
-/** Each crawled dubbed film's best copy still without a hash: Egyptian dubs, then the newest, first. */
+/** Each crawled dubbed film's best copy still without a hash: the films with the most TMDB votes first, then Egyptian dubs, then the newest. */
 const unhashed = (s: Store) => [...new Set(Object.values(s.dubs ?? {}).filter(Boolean).map(String))]
-  .flatMap((id) => wanted(s.films[id]?.rows ?? [], s.torrents).slice(0, 1)).filter((r) => !s.torrents[r.id])
-  .sort((a, b) => Number(b.egyptian) - Number(a.egyptian) || Number(b.id) - Number(a.id))
+  .flatMap((id) => wanted(s.films[id]?.rows ?? [], s.torrents).slice(0, 1).filter((r) => !s.torrents[r.id]).map((r) => ({ r, votes: s.votes?.[id] ?? 0 })))
+  .sort((a, b) => b.votes - a.votes || Number(b.r.egyptian) - Number(a.r.egyptian) || Number(b.r.id) - Number(a.r.id))
+  .map((x) => x.r)
 
 /** The hashes of every dubbed copy known. */
 const dubHashes = (s: Store) => Object.values(s.films).flatMap((f) => f.rows.filter((r) => r.dub).flatMap((r) => {
