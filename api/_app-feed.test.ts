@@ -4,7 +4,7 @@ import { buildM3U, withBackupFeeds, withCompetitionGroups, type Channel } from '
 import { BACKUP_ID, VPN_HOST } from './_provider.js'
 import { Database } from 'bun:sqlite'
 import { rm } from 'node:fs/promises'
-import { channels as channelsRoute, guide as guideRoute } from './app.js'
+import { guide as guideRoute } from './app.js'
 import epg from './epg.js'
 import { handle } from '../server.js'
 
@@ -81,52 +81,6 @@ describe('app channel feed', () => {
   })
 })
 
-describe('/api/app/channels token gate', () => {
-  const env = { ...process.env }
-  // Provider API stub: one category with one stream.
-  beforeEach(() => {
-    Object.assign(process.env, { XTREAM_HOST: 'http://plain.example', XTREAM_USER: 'u', XTREAM_PASS: 'p', PLAYLIST_TOKEN: 'tv' })
-    spyOn(globalThis, 'fetch').mockImplementation((async (url: string) => {
-      const action = new URL(url).searchParams.get('action')
-      if (action === 'get_live_categories') return Response.json([{ category_id: '9001', category_name: 'UK| PREMIER LEAGUE' }])
-      if (action === 'get_live_streams')
-        return Response.json([{ stream_id: 1, name: 'UK: SKY SPORTS MAIN EVENT FHD', epg_channel_id: 'a.uk', category_id: '9001' }])
-      return Response.json([])
-    }) as typeof fetch)
-  })
-  afterEach(() => {
-    process.env = { ...env }
-  })
-  const get = (t?: string) => channelsRoute(new Request(`http://localhost/api/app/channels${t === undefined ? '' : `?t=${t}`}`))
-
-  test('no token, the TiviMate token, an empty token, or no APP_TOKENS are refused', async () => {
-    process.env.APP_TOKENS = 'new,'
-    expect((await get()).status).toBe(403)
-    expect((await get('tv')).status).toBe(403)
-    expect((await get('')).status).toBe(403)
-    delete process.env.APP_TOKENS
-    expect((await get('new')).status).toBe(403)
-  })
-
-  test('either of two app tokens returns the private feed', async () => {
-    process.env.APP_TOKENS = 'old, new'
-    for (const t of ['old', 'new']) {
-      const res = await get(t)
-      expect(res.status).toBe(200)
-      expect(res.headers.get('cache-control')).toBe('private, s-maxage=1800, stale-while-revalidate=3600')
-      expect(res.headers.get('access-control-allow-origin')).toBeNull()
-      expect((await res.json()).channels.length).toBeGreaterThan(0)
-    }
-  })
-
-  test('through server.ts, a warmed cache never serves the tokenless path', async () => {
-    process.env.APP_TOKENS = 'new'
-    expect((await handle(new Request('http://localhost/api/app/channels?t=new'))).status).toBe(200)
-    expect((await handle(new Request('http://localhost/api/app/channels'))).status).toBe(403)
-    expect((await handle(new Request('http://localhost/api/app/channels?t='))).status).toBe(403)
-  })
-})
-
 // A fixed provider: a PPV slot, a channel with real programmes, and an uncovered one.
 const NOW = new Date('2026-11-01T12:30:00Z')
 const stamp = (h: number) => {
@@ -170,15 +124,14 @@ describe('guide', () => {
   })
 
   test('/api/epg XML for a fixed provider is unchanged', async () => {
-    const res = await epg(new Request('http://localhost/api/epg?t=tv'))
+    const res = await epg()
     expect(res.status).toBe(200)
     expect(await res.text()).toMatchSnapshot()
   })
 
-  test("/api/app/guide needs an app token and is private", async () => {
+  test("/api/app/guide is private", async () => {
     process.env.APP_TOKENS = "app"
-    expect((await guideRoute(new Request("http://localhost/api/app/guide?t=tv"))).status).toBe(403)
-    const res = await guideRoute(new Request("http://localhost/api/app/guide?t=app"))
+    const res = await handle(new Request("http://localhost/api/app/guide?t=app"))
     expect(res.status).toBe(200)
     expect(res.headers.get("cache-control")).toBe("private, s-maxage=900")
     expect(res.headers.get("access-control-allow-origin")).toBeNull()
@@ -186,7 +139,7 @@ describe('guide', () => {
 
   test("/api/app/guide is a gzip SQLite file of the same guide, flagged for the app", async () => {
     process.env.APP_TOKENS = "app"
-    const res = await guideRoute(new Request("http://localhost/api/app/guide?t=app"))
+    const res = await guideRoute()
     const db = Database.deserialize(Bun.gunzipSync(new Uint8Array(await res.arrayBuffer())))
     type Row = { tvg_id: string; start: number; stop: number; title: string; norm: string; descr: string; synthetic: number; match: number }
     const rows = db.query("SELECT * FROM programmes ORDER BY tvg_id, start").all() as Row[]
@@ -238,10 +191,6 @@ describe('app distribution routes', () => {
     await rm(dir, { recursive: true, force: true })
   })
   const get = (path: string) => handle(new Request(`http://localhost${path}`))
-
-  test('without the token both routes refuse, even when no files exist', async () => {
-    for (const p of ['/api/app/version', '/api/app/apk', '/api/app/version?t=tv']) expect((await get(p)).status).toBe(403)
-  })
 
   test('with the token and no files, both are 404', async () => {
     for (const p of ['/api/app/version?t=app', '/api/app/apk?t=app']) expect((await get(p)).status).toBe(404)

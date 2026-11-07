@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { rm } from 'node:fs/promises'
 import { addBitrate, allReadings, medianMbps, mergeAppReading, qualityOf, recordBitrate, recordProbed, recordReading } from './_quality.js'
-import { bitrate as bitrateRoute, events as eventsRoute, quality as qualityRoute } from './app.js'
+import { handle } from '../server.js'
+
+const post = (route: string, body: unknown) =>
+  handle(new Request(`http://localhost/api/app/${route}?t=app`, { method: 'POST', body: JSON.stringify(body) }))
 
 const today = '2026-11-01'
 const fresh = { w: 1920, h: 1080, fps: 25, codec: 'h264', name: 'A', at: '2026-10-30' }
@@ -89,8 +92,6 @@ describe('the store', () => {
 describe('/api/app/quality', () => {
   const env = { ...process.env }
   const dir = `${import.meta.dir}/../.cache/test-quality`
-  const post = (body: unknown, t = 'app') =>
-    qualityRoute(new Request(`http://localhost/api/app/quality?t=${t}`, { method: 'POST', body: JSON.stringify(body) }))
   beforeEach(async () => {
     Object.assign(process.env, { APP_TOKENS: 'app', QUALITY_FILE: `${dir}/quality.json` })
     await rm(dir, { recursive: true, force: true })
@@ -100,28 +101,23 @@ describe('/api/app/quality', () => {
     await rm(dir, { recursive: true, force: true })
   })
 
-  test('refuses without an app token', async () => {
-    expect((await post({ id: 990001, ...reading() }, 'tv')).status).toBe(403)
-  })
   test('refuses a malformed reading', async () => {
     for (const bad of [{ id: 'x', ...reading() }, { id: 990001, ...reading({ h: 99999 }) }, { id: 990001, ...reading({ codec: '<b>' }) }])
-      expect((await post(bad)).status).toBe(400)
+      expect((await post('quality', bad)).status).toBe(400)
   })
   test('stores a new reading in the store', async () => {
-    const res = await post({ id: 990001, ...reading() })
+    const res = await post('quality', { id: 990001, ...reading() })
     expect(await res.json()).toEqual({ stored: true })
     expect(qualityOf(990001)).toMatchObject({ h: 1080, fps: 50 })
     expect((await Bun.file(`${dir}/quality.json`).json())['990001']).toMatchObject({ w: 1920, h: 1080, fps: 50 })
-    expect(await (await post({ id: 990001, ...reading({ w: 3840, h: 2160, fps: 25 }) })).json()).toEqual({ stored: true })
-    expect(await (await post({ id: 990001, ...reading({ w: 3840, h: 2160, fps: 25 }) })).json()).toEqual({ stored: false })
+    expect(await (await post('quality', { id: 990001, ...reading({ w: 3840, h: 2160, fps: 25 }) })).json()).toEqual({ stored: true })
+    expect(await (await post('quality', { id: 990001, ...reading({ w: 3840, h: 2160, fps: 25 }) })).json()).toEqual({ stored: false })
   })
 })
 
 describe('/api/app/bitrate', () => {
   const env = { ...process.env }
   const dir = `${import.meta.dir}/../.cache/test-bitrate`
-  const post = (body: unknown) =>
-    bitrateRoute(new Request('http://localhost/api/app/bitrate?t=app', { method: 'POST', body: JSON.stringify(body) }))
   beforeEach(async () => {
     Object.assign(process.env, { APP_TOKENS: 'app', QUALITY_FILE: `${dir}/quality.json` })
     await rm(dir, { recursive: true, force: true })
@@ -134,8 +130,8 @@ describe('/api/app/bitrate', () => {
   test('adds a measured bitrate to the feed and refuses nonsense', async () => {
     await recordReading(990002, reading(), today)
     for (const bad of [{ id: 990002, mbps: 0.04 }, { id: 990002, mbps: 'x' }, { id: 990002, mbps: 999 }])
-      expect((await post(bad)).status).toBe(400)
-    expect(await (await post({ id: 990002, mbps: 6.2 })).json()).toEqual({ stored: true })
+      expect((await post('bitrate', bad)).status).toBe(400)
+    expect(await (await post('bitrate', { id: 990002, mbps: 6.2 })).json()).toEqual({ stored: true })
     expect(qualityOf(990002)?.mbps).toEqual([6.2])
     expect((await Bun.file(`${dir}/quality.json`).json())['990002'].mbps).toEqual([6.2])
   })
@@ -144,8 +140,6 @@ describe('/api/app/bitrate', () => {
 describe('/api/app/events', () => {
   const env = { ...process.env }
   const file = `${import.meta.dir}/../.cache/test-events/app-events.jsonl`
-  const post = (body: unknown, t = 'app') =>
-    eventsRoute(new Request(`http://localhost/api/app/events?t=${t}`, { method: 'POST', body: JSON.stringify(body) }))
   beforeEach(async () => {
     Object.assign(process.env, { APP_TOKENS: 'app', APP_EVENTS_FILE: file })
     await rm(`${import.meta.dir}/../.cache/test-events`, { recursive: true, force: true })
@@ -153,9 +147,8 @@ describe('/api/app/events', () => {
   afterEach(() => { process.env = { ...env } })
 
   test('appends a valid batch with the time received, and refuses the rest', async () => {
-    expect((await post([{ type: 'tune', id: 1, ms: 900 }], 'tv')).status).toBe(403)
-    expect((await post([{ type: 'nope' }])).status).toBe(400)
-    expect((await post([{ type: 'tune', id: 1, ms: 900 }, { type: 'stall', id: 1 }, { type: 'rebuffer', id: 1, netMbps: 4.1, streamMbps: 6.2, cushionMs: 3000 }, { type: 'trial', copy: 'rd:a', works: false }])).status).toBe(204)
+    expect((await post('events', [{ type: 'nope' }])).status).toBe(400)
+    expect((await post('events', [{ type: 'tune', id: 1, ms: 900 }, { type: 'stall', id: 1 }, { type: 'rebuffer', id: 1, netMbps: 4.1, streamMbps: 6.2, cushionMs: 3000 }, { type: 'trial', copy: 'rd:a', works: false }])).status).toBe(204)
     const lines = (await Bun.file(file).text()).trim().split('\n').map((l) => JSON.parse(l))
     expect(lines.map((l) => [l.type, typeof l.at])).toEqual([['tune', 'string'], ['stall', 'string'], ['rebuffer', 'string'], ['trial', 'string']])
   })

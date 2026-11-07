@@ -19,7 +19,7 @@ import { jsonFile } from './_fs.js'
 import { askJev, type JevQuestion } from './_jev.js'
 import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { apiGet, BACKUP_ID, backupConfigFromEnv, claims4K, guideUrl, plainCategory, readName, streamUrl, vodCatalogue, type VodFilm, type XtreamConfig } from './_provider.js'
+import { apiGet, BACKUP_ID, backupConfigFromEnv, claims4K, configFromEnv, guideUrl, plainCategory, readName, streamUrl, vodCatalogue, type VodFilm, type XtreamConfig } from './_provider.js'
 
 const cachePath = (name: string) => fileURLToPath(new URL(`../.cache/${name}`, import.meta.url))
 /**
@@ -1378,17 +1378,27 @@ export async function fetchProviderEpg(cfg: XtreamConfig): Promise<string> {
   }
 }
 
-/** Shared token gate: true if the request's ?t= matches PLAYLIST_TOKEN. */
-export function tokenOk(url: string | undefined): boolean {
-  const token = process.env.PLAYLIST_TOKEN
-  if (!token) return false
-  const t = new URL(url ?? '/', 'http://x').searchParams.get('t')
-  return t === token
-}
+// The guide downloads (~47MB of myepg + the ~70MB provider guide) change slowly, and a
+// burst of them gets the myepg account blocked, so they are reused for 6h. The guide built
+// from them is NOT: a PPV slot's guide entry is its channel name, which changes from match to
+// match, so a guide built hours ago shows the previous match (and its 24h window runs out).
+const GUIDE_TTL = 6 * 3600_000
+let guides: { at: number; job: Promise<[string, MyepgGuide]> } | undefined
 
-/** App token gate: true if ?t= is one of the comma-separated APP_TOKENS (two at once while rotating). */
-export function appTokenOk(url: string): boolean {
-  const t = new URL(url, 'http://x').searchParams.get('t')
-  const tokens = (process.env.APP_TOKENS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
-  return !!t && tokens.includes(t)
+/** The curated channels and the XMLTV guide built for them (served as /api/epg, parsed into the app's guide). */
+export async function curatedGuide(): Promise<{ channels: Channel[]; xml: string }> {
+  const cfg = configFromEnv()
+  const epgUrls = (process.env.EPG_URLS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+  const channelsPromise = fetchCuratedChannels(cfg, false) // VOD entries carry no guide
+  if (!guides || Date.now() - guides.at > GUIDE_TTL) {
+    // provider EPG doesn't need the channel list, so its download overlaps curation;
+    // myepg needs the channels, so it waits for them
+    const providerEpgPromise = fetchProviderEpg(cfg)
+    const job = channelsPromise.then((channels) =>
+      Promise.all([providerEpgPromise, fetchMyepgGuide(epgUrls, channels).then(async (g) => (await saveEpgIcons(g.icons), g))]))
+    guides = { at: Date.now(), job }
+    job.catch(() => { if (guides?.job === job) guides = undefined })
+  }
+  const [channels, [providerXml, myepg]] = await Promise.all([channelsPromise, guides.job])
+  return { channels, xml: buildEventEpg(channels, providerXml, myepg) }
 }
