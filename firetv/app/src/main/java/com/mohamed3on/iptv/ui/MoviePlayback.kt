@@ -108,6 +108,9 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import com.mohamed3on.iptv.ui.theme.PROSE_WIDTH
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextLayoutResult
@@ -287,6 +290,21 @@ internal fun MoviePlayback(
             delay(500)
         }
     }
+    // The pause screen: 8 s paused with no key, the controls give way to the title, its episode and plot over a dark
+    // left and foot; any key brings the controls back (and does nothing else).
+    var asleep by remember { mutableStateOf(false) }
+    LaunchedEffect(kick, ui.paused, panel, error, card) {
+        asleep = false
+        if (!ui.paused || panel || error || card) return@LaunchedEffect
+        delay(PAUSE_SCREEN_MS)
+        asleep = true
+        controls = false
+    }
+    val plot = remember(of) {
+        val titles = graph.titles
+        (titles.peekInfo(of.title)?.plot?.ifEmpty { null } ?: if (of.episode != null) titles.peekShowOf(of.title)?.plot?.ifEmpty { null } else null)
+    }
+
     // firetv/check.sh: `play:<id>~<seconds>` starts that long before the end, to reach the card quickly.
     LaunchedEffect(ui.playing) {
         val back = Check.fromEnd ?: return@LaunchedEffect
@@ -365,7 +383,7 @@ internal fun MoviePlayback(
                 val down = e.type == KeyEventType.KeyDown
                 val keys = FilmKeys(
                     error = error, panel = panel, seeking = target != null, sessionBack = session.takesBack, controls = controls, playing = exo.playWhenReady,
-                    skip = session.state.value.notice is Notice.Skip, card = card,
+                    skip = session.state.value.notice is Notice.Skip, card = card, asleep = asleep,
                 )
                 val action = filmKey(native.keyCode, down, native.repeatCount, native.eventTime - native.downTime, native.eventTime - lastStep[0], keys)
                 when (action) {
@@ -426,7 +444,8 @@ internal fun MoviePlayback(
             Motion.panel(reduced),
             label = "subtitles",
         )
-        Subtitles(cues, line) { subtitleLift.value }
+        // The pause screen's words take the foot; a paused line would sit under them.
+        if (!asleep) Subtitles(cues, line) { subtitleLift.value }
 
         var spinner by remember { mutableStateOf(false) }
         LaunchedEffect(ui.buffering, error) {
@@ -457,6 +476,11 @@ internal fun MoviePlayback(
                     modifier = Modifier.onSizeChanged { controlsHeight.intValue = it.height }.slideFade({ shown.value }, Edge.Bottom, reduced).padding(Space.safe),
                 )
             }
+        }
+
+        AnimatedVisibility(visible = asleep && !error && !panel, enter = EnterTransition.None, exit = ExitTransition.None, modifier = Modifier.fillMaxSize()) {
+            val shown = reveal()
+            PauseScreen(heading, plot, { shown.value }, reduced)
         }
 
         // The corner: the next episode's card or a Skip button, above the controls while they show (on the panel spring).
@@ -560,6 +584,11 @@ private fun Controls(
             Text(heading.name, style = Type.title, maxLines = 2, modifier = Modifier.weight(1f, fill = false))
             heading.detail?.let { ScrollText(it, style = Type.body, lines = 1, modifier = Modifier.weight(1f, fill = false)) }
             Box(Modifier.weight(1f))
+        }
+        if (quality.isNotEmpty()) FormatChips(quality)
+        if (note != null) Text(note, style = Type.body)
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.l), verticalAlignment = Alignment.CenterVertically) {
+            // The pause mark stands where the time stopped, not alone at the title row's end.
             AnimatedContent(
                 targetState = paused,
                 transitionSpec = { fadeIn(Motion.focus()) togetherWith fadeOut(Motion.focus()) },
@@ -567,10 +596,6 @@ private fun Controls(
             ) { p ->
                 if (p) PauseMark()
             }
-        }
-        if (quality.isNotEmpty()) FormatChips(quality)
-        if (note != null) Text(note, style = Type.body)
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.l), verticalAlignment = Alignment.CenterVertically) {
             Text(elapsed, style = TIME_STYLE.copy(color = Palette.textPrimary))
             SeekBar(position, duration, buffered, seeking, seekFrom, Modifier.weight(1f))
             Text(left, style = TIME_STYLE)
@@ -654,6 +679,35 @@ private fun SkipButton(label: String, modifier: Modifier = Modifier) {
             .drawBehind { drawRoundRect(Palette.textPrimary, cornerRadius = CornerRadius(Radius.row.toPx())) }
             .padding(horizontal = Space.xl, vertical = Space.m),
     )
+}
+
+/** A film paused this long without a key shows the pause screen. */
+private const val PAUSE_SCREEN_MS = 8_000L
+
+/** Ink behind the pause screen's words: dense at the left and the foot, the picture still there to the right and above. */
+private val PAUSE_LEFT = Brush.horizontalGradient(0f to Palette.ink.copy(alpha = 0.92f), 0.45f to Palette.ink.copy(alpha = 0.8f), 0.8f to Color.Transparent)
+private val PAUSE_FOOT = Brush.verticalGradient(0.35f to Color.Transparent, 1f to Palette.ink.copy(alpha = 0.85f))
+
+/**
+ * The pause screen: low left at the safe inset, the title in a title page's type, the episode (or the year) and up to
+ * three lines of plot, over ink that darkens the paused picture; [progress] 0 → 1 fades and slides it in, read while drawing.
+ */
+@Composable
+private fun PauseScreen(heading: Heading, plot: String?, progress: () -> Float, reduced: Boolean) {
+    Box(Modifier.fillMaxSize().drawBehind {
+        val a = progress().coerceIn(0f, 1f)
+        drawRect(PAUSE_LEFT, alpha = a)
+        drawRect(PAUSE_FOOT, alpha = a)
+    }) {
+        Column(
+            Modifier.align(Alignment.BottomStart).padding(Space.safe).padding(bottom = Space.xxl).width(PROSE_WIDTH).slideFade(progress, Edge.Bottom, reduced),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            Text(heading.name, style = Type.pageTitle, maxLines = 3)
+            heading.detail?.let { Text(it, style = Type.headline.copy(color = Palette.textSecondary)) }
+            plot?.let { ScrollText(it, style = Type.prose, lines = 3, modifier = Modifier.padding(top = Space.s)) }
+        }
+    }
 }
 
 /** What the controls (and the pause screen) name: a film's title and year, or a show's name and "S2 E3 · Title". */
