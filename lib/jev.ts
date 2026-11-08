@@ -24,7 +24,8 @@ export const jevTokens = () => inputTokens
 
 /**
  * Ask `questions` against a shared context, `perRequest` at a time (4 requests in flight).
- * Throws when TYPESAFE_API_KEY is unset or a batch keeps failing — callers fall back to rules.
+ * A batch that keeps failing leaves its questions out of the result, so the batches that did answer
+ * are kept. Throws when TYPESAFE_API_KEY is unset or every batch fails — callers fall back to rules.
  */
 export async function askJev(
   state: string,
@@ -57,6 +58,8 @@ export async function askJev(
   }
   const parts: string[][] = []
   for (let i = 0; i < ids.length; i += perRequest) parts.push(ids.slice(i, i + perRequest))
-  for (let i = 0; i < parts.length; i += 4) await Promise.all(parts.slice(i, i + 4).map(ask))
+  let failure: unknown
+  for (let i = 0; i < parts.length; i += 4) await Promise.all(parts.slice(i, i + 4).map((p) => ask(p).catch((e) => { failure = e })))
+  if (failure && !Object.keys(answers).length) throw failure
   return answers
 }

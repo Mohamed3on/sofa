@@ -16,9 +16,9 @@
 // scripts/probe-quality.ts; a missing entry just falls back to the name marker.
 import { audioRank, detailRank, qualityOf } from './quality.js'
 import { flakyRank } from './flaky.js'
-import { jsonFile } from './fs.js'
+import { jsonFile, writeAtomic } from './fs.js'
 import { applyListings, fetchListings, judgeSameMatches, placeListings, sameMatch, type Placed } from './tv-listings.js'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { apiGet, BACKUP_ID, backupConfigFromEnv, claims4K, configFromEnv, guideUrl, plainCategory, readName, streamUrl, vodCatalogue, type VodFilm, type XtreamConfig } from './provider.js'
 
@@ -738,7 +738,7 @@ export async function vodChannels(cfg: XtreamConfig): Promise<Channel[]> {
 const EPG_ICONS = new URL('../.cache/epg-icons.json', import.meta.url)
 
 export async function saveEpgIcons(icons: Map<string, string>): Promise<void> {
-  if (icons.size) await writeFile(EPG_ICONS, JSON.stringify(Object.fromEntries(icons))).catch(() => {})
+  if (icons.size) await writeAtomic(EPG_ICONS, Object.fromEntries(icons)).catch(() => {})
 }
 
 // Pulls already running are shared: the playlist, the app's channel list and the guide build its 🏆 groups
@@ -1511,7 +1511,10 @@ export async function fetchProviderEpg(cfg: XtreamConfig): Promise<string> {
 // from them is NOT: a PPV slot's guide entry is its channel name, which changes from match to
 // match, so a guide built hours ago shows the previous match (and its 24h window runs out).
 const GUIDE_TTL = 6 * 3600_000
-let guides: { at: number; job: Promise<[string, MyepgGuide]> } | undefined
+// A provider guide that failed both tries is tried again 15 min on (myepg is not: its downloads keep their 6 h).
+const FAILED_GUIDE_TTL = 15 * 60_000
+let guides: { at: number; job: Promise<MyepgGuide> } | undefined
+let providerGuide: { at: number; ttl: number; job: Promise<string> } | undefined
 
 // A built guide is shared for 5 min: the playlist and the app's channels need it too (their 🏆 groups
 // come from it), and a build takes seconds and ~600 MB, so requests at once never build it twice.
@@ -1529,23 +1532,31 @@ export function curatedGuide(): Promise<{ channels: Channel[]; xml: string }> {
 }
 
 /** Drops the shared built guide and the kept downloads, so the next request starts over (tests that change what the guide is built from). */
-export const forgetBuiltGuide = () => { built = undefined; guides = undefined }
+export const forgetBuiltGuide = () => { built = undefined; guides = undefined; providerGuide = undefined }
 
 async function buildCuratedGuide(): Promise<{ channels: Channel[]; xml: string }> {
   const cfg = configFromEnv()
   const epgUrls = (process.env.EPG_URLS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
   const channelsPromise = fetchCuratedChannels(cfg, false) // VOD entries carry no guide
-  if (!guides || Date.now() - guides.at > GUIDE_TTL) {
+  if (!providerGuide || Date.now() - providerGuide.at > providerGuide.ttl) {
     // provider EPG doesn't need the channel list, so its download overlaps curation;
+    // a failed download is '', so it gets one more try 30s later, then another build's 15 min on
+    const job: Promise<string> = fetchProviderEpg(cfg)
+      .then((x) => x || Bun.sleep(30_000).then(() => fetchProviderEpg(cfg)))
+      .then(async (x) => {
+        if (!x && providerGuide?.job === job) providerGuide.ttl = FAILED_GUIDE_TTL
+        return scopeProviderEpg(x, await channelsPromise)
+      })
+    providerGuide = { at: Date.now(), ttl: GUIDE_TTL, job }
+    job.catch(() => { if (providerGuide?.job === job) providerGuide = undefined })
+  }
+  if (!guides || Date.now() - guides.at > GUIDE_TTL) {
     // myepg needs the channels, so it waits for them
-    // a failed download is '' and would be reused for 6h, so it gets one more try 30s later
-    const providerEpgPromise = fetchProviderEpg(cfg).then((x) => x || Bun.sleep(30_000).then(() => fetchProviderEpg(cfg)))
-    const job = channelsPromise.then((channels) =>
-      Promise.all([providerEpgPromise.then((x) => scopeProviderEpg(x, channels)), fetchMyepgGuide(epgUrls, channels).then(async (g) => (await saveEpgIcons(g.icons), g))]))
+    const job = channelsPromise.then((channels) => fetchMyepgGuide(epgUrls, channels).then(async (g) => (await saveEpgIcons(g.icons), g)))
     guides = { at: Date.now(), job }
     job.catch(() => { if (guides?.job === job) guides = undefined })
   }
-  const [channels, [providerXml, myepg], listings] = await Promise.all([channelsPromise, guides.job, fetchListings()])
+  const [channels, providerXml, myepg, listings] = await Promise.all([channelsPromise, providerGuide.job, guides.job, fetchListings()])
   const xml = buildEventEpg(channels, providerXml, myepg, placeListings(channels, listings))
   void judgeSameMatches() // for the next build
   Bun.gc(true) // hand back the build's garbage now: Bun otherwise keeps it resident, and the next build starts from there

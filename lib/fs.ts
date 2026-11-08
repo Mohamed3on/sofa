@@ -11,9 +11,15 @@ const writes = new Map<string, Promise<void>>()
 export function writeAtomic(file: string, data: unknown, mode?: number): Promise<void> {
   const next = (writes.get(file) ?? Promise.resolve()).catch(() => {}).then(async () => {
     await mkdir(dirname(file), { recursive: true, ...(mode && { mode: 0o700 }) })
-    if (mode) await rm(file + '.tmp', { force: true }) // a new file takes the mode
-    await writeFile(file + '.tmp', typeof data === 'string' ? data : JSON.stringify(data), { mode })
-    await rename(file + '.tmp', file)
+    // A temp name of its own, so another process writing the same file (the nightly scripts) never shares it.
+    const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`
+    try {
+      await writeFile(tmp, typeof data === 'string' ? data : JSON.stringify(data), { mode })
+      await rename(tmp, file)
+    } catch (e) {
+      await rm(tmp, { force: true })
+      throw e
+    }
   })
   writes.set(file, next)
   const done = () => void (writes.get(file) === next && writes.delete(file))

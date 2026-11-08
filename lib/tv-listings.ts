@@ -62,6 +62,7 @@ export function parseListings(html: string, tz: string, mdy = false): Listing[] 
     if (/^[^>]*class="cabeceraTabla/.test(tr)) {
       const m = tr.match(/\b(\d{1,4})[/.-](\d{1,2})[/.-](\d{2,4})\b/)?.slice(1).map(Number)
       day = !m ? null : m[0] > 999 ? m : mdy ? [m[2], m[0], m[1]] : [m[2], m[1], m[0]]
+      if (day && day[0] < 100) day[0] += 2000 // "8-11-26" is 2026, not 1926
     } else if (/^[^>]*class="cabeceraCompericion/.test(tr)) {
       comp = unescape(tr.match(/title="([^"]*)"/)?.[1] ?? '')
     } else if (day) {
