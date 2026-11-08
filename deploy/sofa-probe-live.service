@@ -1,0 +1,12 @@
+[Unit]
+Description=sofa: probe the feeds showing a 🏆 match now, for match-time bitrates (feed quality, skipped or stopped while someone watches)
+After=sofa.service
+
+[Service]
+Type=oneshot
+User=sofa
+WorkingDirectory=/opt/sofa
+EnvironmentFile=/opt/sofa/.env
+ExecStart=/bin/bash scripts/probe-box.sh live mins=3
+# It pulls the provider's channel list; the server keeps its own 2G.
+MemoryMax=1G

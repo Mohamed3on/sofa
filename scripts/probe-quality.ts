@@ -50,8 +50,14 @@
 // (lib/quality.ts mergeProbed). Refresh also visits fresh feeds with a picture but no bitrate yet, after
 // the stale and below-marker ones, in playlist order, so the 🏆 groups' feeds get theirs first.
 //
-// Usage: bun scripts/probe-quality.ts [concurrency] [refresh] [mins=N]  (creds from env/.env.local)
-import { EVENT_ONLY, fetchCuratedChannels, isAbroad, saneFps, withCompetitionGroups } from '../lib/curation.js'
+// LIVE MODE (`live` arg, the daytime timers): every feed of a channel whose guide shows a 🏆 match on air
+// now, whatever its reading, so bitrates come from match pictures rather than the still frames idle channels
+// show at night (recorded as in refresh). The server's built guide (/api/epg) says what is on air.
+//
+// Usage: bun scripts/probe-quality.ts [concurrency] [refresh|live] [mins=N]  (creds from env/.env.local)
+import { statSync } from 'node:fs'
+import { guideCompetitions } from '../lib/app-feed.js'
+import { EVENT_ONLY, fetchCuratedChannels, isAbroad, saneFps, withCompetitionGroups, type Channel } from '../lib/curation.js'
 import { configFromEnv, connectionSlots as slotsOf, streamUrl, VPN_HOST } from '../lib/provider.js'
 import { writeAtomic } from '../lib/fs.ts'
 // better() keeps the cache monotonic in refresh mode; the app's readings (/api/app/quality) share these rules.
@@ -59,7 +65,8 @@ import { allReadings, better, STALE_DAYS, type Meta, type Readings } from '../li
 
 const cfg = configFromEnv()
 const requestedConcurrency = Number(Bun.argv[2]) || 1
-const REFRESH = Bun.argv.includes('refresh')
+const LIVE = Bun.argv.includes('live')
+const REFRESH = LIVE || Bun.argv.includes('refresh')
 const BUDGET_MIN = Number(Bun.argv.find((a) => a.startsWith('mins='))?.slice(5)) || 30
 const PROBED = process.env.PROBED_FILE ?? '.cache/quality-probed.json'
 const today = new Date().toISOString().slice(0, 10)
@@ -113,7 +120,16 @@ const gaps = live.filter((c) => {
   return (c.q ?? 0) >= 4 && m.h < nominalH(c.q ?? 0) && (c.q! < 5 || /³⁸⁴⁰|3840|2160/.test(c.name))
 })
 const noBitrate = REFRESH ? live.filter((c) => { const m = cache[c.streamId]; return m && !isStale(m) && !m.mbps }) : []
-const targets = [...stale, ...gaps, ...noBitrate]
+async function onAir(feeds: Channel[]): Promise<Channel[]> {
+  const res = await fetch(`${process.env.API_BASE ?? 'http://127.0.0.1:8790'}/api/epg?t=${process.env.PLAYLIST_TOKEN}`)
+  if (!res.ok) throw new Error(`guide: HTTP ${res.status}`)
+  const { rows, comps } = guideCompetitions(channels, await res.text())
+  const now = Date.now() / 1000
+  const showing = new Set(rows.filter((r, i) => comps[i] && r.start <= now && r.stop > now).map((r) => r.tvgId))
+  return feeds.filter((c) => showing.has(c.tvgId))
+}
+const targets = LIVE ? await onAir(live) : [...stale, ...gaps, ...noBitrate]
+if (LIVE) console.log(`${targets.length} feeds show a match now`)
 const byId = new Map(targets.map((c) => [c.streamId, c.name]))
 const ids = [...byId.keys()]
 
@@ -193,6 +209,19 @@ const deadline = t0 + BUDGET_MIN * 60_000
 let cursor = 0
 let busy = false
 let ok = 0 // probes that actually returned video this run
+// On the box the app's watch log tells when the stick starts playing (it sends each tune within a minute):
+// the run stops then, whatever the account's count, which includes the run's own streams.
+const EVENTS = process.env.APP_EVENTS_FILE ?? '.cache/app-events.jsonl'
+const sizeOf = (f: string) => statSync(f, { throwIfNoEntry: false })?.size ?? 0
+const eventsFrom = sizeOf(EVENTS)
+let eventsAt = 0
+async function appTuned(): Promise<boolean> {
+  if (Date.now() - eventsAt < 5000) return false
+  eventsAt = Date.now()
+  const size = sizeOf(EVENTS)
+  if (size === eventsFrom) return false
+  return /"type":"tune"/.test(await Bun.file(EVENTS).slice(size < eventsFrom ? 0 : eventsFrom).text()) // smaller: rotated
+}
 const refused = new Set<number>() // feeds a probe of which was refused as busy
 // One check at a time, while no new probe starts: two free readings in a row within 45 s (the panel counts a
 // stream for ~5 s after it closes, and in-flight probes take up to 16 s) say no one is watching.
@@ -222,6 +251,7 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
 const worker = async () => {
   while (cursor < ids.length && Date.now() < deadline && !busy) {
     if (checking && !(await checking)) break
+    if (await appTuned()) { busy = true; console.log('The app started playing, so the run stops'); break }
     const id = ids[cursor++]
     const old = cache[id]
     const reverify = REFRESH && isStale(old)

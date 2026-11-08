@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Re-probe feed quality off the box and merge the results into the box's store
-# (/opt/sofa/.cache/quality.json). It runs elsewhere (nightly on GitHub Actions, or a Mac)
-# because the provider refuses streams from the box's IP (HTTP 511). It holds the account's
-# one connection slot, so the probe skips/stops when someone is watching. The probe works on
+# Re-probe feed quality from another machine (a Mac, by hand) and merge the results into the box's
+# store (/opt/sofa/.cache/quality.json). The box probes itself on its timers (scripts/probe-box.sh);
+# this is for an extra run. The probe skips/stops when someone is watching. The probe works on
 # a copy and sends back only what it changed; the box merges that entry by entry, so readings
 # the app records during the run are kept, and the server picks them up without a restart.
 # From the repo root:

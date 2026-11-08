@@ -12,4 +12,6 @@ APP_DIR=/opt/sofa
 
 rsync -az --delete server.ts api lib scripts "$SERVER:$APP_DIR/"
 rsync -a deploy/*.service deploy/*.timer "$SERVER:/etc/systemd/system/"
-ssh "$SERVER" "chown -R sofa:sofa $APP_DIR && systemctl daemon-reload && systemctl enable --now sofa-library.timer && systemctl enable sofa && systemctl restart sofa"
+# ffprobe for the feed-quality timers (scripts/probe-box.sh)
+ssh "$SERVER" "command -v ffprobe >/dev/null || (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg >/dev/null)"
+ssh "$SERVER" "chown -R sofa:sofa $APP_DIR && systemctl daemon-reload && systemctl enable --now sofa-library.timer sofa-probe.timer sofa-probe-live.timer && systemctl enable sofa && systemctl restart sofa"

@@ -1,0 +1,12 @@
+[Unit]
+Description=sofa: the nightly re-probe of every due feed (feed quality, skipped or stopped while someone watches)
+After=sofa.service
+
+[Service]
+Type=oneshot
+User=sofa
+WorkingDirectory=/opt/sofa
+EnvironmentFile=/opt/sofa/.env
+ExecStart=/bin/bash scripts/probe-box.sh refresh mins=30
+# It pulls the provider's channel list; the server keeps its own 2G.
+MemoryMax=1G

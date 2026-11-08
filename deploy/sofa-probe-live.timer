@@ -1,0 +1,9 @@
+[Unit]
+Description=sofa-probe-live.service every half hour from 11:05 to 23:35 UTC (skipped while someone watches)
+
+[Timer]
+OnCalendar=*-*-* 11..23:05,35:00 UTC
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=Nightly sofa-probe.service, when no one watches
+
+[Timer]
+OnCalendar=*-*-* 02:23:00 UTC
+Persistent=false
+
+[Install]
+WantedBy=timers.target
