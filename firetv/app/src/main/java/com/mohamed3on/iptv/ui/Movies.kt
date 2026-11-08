@@ -2300,6 +2300,13 @@ private fun PersonPage(person: Person, watched: Set<TitleId>, active: Boolean, h
     }
 }
 
+/** The first episode of the season after (or before) [at]'s; null at either end. */
+private fun seasonStart(episodes: List<Episode>, at: Int, next: Boolean): Int? {
+    val seasons = episodes.map { it.season }.distinct()
+    val season = seasons.getOrNull(seasons.indexOf(episodes[at].season) + if (next) 1 else -1) ?: return null
+    return episodes.indexOfFirst { it.season == season }
+}
+
 /** A row of a show's episode list: a season's heading, or an episode (its index in the show's list). */
 private sealed interface EpisodeLine {
     data class Season(val season: Int) : EpisodeLine
@@ -2356,6 +2363,20 @@ private fun ShowPage(
     val targetRow = remember { FocusRequester() }
     val listFocus = remember { FocusRequester() }
     val list = rememberLazyListState()
+    // The episode focus is on, and the one ⏪/⏩ jump to: the first of the season before or after.
+    var onRow by remember { mutableStateOf<Int?>(null) }
+    var jumpTo by remember { mutableStateOf<Int?>(null) }
+    val jumpRow = remember { FocusRequester() }
+    LaunchedEffect(jumpTo) {
+        val to = jumpTo ?: return@LaunchedEffect
+        list.scrollToItem((lines.indexOfFirst { it is EpisodeLine.Item && it.index == to } - 1).coerceAtLeast(0))
+        for (i in 0 until FOCUS_FRAMES) {
+            withFrameNanos {}
+            if (onRow == to) break
+            runCatching { (if (to == target) targetRow else jumpRow).requestFocus() }
+        }
+        jumpTo = null
+    }
     var hasFocus by remember { mutableStateOf(false) }
     // The episode whose Versions are open, and whose marks are (Menu on its row; -1 the show's, Menu elsewhere).
     var versionsFor by remember { mutableStateOf<Int?>(null) }
@@ -2390,7 +2411,18 @@ private fun ShowPage(
     TitleFrame(backdropOf(show, info) ?: data?.backdrop, hidden, onBack, onFocus = { hasFocus = it }, onMenu = onMenu) {
         TitleScroll(
             main = {
-                Row(Modifier.fillMaxSize().padding(start = EDGE, end = EDGE), horizontalArrangement = Arrangement.spacedBy(Space.xxl)) {
+                Row(
+                    Modifier.fillMaxSize().padding(start = EDGE, end = EDGE)
+                        // ⏪/⏩ anywhere on the page: the episode list's season before or after the episode last focused there (else up next).
+                        .onPreviewKeyEvent { e ->
+                            val key = remoteKey(e.nativeKeyEvent.keyCode)
+                            if (key != RemoteKey.FastForward && key != RemoteKey.Rewind || episodes.isNullOrEmpty()) return@onPreviewKeyEvent false
+                            val at = onRow ?: target
+                            if (e.type == KeyEventType.KeyDown && at != null) seasonStart(episodes, at, next = key == RemoteKey.FastForward)?.let { jumpTo = it }
+                            true
+                        },
+                    horizontalArrangement = Arrangement.spacedBy(Space.xxl),
+                ) {
                     Column(Modifier.width(SHOW_INFO_WIDTH).fillMaxHeight().padding(bottom = Space.xl), verticalArrangement = Arrangement.spacedBy(Space.s, Alignment.Bottom)) {
                         PageTitle(show.title.title, info, Modifier.glide())
                         val seasons = episodes?.map { it.season }?.distinct()?.size
@@ -2441,12 +2473,12 @@ private fun ShowPage(
                                     Text("Season ${line.season}", style = Type.headline)
                                     dubs[line.season]?.let { l -> FormatChips(listOf("${FLAGS[l]} ${audioName(l)}")) }
                                 }
-                                is EpisodeLine.Item -> EpisodeRow(
+                                is EpisodeLine.Item -> Box(Modifier.onFocusChanged { if (it.hasFocus) onRow = line.index }) { EpisodeRow(
                                     line.episode,
                                     watched = line.episode.titleId in seen,
                                     rating = ratings[line.episode.titleId],
                                     progress = resume?.takeIf { it.episode == line.episode.titleId && it.dur > 0 && it.pos > 0 }?.let { it.pos.toFloat() / it.dur },
-                                    focus = if (line.index == target) targetRow else null,
+                                    focus = if (line.index == target) targetRow else if (line.index == jumpTo) jumpRow else null,
                                     onClick = {
                                         lastPlayed = line.index
                                         onPlay(episodes, line.index, false)
@@ -2455,7 +2487,7 @@ private fun ShowPage(
                                         backTo[0] = listFocus
                                         if (graph.marks.canMark(line.episode.titleId)) marksFor = line.index else versionsFor = line.index
                                     },
-                                )
+                                ) }
                             }
                         }
                     }
