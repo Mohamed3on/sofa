@@ -41,7 +41,10 @@ async function locked<R>(file: string, fn: () => Promise<R>): Promise<R> {
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
       const st = await stat(lock).catch(() => null)
-      if (st && Date.now() - st.mtimeMs > LOCK_STALE_MS) await rm(lock, { force: true })
+      // A stale lock is taken out of the way by a rename to a name of this process's own: of two waiters
+      // that both find it stale only one rename succeeds, so neither removes the lock the other then makes.
+      const aside = `${lock}.${process.pid}.${Math.random().toString(36).slice(2)}`
+      if (st && Date.now() - st.mtimeMs > LOCK_STALE_MS && (await rename(lock, aside).then(() => true, () => false))) await rm(aside, { force: true })
       else await Bun.sleep(5)
     }
   }

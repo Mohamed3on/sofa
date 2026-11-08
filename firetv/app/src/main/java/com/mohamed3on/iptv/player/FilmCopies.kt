@@ -96,25 +96,30 @@ class CopyPlan(
     private class Link(val at: Long, val ip: Any?, val url: Deferred<String?>)
 
     /** When it was made, or its last play ended: [FilmCopies] keeps it 30 min from then, and all through a play. */
-    @Volatile internal var kept = now()
-    /** Plays holding it ([playing]). */
-    @Volatile internal var plays = 0
+    @Volatile internal var keptFrom = now()
+    /** Plays holding it ([hold]). */
+    @Volatile internal var holders = 0
     private val _state = MutableStateFlow(Prepared(debridOff = debrid.status.value.state == DebridState.NotPremium))
     val state: StateFlow<Prepared> = _state
     @Volatile private var checking: Job? = null
     @Volatile private var fallback: Copy? = null
     private val links = ConcurrentHashMap<String, Link>()
-    /** [usable] for the state it was ranked from: ranked once per change, not on every tick of a play. */
-    @Volatile private var usableFor: Pair<Prepared, Ranking>? = null
+    /** [usable] for the state it was ranked from, and when: ranked once per change (or [USABLE_MS], for the bandwidth a play learns), not on every tick. */
+    @Volatile private var usableFor: Triple<Prepared, Long, Ranking>? = null
 
     /**
-     * A play holds its plan ([on]) until it ends: nothing replaces it meanwhile, so its links, IPTV containers and what
+     * A play holds its plan until it [release]s it: nothing replaces it meanwhile, so its links, IPTV containers and what
      * it learned stay the play's, and the title page shows them after (#22).
      */
     @Synchronized
-    fun playing(on: Boolean) {
-        plays += if (on) 1 else -1
-        if (!on) kept = now()
+    fun hold() {
+        holders++
+    }
+
+    @Synchronized
+    fun release() {
+        holders = (holders - 1).coerceAtLeast(0)
+        keptFrom = now()
     }
 
     /** The box's answer: ranked, then the unchecked debrid copies are checked. */
@@ -153,9 +158,9 @@ class CopyPlan(
     /** The copies that can play now, ranked: IPTV's and the ready debrid ones (R1), for step-downs and offers. */
     fun usable(): Ranking {
         val p = _state.value
-        usableFor?.takeIf { it.first === p }?.let { return it.second }
+        usableFor?.takeIf { it.first === p && now() - it.second < USABLE_MS }?.let { return it.third }
         val copies = p.ranking?.copies.orEmpty().map { it.copy }.filter { it.source == Source.Iptv || p.debrid[it.id] is DebridCheck.Ready }
-        return choices.rank(title, copies, p.answer?.copies?.originalLanguage, setup(), typical).also { usableFor = p to it }
+        return choices.rank(title, copies, p.answer?.copies?.originalLanguage, setup(), typical).also { usableFor = Triple(p, now(), it) }
     }
 
     /**
@@ -237,6 +242,7 @@ class CopyPlan(
         const val CHECK_MS = 4_000L
         /** A link fetched ahead is used within this long, on the IP it was made on. */
         const val LINK_MS = 10 * 60_000L
+        private const val USABLE_MS = 30_000L
     }
 }
 
@@ -266,7 +272,7 @@ class FilmCopies(
 
     /** [title]'s plan: a recent one kept, else a new one, asking the box now. */
     fun plan(title: String): CopyPlan = synchronized(plans) {
-        plans[title]?.takeIf { it.plays > 0 || now() - it.kept < KEEP_MS && !it.state.value.failed }
+        plans[title]?.takeIf { it.holders > 0 || now() - it.keptFrom < KEEP_MS && !it.state.value.failed }
             ?: CopyPlan(title, debrid, choices, setup, { capacity.typicalMbps(it, now()) }, scope, now, ip, linked).also {
                 plans[title] = it
                 held += it

@@ -203,7 +203,7 @@ fun openFilmPlay(
     val exo = moviePlayer(context, graph.http, graph.filmHeads, load) { fileBytes.compareAndSet(0, it) }
     val film = ExoFilmPlayer(exo)
     val setup = graph.setup
-    val plan = graph.films.plan(title).also { it.playing(true) }
+    val plan = graph.films.plan(title)
     val session = FilmSession(title, plan, film, graph.copyChoices, { setup.profile.value }, meter, iptvUrl, scope, System::currentTimeMillis, graph.telemetry::film)
     val fetched = SubtitleFetch(exo, graph.http, graph.titles, scope, { plan.state.value.answer?.copies?.originalLanguage }) {
         session.inform(Notice.Subtitles(it.lang))
@@ -266,7 +266,7 @@ fun openFilmPlay(
             if (graph.premiumEndedShown.compareAndSet(false, true)) emit(lapsed.name)
         },
         release = {
-            plan.playing(false)
+            plan.release()
             parts.cancel()
             surface.release()
             subtitles.release()
@@ -277,6 +277,7 @@ fun openFilmPlay(
             meter.finish().forEach { (bucket, mbps) -> Log.i("IptvCapacity", "${bucket.first} ${bucket.second}: $mbps Mbps") }
         },
     )
+    plan.hold() // built: release (the play's close) lets it go
     return ExoFilmPlay(exo, play, plan, surface, subtitles, fetched) {
         play.start(Place(from), fallback)
     }

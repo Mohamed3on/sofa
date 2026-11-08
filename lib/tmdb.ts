@@ -173,7 +173,8 @@ function put(k: string, e: Entry) {
   saving ??= (async () => {
     while (unsaved.size) {
       const batch = new Map(unsaved)
-      await store.update((cur) => ({ ...cur, ...Object.fromEntries(batch) })).catch(() => {})
+      // A failed write keeps them here, to go with the next entry's.
+      if (!(await store.update((cur) => ({ ...cur, ...Object.fromEntries(batch) })).then(() => true, () => false))) break
       for (const [key, v] of batch) if (unsaved.get(key) === v) unsaved.delete(key)
     }
   })().finally(() => (saving = null))

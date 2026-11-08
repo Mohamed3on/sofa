@@ -78,11 +78,11 @@ class FilmCopiesTest {
         )
         val plan = films.plan("movie:1")
         runCurrent()
-        plan.playing(true)
+        plan.hold()
         t = 31 * 60_000L
         assertSame(plan, films.plan("movie:1"))
         assertEquals("mkv", films.state("movie:1").value.answer?.ext("iptv:7"))
-        plan.playing(false)
+        plan.release()
         t += 29 * 60_000L
         assertSame(plan, films.plan("movie:1"))
         t += 2 * 60_000L
