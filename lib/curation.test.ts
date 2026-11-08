@@ -110,6 +110,20 @@ describe('sibling feeds', () => {
     expect(xml).toContain('start="20261020163000 +0000" stop="20261020163000 +0000" channel="sx.2"')
   })
 
+  test('EPG: the provider continues a channel where its myepg schedule runs out', () => {
+    const prog = (start: string, stop: string, title: string) =>
+      `<programme start="${start} +0000" stop="${stop} +0000" channel="b1.qa"><title>${title}</title></programme>`
+    const provider = prog('20261108170000', '20261108190000', 'Man Utd vs Villa (provider)') + prog('20261108190000', '20261108220000', 'Atletico vs Barcelona')
+    const xml = buildEventEpg([{ streamId: 1, name: 'beIN 1', logo: '', tvgId: 'b1.qa', group: 'ar', isEventSlot: false, q: 4 }], provider, {
+      programmes: [prog('20261108170000', '20261108190000', 'Man Utd vs Villa')],
+      covered: new Set(['b1.qa']),
+      icons: new Map(),
+    })
+    expect(xml).toContain('<title>Man Utd vs Villa</title>')
+    expect(xml).not.toContain('(provider)')
+    expect(xml).toContain('<title>Atletico vs Barcelona</title>')
+  })
+
   test('EPG: guide ids match in any case, and Jev matches feed further channels', async () => {
     const ar = '🇸🇦 beIN & Arabic Sports'
     const ch = (streamId: number, name: string, tvgId: string): Channel =>

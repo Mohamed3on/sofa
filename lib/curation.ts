@@ -1299,12 +1299,14 @@ export function buildEventEpg(
   // the right one showed the match before, so it is moved 3h earlier (+0200 -> +0500).
   const lateKeys = new Set<string>()
   const okKeys = new Set<string>()
+  const at = (block: string, attr: 'start' | 'stop') => {
+    const s = block.match(new RegExp(`\\b${attr}="(\\d{4})(\\d\\d)(\\d\\d)(\\d\\d)(\\d\\d)(\\d\\d) ([+-]\\d\\d)(\\d\\d)"`))
+    return s ? Date.parse(`${s[1]}-${s[2]}-${s[3]}T${s[4]}:${s[5]}:${s[6]}${s[7]}:${s[8]}`) : NaN
+  }
   const progKey = (block: string) => {
-    const s = block.match(/\bstart="(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d) ([+-]\d\d)(\d\d)"/)
+    const start = at(block, 'start')
     const title = block.match(/<title[^>]*>([^<]*)/)?.[1]
-    return s && title
-      ? `${title.replace(/\s+/g, ' ').trim()}|${Date.parse(`${s[1]}-${s[2]}-${s[3]}T${s[4]}:${s[5]}:${s[6]}${s[7]}:${s[8]}`)}`
-      : ''
+    return !Number.isNaN(start) && title ? `${title.replace(/\s+/g, ' ').trim()}|${start}` : ''
   }
   const lessThree = (block: string) =>
     block.replace(/\b(start|stop)="(\d{14}) ([+-])(\d\d)(\d\d)"/g, (_, k, ts, sign, hh, mm) => {
@@ -1314,12 +1316,15 @@ export function buildEventEpg(
     })
   // myepg real programmes (channel attr already rewritten to our tvg-ids)
   const blocks: [string, string][] = (myepg?.programmes ?? []).map((p) => [programmeChannel(p), p])
-  // provider programmes for channels myepg lacks
+  // provider programmes for channels myepg lacks, and for the ones whose myepg schedule runs out
+  // first (its beIN 1 stopped one match short of the provider's)
+  const myepgEnd = new Map<string, number>()
+  for (const [id, p] of blocks) myepgEnd.set(id, Math.max(myepgEnd.get(id) ?? 0, at(p, 'stop') || 0))
   const seenProg = new Set<string>()
   if (providerXml) {
     for (const m of providerXml.matchAll(/<programme\b[^>]*\bchannel="([^"]*)"[^>]*>[\s\S]*?<\/programme>/g)) {
       if (m[1].endsWith('.qa')) (/[A-Z]/.test(m[1]) ? lateKeys : okKeys).add(progKey(m[0]))
-      if (!wantIds.has(m[1])) continue
+      if (!wantIds.has(m[1]) && !(at(m[0], 'start') >= (myepgEnd.get(m[1]) ?? Infinity))) continue
       const startM = m[0].match(/\bstart="([^"]*)"/)
       const k = m[1] + '|' + (startM ? startM[1] : out.length)
       if (seenProg.has(k)) continue // skip duplicate programme declarations
