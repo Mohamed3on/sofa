@@ -32,9 +32,10 @@
 // reading stays due, and `tried` only moves it to the back of the queue so dead feeds
 // don't eat every night's budget.
 //
-// BUSY SLOT: a run starts only when the account's slot is free (no one watching), and stops at once
-// when a probe is refused as busy (HTTP 458: someone started watching elsewhere) instead of recording
-// their channel-switches as dead feeds. Stopped by hand (Ctrl-C) or by a signal, it saves what it measured
+// BUSY SLOT: a run starts only when the account's slot is free (no one watching). A probe refused as busy
+// (HTTP 458) holds new probes until the run's own streams have closed, then asks the account: a slot taken
+// still is someone watching, so the run stops instead of recording their channel-switches as dead feeds;
+// a free one was a passing refusal (two in 650 probes, 2026-11-09), so the feed is tried again and the run goes on. Stopped by hand (Ctrl-C) or by a signal, it saves what it measured
 // for the wrapper to merge; the next run takes up the rest.
 //
 // TIME BUDGET (`mins=N`, default 30): stop starting new probes once the budget is spent.
@@ -150,7 +151,7 @@ async function probe(id: number): Promise<Meta | null> {
   )
   const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()])
   await p.exited
-  if (BUSY.test(err) && !busy) { busy = true; console.log(`Refused as busy on ${byId.get(id)}: ${err.trim().split("\n")[0]}`) }
+  if (BUSY.test(err)) refused.add(id)
   try {
     const streams: any[] = JSON.parse(out)?.streams ?? []
     const v = streams.find((s) => s.codec_type === 'video')
@@ -192,6 +193,21 @@ const deadline = t0 + BUDGET_MIN * 60_000
 let cursor = 0
 let busy = false
 let ok = 0 // probes that actually returned video this run
+const refused = new Set<number>() // feeds a probe of which was refused as busy
+// One check at a time, while no new probe starts: two free readings in a row within 45 s (the panel counts a
+// stream for ~5 s after it closes, and in-flight probes take up to 16 s) say no one is watching.
+let checking: Promise<boolean> | null = null
+const noViewer = () => (checking ??= (async () => {
+  const t = Date.now()
+  let free = 0
+  while (Date.now() - t < 45_000) {
+    await Bun.sleep(2000)
+    const { max, active } = await connectionSlots()
+    free = active < max ? free + 1 : 0
+    if (free === 2) return true
+  }
+  return false
+})().finally(() => { checking = null }))
 // Stopped by hand or by a signal: what was measured is saved for the wrapper to merge (none of it if no
 // feed gave a picture, which says the provider refused this machine), and the next run takes up the rest.
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
@@ -205,13 +221,18 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
 }
 const worker = async () => {
   while (cursor < ids.length && Date.now() < deadline && !busy) {
+    if (checking && !(await checking)) break
     const id = ids[cursor++]
     const old = cache[id]
     const reverify = REFRESH && isStale(old)
     // Only event-only feeds earn retries: a 24/7 "4K" feed reading 1080p is usually just 1080p.
     const tries = REFRESH && !reverify && EVENT_ONLY.test(byId.get(id)!) ? 3 : 1
-    const m = await probeBest(id, tries)
-    if (busy) break // someone's watching; this feed stays due
+    let m = await probeBest(id, tries)
+    if (refused.delete(id)) {
+      if (!(await noViewer())) { busy = true; console.log(`Refused as busy on ${byId.get(id)}, and the slot stays taken`); break } // this feed stays due
+      m = await probeBest(id, tries)
+      if (refused.delete(id)) continue // refused again: due next run
+    }
     if (m) ok++
     // Initial: record result (null = probed). Re-verify: the current reading replaces the
     // stale one; no signal keeps it due, just tried (see RE-VERIFICATION).
