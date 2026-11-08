@@ -127,6 +127,9 @@ import com.mohamed3on.iptv.ui.theme.pressable
 import com.mohamed3on.iptv.ui.theme.SlidePanel
 import com.mohamed3on.iptv.ui.theme.CornerNotice
 import com.mohamed3on.iptv.ui.theme.ProblemCard
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -170,9 +173,18 @@ fun PlayerScreen(feed: Feed, session: StreamSession?, audio: AudioTracks?, surfa
         val fill = aspect <= 0f || abs(aspect - SCREEN_ASPECT) < ASPECT_SLACK
         if (grid.tiles.isEmpty() && !movie) AndroidView(factory = { surface }, modifier = Modifier.align(Alignment.Center).then(if (fill) Modifier.fillMaxSize() else Modifier.aspectRatio(aspect)))
         if (session != null) {
-            // Match rows draw their crests from the guide (LocalCrests), in the list, Live now and the banner.
-            val guide by LocalContext.current.graph.sync.guide.collectAsState()
-            CompositionLocalProvider(LocalCrests provides (guide?.crests ?: emptyMap())) {
+            // Match rows draw their crests from the guide (LocalCrests), in the list, Live now and the banner, and a known
+            // match its score and clock (LocalScores), asked for every 30 s while live TV is on screen and the guide has one.
+            val graph = LocalContext.current.graph
+            val guide by graph.sync.guide.collectAsState()
+            val crests = guide?.crests ?: emptyMap()
+            val scores = graph.scores.scores.collectAsState()
+            val lifecycle = LocalLifecycleOwner.current.lifecycle
+            val anyMatch = remember(crests) { crests.values.any { it.key != null } }
+            LaunchedEffect(lifecycle, movie, anyMatch) {
+                if (!movie && anyMatch) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { graph.scores.poll() }
+            }
+            CompositionLocalProvider(LocalCrests provides crests, LocalScores provides scores) {
                 PlayerChrome(feed, session, audio, tiles, grid, live, health, onMovie = { movie = it })
             }
         }
@@ -724,7 +736,10 @@ private fun Guide(channel: Channel, guide: GuideDb?, clock: State<Long>, describ
         return
     }
     if (now?.synthetic == true) return
-    if (now != null) {
+    // A match the scoreboards know is its matchup, with no time bar or guide text; any other programme as it airs.
+    val match = matchOf(now?.title)
+    if (now != null && match != null) Matchup(match, match.crests.comp)
+    else if (now != null) {
         Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
             if (now.match) LiveMark()
             MatchCrests(now.title)

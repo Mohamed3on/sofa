@@ -191,6 +191,14 @@ private val liveFill = Palette.live.copy(alpha = 0.16f)
 @Composable
 fun LiveMark(modifier: Modifier = Modifier) = Chips(liveLabel, liveStyle, fill = liveFill, outline = null, modifier)
 
+/** A short status ("67'", "HT", "FT", "21:00") in [color] on a 16% tint of itself, drawn like [LiveMark]. */
+@Composable
+fun StatusPill(label: String, color: Color, modifier: Modifier = Modifier) {
+    val labels = remember(label) { listOf(label) }
+    val style = remember(color) { Type.caption.copy(color = color) }
+    Chips(labels, style, fill = remember(color) { color.copy(alpha = 0.16f) }, outline = null, modifier)
+}
+
 /**
  * Programme progress, neutral so the accent stays for focus. [fraction] is read inside the draw phase, so the shared minute ticker
  * repaints only this bar, never recomposes the row.

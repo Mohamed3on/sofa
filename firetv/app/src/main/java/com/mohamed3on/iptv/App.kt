@@ -7,6 +7,7 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
+import com.mohamed3on.iptv.data.LiveScores
 import com.mohamed3on.iptv.data.LiveSync
 import com.mohamed3on.iptv.data.SofaServer
 import com.mohamed3on.iptv.data.TitlesClient
@@ -116,6 +117,8 @@ class AppGraph(context: Context) {
     val server = SofaServer(http, BuildConfig.SERVER_URL, BuildConfig.APP_TOKEN)
     /** Channels and guide. */
     val sync = LiveSync(server, context.filesDir, prefs)
+    /** Today's football scores, polled while live TV is on screen. */
+    val scores = LiveScores(server)
     /** Films and shows: the library, history, title pages, copies, subtitles, marks and the watchlist. */
     val titles = TitlesClient(server, context.filesDir, prefs, onEpisodes = migration::adoptEpisodes)
     /** What the TV, stick and soundbar can show and play; built off the launch path. */

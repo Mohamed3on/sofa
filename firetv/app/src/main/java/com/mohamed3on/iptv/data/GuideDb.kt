@@ -10,8 +10,11 @@ data class Programme(val start: Long, val stop: Long, val title: String, val des
 
 data class NowNext(val now: Programme?, val next: Programme?)
 
-/** A live match's two crests as image URLs, home first; either may be missing. */
-data class Crests(val home: String?, val away: String?)
+/**
+ * A live match's two crests as image URLs, home first; either may be missing. A guide from after live scores also names
+ * both teams' short names ("Man Utd"), the match's [key] in [LiveScores.scores] and its 🏆 group [comp]; null in an older guide.
+ */
+data class Crests(val home: String?, val away: String?, val homeName: String? = null, val awayName: String? = null, val key: String? = null, val comp: String? = null)
 
 /**
  * A guide entry on [tvgId] (a live match, or a search hit); [norm] is the server's search form of its
@@ -23,6 +26,14 @@ data class Airing(val tvgId: String, val norm: String, val programme: Programme,
 class GuideDb private constructor(private val db: SQLiteDatabase) : Closeable {
     /** Each 🏆 match title's crests (the server's crests table; none in a guide from before it), read once at open. */
     val crests: Map<String, Crests> = runCatching {
+        db.rawQuery(
+            "SELECT c.title, home, away, home_name, away_name, home_key || '|' || away_key, p.comp FROM crests c LEFT JOIN " +
+                "(SELECT title, MIN(comp) AS comp FROM programmes WHERE comp IS NOT NULL GROUP BY title) p ON p.title = c.title",
+            null,
+        ).use { c ->
+            buildMap { while (c.moveToNext()) put(c.getString(0), Crests(c.getString(1), c.getString(2), c.getString(3), c.getString(4), c.getString(5), c.getString(6))) }
+        }
+    }.recoverCatching {
         db.rawQuery("SELECT title, home, away FROM crests", null).use { c ->
             buildMap { while (c.moveToNext()) put(c.getString(0), Crests(c.getString(1), c.getString(2))) }
         }

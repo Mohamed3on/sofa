@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -135,6 +136,23 @@ fun FitText(text: String, style: TextStyle, modifier: Modifier = Modifier, color
         text,
         style = style,
         color = color,
+        maxLines = 1,
+        softWrap = false,
+        onTextLayout = { width.floatValue = it.multiParagraph.width },
+        modifier = modifier
+            .fadeEnd(width)
+            .then(if (active && !reduced && !LocalStill.current) Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1000, velocity = 30.dp) else Modifier),
+    )
+}
+
+/** [FitText] with spans: a match line's score in tabular figures, the rest of it as it is. */
+@Composable
+fun FitText(text: AnnotatedString, style: TextStyle, modifier: Modifier = Modifier, active: Boolean = LocalFocused.current) {
+    val reduced = LocalReducedMotion.current
+    val width = remember { mutableFloatStateOf(0f) }
+    Text(
+        text,
+        style = style,
         maxLines = 1,
         softWrap = false,
         onTextLayout = { width.floatValue = it.multiParagraph.width },

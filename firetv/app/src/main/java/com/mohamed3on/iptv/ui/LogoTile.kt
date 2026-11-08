@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Text
@@ -91,16 +92,16 @@ fun MatchCrests(title: String?) {
     }
 }
 
+/** One crest, [size] on a faint chip [Space.xs] larger, so a dark crest still reads on the scrim. */
 @Composable
-private fun Crest(url: String?) {
+internal fun Crest(url: String?, size: Dp = CREST) {
     val context = LocalPlatformContext.current
     val density = LocalDensity.current
-    val request = remember(url) { url?.let { with(density) { ImageRequest.Builder(context).data(it).size(CREST.roundToPx()).build() } } }
-    Box(Modifier.size(CREST_CHIP).background(Palette.tile, RoundedCornerShape(Radius.chip)), contentAlignment = Alignment.Center) {
-        if (request != null) AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(CREST))
+    val request = remember(url) { url?.let { with(density) { ImageRequest.Builder(context).data(it).size(size.roundToPx()).build() } } }
+    Box(Modifier.size(size + Space.xs).background(Palette.tile, RoundedCornerShape(Radius.chip)), contentAlignment = Alignment.Center) {
+        if (request != null) AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size))
     }
 }
 
 private val CREST = 18.dp
-private val CREST_CHIP = 22.dp
 private val CREST_GAP = 2.dp

@@ -1147,10 +1147,14 @@ internal fun ChannelRow(
             when {
                 lines?.noGuide == true -> Text("No guide", style = Type.body, maxLines = 1)
                 now != null -> {
-                    if (now.match) LiveMark()
-                    MatchCrests(now.title)
-                    FitText(remember(now) { shownTitle(now) }, style = Type.body, modifier = Modifier.weight(1f))
-                    Progress(now, clock)
+                    val match = matchOf(now.title)
+                    if (match != null) MatchLine(match, Type.body)
+                    else {
+                        if (now.match) LiveMark()
+                        MatchCrests(now.title)
+                        FitText(remember(now) { shownTitle(now) }, style = Type.body, modifier = Modifier.weight(1f))
+                        Progress(now, clock)
+                    }
                 }
                 else -> Text("", style = Type.body)
             }
