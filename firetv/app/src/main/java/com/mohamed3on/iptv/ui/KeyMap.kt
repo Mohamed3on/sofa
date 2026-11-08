@@ -145,6 +145,12 @@ data class FilmKeys(
     val controls: Boolean = false,
     /** The film plays (or would once buffered), so OK pauses it. */
     val playing: Boolean = true,
+    /** A Skip intro / Skip recap button shows: OK presses it. */
+    val skip: Boolean = false,
+    /** The next episode's card shows over the credits: OK plays it, Back keeps the credits. */
+    val card: Boolean = false,
+    /** The pause screen shows: any key only wakes the controls. */
+    val asleep: Boolean = false,
 )
 
 /** A key press in the film player, mapped by [filmKey]. */
@@ -164,8 +170,14 @@ sealed interface FilmAction {
     data object Pause : FilmAction
     /** Steps the pending target by [by] ms. */
     data class Step(val by: Long) : FilmAction
-    /** ▲: takes the offer or Skip intro showing. */
+    /** ▲, or OK on the Skip button: takes the offer or Skip showing. */
     data object Accept : FilmAction
+    /** OK on the next episode's card: plays it now. */
+    data object NextEpisode : FilmAction
+    /** Back on the next episode's card: keeps watching the credits. */
+    data object DismissCard : FilmAction
+    /** A key on the pause screen: back to the controls, the key spent. */
+    data object Wake : FilmAction
     /** The player's key, nothing to do (a key's release, a held repeat). */
     data object Swallow : FilmAction
     /** Not the player's key: the panel moves its own focus with it. */
@@ -181,17 +193,21 @@ private const val FILM_REPEAT_MS = 100L
 
 /**
  * The film player's keys as a pure function: [held] is how long the key has been down, [sinceStep] the time since the
- * last step. Back peels one layer a press: the Unavailable card, a panel, a pending seek, a trial or notice, the
- * controls, then the film. OK and Play/Pause seek a pending step, else pause and play.
+ * last step. Back peels one layer a press: the Unavailable card, a panel, a pending seek, the next episode's card, a
+ * trial or notice, the controls, then the film. OK and Play/Pause seek a pending step, else pause and play; OK presses
+ * the next episode's card or a Skip button while one shows. On the pause screen any key only wakes the controls.
  */
 fun filmKey(code: Int, down: Boolean, repeat: Int, held: Long, sinceStep: Long, s: FilmKeys): FilmAction {
     val back = code == KeyEvent.KEYCODE_BACK
     if (back && s.error) return if (down) FilmAction.Leave else FilmAction.Swallow
     if (s.panel) return if (!back && code != KeyEvent.KEYCODE_MENU) FilmAction.Pass else if (down) FilmAction.ClosePanel else FilmAction.Swallow
     if (s.error) return FilmAction.Pass
+    if (s.asleep) return if (down && repeat == 0) FilmAction.Wake else FilmAction.Swallow
+    val ok = code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER
     val action = when (code) {
         KeyEvent.KEYCODE_BACK -> when {
             s.seeking -> FilmAction.DropSeek
+            s.card -> FilmAction.DismissCard
             s.sessionBack -> FilmAction.SessionBack
             s.controls -> FilmAction.HideControls
             else -> FilmAction.Leave
@@ -201,6 +217,8 @@ fun filmKey(code: Int, down: Boolean, repeat: Int, held: Long, sinceStep: Long, 
         KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE -> when {
             repeat > 0 -> FilmAction.Swallow
             s.seeking -> FilmAction.CommitSeek
+            ok && s.card -> FilmAction.NextEpisode
+            ok && s.skip -> FilmAction.Accept
             code == KeyEvent.KEYCODE_MEDIA_PLAY -> FilmAction.Play
             code == KeyEvent.KEYCODE_MEDIA_PAUSE || s.playing -> FilmAction.Pause
             else -> FilmAction.Play

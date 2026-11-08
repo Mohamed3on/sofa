@@ -102,6 +102,12 @@ import com.mohamed3on.iptv.player.FilmState
 import com.mohamed3on.iptv.player.IdleWatch
 import com.mohamed3on.iptv.player.Notice
 import com.mohamed3on.iptv.player.OfferKind
+import com.mohamed3on.iptv.player.SkipPart
+import com.mohamed3on.iptv.ui.theme.Radius
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import com.mohamed3on.iptv.player.PlayOf
 import com.mohamed3on.iptv.player.openFilmPlay
 import com.mohamed3on.iptv.ui.theme.PanelRow
@@ -235,6 +241,11 @@ internal fun MoviePlayback(
         delay(NOTE_MS)
         note = null
     }
+    val filmNotice by remember { session.state.map { it.notice }.distinctUntilChanged() }.collectAsState(null)
+    // The controls' and the corner's heights (px), measured as they lay out; what sits above them moves by these.
+    val controlsHeight = remember { mutableIntStateOf(0) }
+    val cornerHeight = remember { mutableIntStateOf(0) }
+    val controlsLift = animateFloatAsState(if (controls && !error) controlsHeight.intValue.toFloat() else 0f, Motion.panel(reduced), label = "lift")
     // While the controls show, the bar follows the player; elapsed and remaining recompose once a second.
     LaunchedEffect(controls) {
         while (controls) {
@@ -284,7 +295,10 @@ internal fun MoviePlayback(
             .onKeyEvent { e ->
                 val native = e.nativeKeyEvent
                 val down = e.type == KeyEventType.KeyDown
-                val keys = FilmKeys(error = error, panel = panel, seeking = target != null, sessionBack = session.takesBack, controls = controls, playing = exo.playWhenReady)
+                val keys = FilmKeys(
+                    error = error, panel = panel, seeking = target != null, sessionBack = session.takesBack, controls = controls, playing = exo.playWhenReady,
+                    skip = session.state.value.notice is Notice.Skip,
+                )
                 val action = filmKey(native.keyCode, down, native.repeatCount, native.eventTime - native.downTime, native.eventTime - lastStep[0], keys)
                 when (action) {
                     FilmAction.Pass -> return@onKeyEvent false
@@ -305,6 +319,7 @@ internal fun MoviePlayback(
                         seekBy(action.by)
                     }
                     FilmAction.Accept -> session.accept()
+                    FilmAction.NextEpisode, FilmAction.DismissCard, FilmAction.Wake -> {}
                     FilmAction.Swallow -> {}
                 }
                 if (down && !keys.panel && !keys.error && action != FilmAction.HideControls) kick++
@@ -356,8 +371,26 @@ internal fun MoviePlayback(
                     duration = { duration.longValue },
                     buffered = { buffered.longValue },
                     seeking = target != null,
-                    modifier = Modifier.slideFade({ shown.value }, Edge.Bottom, reduced).padding(Space.safe),
+                    modifier = Modifier.onSizeChanged { controlsHeight.intValue = it.height }.slideFade({ shown.value }, Edge.Bottom, reduced).padding(Space.safe),
                 )
+            }
+        }
+
+        // The corner's Skip button, above the controls while they show (their top edge, on the panel spring).
+        val skip = (filmNotice as? Notice.Skip)?.takeIf { !panel && !error }
+        Box(
+            Modifier
+                .align(Alignment.BottomEnd)
+                .offset { IntOffset(0, -controlsLift.value.roundToInt()) }
+                .padding(Space.safe)
+                .onSizeChanged { cornerHeight.intValue = it.height },
+        ) {
+            AnimatedVisibility(visible = skip != null, enter = EnterTransition.None, exit = ExitTransition.None) {
+                val shown = reveal()
+                // Kept through the fade out, after the notice has gone.
+                var part by remember { mutableStateOf(SkipPart.Intro) }
+                skip?.let { part = it.part }
+                SkipButton(if (part == SkipPart.Recap) "Skip recap" else "Skip intro", Modifier.slideFade({ shown.value }, Edge.Right, reduced))
             }
         }
 
@@ -477,6 +510,22 @@ private fun SeekBar(position: () -> Long, duration: () -> Long, buffered: () -> 
             val thumb = (THUMB.toPx() * (0.6f + 0.4f * grow)) / 2
             drawCircle(Palette.textPrimary, radius = thumb, center = Offset(size.width * f, size.height / 2))
         },
+    )
+}
+
+/**
+ * Skip intro / Skip recap: a page button drawn as focused (solid light, ink label), since it is what OK presses
+ * while it shows; the player keeps the focus, so it never moves.
+ */
+@Composable
+private fun SkipButton(label: String, modifier: Modifier = Modifier) {
+    Text(
+        label,
+        style = Type.headline.copy(color = Palette.ink),
+        maxLines = 1,
+        modifier = modifier
+            .drawBehind { drawRoundRect(Palette.textPrimary, cornerRadius = CornerRadius(Radius.row.toPx())) }
+            .padding(horizontal = Space.xl, vertical = Space.m),
     )
 }
 
@@ -676,7 +725,8 @@ private val SUBTITLE_BOTTOM = 56.dp
 private fun NoticeCorner(state: StateFlow<FilmState>, modifier: Modifier) {
     val film by state.collectAsState()
     val service = debridName()
-    val now = film.notice?.let { noticeText(it, service) } ?: if (film.trial) NoticeText("Trying this version · Back returns to the last one") else null
+    // A Skip is the corner button at the foot, not a notice up here.
+    val now = film.notice?.let { noticeText(it, service) } ?: if (film.trial && film.notice !is Notice.Skip) NoticeText("Trying this version · Back returns to the last one") else null
     CornerNotice(now, modifier.widthIn(max = NOTICE_WIDTH)) { n ->
         ScrollText(n.text, style = Type.caption.copy(color = Palette.textPrimary), lines = 2, modifier = Modifier.weight(1f, fill = false))
         n.action?.let {
@@ -691,7 +741,7 @@ private class NoticeText(val text: String, val action: String? = null)
 /** "TorBox · 4K · HDR10": enough to tell copies apart in a line. */
 private fun short(c: Copy, service: String) = (listOf(sourceName(c.source, service)) + copyLabels(c).take(2)).joinToString(" · ")
 
-private fun noticeText(n: Notice, service: String) = when (n) {
+private fun noticeText(n: Notice, service: String): NoticeText? = when (n) {
     is Notice.Offer -> when (n.kind) {
         OfferKind.Better -> NoticeText("Better version ready: ${short(n.copy, service)}", "Switch")
         OfferKind.Untested -> NoticeText("Untested here: ${short(n.copy, service)}", "Try it")
@@ -702,7 +752,7 @@ private fun noticeText(n: Notice, service: String) = when (n) {
     is Notice.CantStart -> NoticeText("${short(n.copy, service)} can’t start now · still on this version")
     is Notice.TrialResult -> NoticeText(if (n.works) "${short(n.copy, service)} works here" else "${short(n.copy, service)} didn’t play here · back to the last version")
     is Notice.Subtitles -> NoticeText("${fetchedName(n.language)} subtitles from OpenSubtitles · timing in Options")
-    is Notice.SkipIntro -> NoticeText("Intro", "Skip")
+    is Notice.Skip -> null
     is Notice.PremiumEnded -> NoticeText("${n.service} premium has ended")
 }
 

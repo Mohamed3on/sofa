@@ -29,4 +29,19 @@ class FilmKeysTest {
         assertEquals(FilmAction.Play, press(ok, FilmKeys(playing = false)))
         assertEquals("a held OK does nothing more", FilmAction.Swallow, press(ok, FilmKeys(), repeat = 3))
     }
+
+    @Test fun `OK presses a Skip button or the next episode's card, never pausing under them, while Play-Pause still pauses`() {
+        val ok = KeyEvent.KEYCODE_DPAD_CENTER
+        assertEquals(FilmAction.Accept, press(ok, FilmKeys(skip = true)))
+        assertEquals(FilmAction.NextEpisode, press(ok, FilmKeys(card = true)))
+        assertEquals(FilmAction.Pause, press(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, FilmKeys(skip = true)))
+        assertEquals("a pending seek goes first", FilmAction.CommitSeek, press(ok, FilmKeys(card = true, seeking = true)))
+        assertEquals("Back on the card keeps the credits", FilmAction.DismissCard, press(KeyEvent.KEYCODE_BACK, FilmKeys(card = true, controls = true)))
+    }
+
+    @Test fun `on the pause screen any key only wakes the controls`() {
+        val asleep = FilmKeys(asleep = true, playing = false)
+        for (code in listOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_MENU)) assertEquals(FilmAction.Wake, press(code, asleep))
+        assertEquals(FilmAction.Swallow, filmKey(KeyEvent.KEYCODE_DPAD_CENTER, false, 0, 0, 0, asleep))
+    }
 }

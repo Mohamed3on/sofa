@@ -47,15 +47,24 @@ interface FilmPlayer {
     }
 }
 
-/** A title's copies as discovery returns them; [debrid] is each debrid copy's torrent, by copy id; [originalLanguage] when known; an episode's [intro] (ms) when known. */
-class TitleCopies(val copies: List<Copy>, val debrid: Map<String, DebridCandidate> = emptyMap(), val originalLanguage: String? = null, val intro: LongRange? = null)
+/**
+ * A title's copies as discovery returns them; [debrid] is each debrid copy's torrent, by copy id; [originalLanguage] when known;
+ * an episode's [intro] and [recap] (ms) and where its end [credits] start (ms), when known.
+ */
+class TitleCopies(
+    val copies: List<Copy>, val debrid: Map<String, DebridCandidate> = emptyMap(), val originalLanguage: String? = null,
+    val intro: LongRange? = null, val recap: LongRange? = null, val credits: Long? = null,
+)
+
+/** What a Skip button skips. */
+enum class SkipPart { Intro, Recap }
 
 enum class FilmPhase { Stopped, Loading, Starting, Playing, Ended, Unavailable }
 
 /** R10's better copy once bandwidth recovers, R28's untested copy, KTD12's lighter copy for a pinned one that stalls. */
 enum class OfferKind { Better, Untested, Lighter }
 
-/** What the corner shows, one at a time. An offer or Skip intro shows [FilmSession.OFFER_MS] (▲ accepts), the rest [FilmSession.INFO_MS]. */
+/** What the corner shows, one at a time: an offer for [FilmSession.OFFER_MS] (▲ accepts), the rest [FilmSession.INFO_MS]; a Skip while its part plays. */
 sealed interface Notice {
     data class Offer(val kind: OfferKind, val copy: Copy) : Notice
     /** An automatic step-down; Versions can reverse it (R13). */
@@ -69,8 +78,8 @@ sealed interface Notice {
     data class Subtitles(val language: String) : Notice
     /** The [service]'s premium ended: its copies are skipped (shown once an app session). */
     data class PremiumEnded(val service: String) : Notice
-    /** The intro plays; ▲ jumps to its [end] (R33). Goes once playback leaves it. */
-    data class SkipIntro(val end: Long) : Notice
+    /** The intro or recap plays; OK on the Skip button (or ▲) jumps to its [end] (R33). Goes once playback leaves it. */
+    data class Skip(val part: SkipPart, val end: Long) : Notice
 }
 
 /** For telemetry (/api/app/events). */
@@ -151,9 +160,9 @@ class FilmSession(
     private var pausedAt: Long? = null
     private var stale = false
     private var panel = false
-    private var intro: LongRange? = null
-    /** Skip intro is offered once a play. */
-    private var introRaised = false
+    /** The episode's skippable parts, by what they are; each offered once a play. */
+    private var parts: Map<SkipPart, LongRange> = emptyMap()
+    private val raised = mutableSetOf<SkipPart>()
     /** Play starts by then: Real-Debrid's check gets only what is left of [WAIT_MS] while IPTV could play (KTD13). */
     private var startBy = 0L
 
@@ -194,7 +203,7 @@ class FilmSession(
         // Versions follows the plan; a play's next link is fetched ahead as its answers change.
         jobs.launch {
             plan.state.collect {
-                it.answer?.copies?.intro?.let { w -> intro = w }
+                it.answer?.copies?.let { c -> parts = listOfNotNull(c.recap?.let { SkipPart.Recap to it }, c.intro?.let { SkipPart.Intro to it }).toMap() }
                 faults(it)
                 publish()
                 prepare()
@@ -208,9 +217,9 @@ class FilmSession(
         }
     }
 
-    /** ▲ on an offer: switches to its copy at the same place (a trial for an untested one); on Skip intro, jumps past it. False when neither shows. */
+    /** ▲ on an offer: switches to its copy at the same place (a trial for an untested one); on a Skip, jumps past its part. False when neither shows. */
     fun accept(): Boolean {
-        (notices.firstOrNull() as? Notice.SkipIntro)?.let {
+        (notices.firstOrNull() as? Notice.Skip)?.let {
             dismiss(accepted = true)
             player.seek(it.end)
             return true
@@ -495,7 +504,8 @@ class FilmSession(
 
     private fun tick() {
         val t = now()
-        notices.firstOrNull()?.let { if (t - noticeAt >= if (it is Notice.Offer || it is Notice.SkipIntro) OFFER_MS else INFO_MS) dismiss(accepted = false) }
+        // A Skip stays while its part plays ([skips] takes it away).
+        notices.firstOrNull()?.let { if (it !is Notice.Skip && t - noticeAt >= if (it is Notice.Offer) OFFER_MS else INFO_MS) dismiss(accepted = false) }
         if (attempt && phase == FilmPhase.Starting && t - openedAt >= START_MS) return failed(StreamFailure.Timeout)
         if (phase != FilmPhase.Playing) return
         val copy = current ?: return
@@ -503,20 +513,21 @@ class FilmSession(
             back = null
             trialOver(copy, works = true)
         }
-        skipIntro()
+        skips()
         offers(t, copy)
     }
 
-    /** R33: while the intro plays (not in its last seconds), Skip intro shows once; leaving the intro takes it away. */
-    private fun skipIntro() {
-        val w = intro ?: return
+    /** R33: while the intro or recap plays (not in its last seconds), its Skip shows, once a play; leaving the part takes it away. */
+    private fun skips() {
         val at = player.place.position
-        if (notices.firstOrNull() is Notice.SkipIntro && at !in w) dismiss(accepted = false)
         val head = notices.firstOrNull()
-        if (at !in w) notices.removeAll { it is Notice.SkipIntro && it !== head }
-        if (!introRaised && pausedAt == null && at >= w.first && at < w.last - INTRO_TAIL_MS) {
-            introRaised = true
-            notify(Notice.SkipIntro(w.last))
+        if (head is Notice.Skip && parts[head.part]?.let { at in it.first until it.last - TAIL_MS } != true) dismiss(accepted = false)
+        val showing = notices.firstOrNull()
+        notices.removeAll { it is Notice.Skip && it !== showing && parts[it.part]?.contains(at) != true }
+        for ((part, w) in parts) {
+            if (part in raised || pausedAt != null || at < w.first || at >= w.last - TAIL_MS) continue
+            raised += part
+            notify(Notice.Skip(part, w.last))
         }
     }
 
@@ -540,10 +551,10 @@ class FilmSession(
         if (kind !in spent && notices.none { it is Notice.Offer }) notify(Notice.Offer(kind, copy))
     }
 
-    /** One notice at a time, by priority: Skip intro, trial result, offers, then information; the one showing stays. */
+    /** One notice at a time, by priority: a Skip, trial result, offers, then information; the one showing stays. */
     private fun notify(n: Notice) {
         fun rank(x: Notice) = when (x) {
-            is Notice.SkipIntro -> 0
+            is Notice.Skip -> 0
             is Notice.TrialResult -> 1
             is Notice.Offer -> 2
             else -> 3
@@ -588,7 +599,8 @@ class FilmSession(
         const val WAIT_MS = 4_000L
         const val OFFER_MS = 12_000L
         const val INFO_MS = 6_000L
-        private const val INTRO_TAIL_MS = 3_000L
+        /** A Skip leaves this long before its part ends: by then the jump saves nothing. */
+        private const val TAIL_MS = 3_000L
         private const val TICK_MS = 1_000L
         /** First frame of a film, over a connect and the 1.5 s start buffer. */
         private const val START_MS = 15_000L

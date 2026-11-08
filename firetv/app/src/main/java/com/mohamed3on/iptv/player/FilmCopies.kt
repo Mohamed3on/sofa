@@ -301,11 +301,14 @@ fun answerOf(a: CopiesAnswer): TitleAnswer {
     val copies = server.map { (id, s) -> copyOf(id, s) }
     val rd = server.filterValues { it.src == "rd" }.mapValues { (_, s) -> DebridCandidate(s.hash, s.file, s.filename, s.cached) }
     return TitleAnswer(
-        TitleCopies(copies, rd, a.originalLanguage.ifEmpty { null }, a.intro.takeIf { it.size == 2 }?.let { it[0]..it[1] }),
+        TitleCopies(copies, rd, a.originalLanguage.ifEmpty { null }, span(a.intro), span(a.recap), a.credits.firstOrNull()?.takeIf { it > 0 }),
         debridPending = a.sources.rd == "pending", debridUnavailable = a.sources.rd == "unavailable", iptvUnavailable = a.sources.iptv == "unavailable",
         server = server,
     )
 }
+
+/** A [start, end] ms pair from the box, null when absent. */
+private fun span(w: List<Long>) = w.takeIf { it.size == 2 && it[1] > it[0] }?.let { it[0]..it[1] }
 
 private fun copyId(s: ServerCopy) = if (s.src == "rd") "rd:${s.hash}" + (s.file?.let { ":$it" } ?: "") else "iptv:${s.id}"
 
