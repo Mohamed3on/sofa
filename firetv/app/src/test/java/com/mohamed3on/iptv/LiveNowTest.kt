@@ -29,4 +29,22 @@ class LiveNowTest {
         // The club's channel and another match's channel stay event slots of their own.
         assertEquals(listOf(4, 5), live.slots.map { it.tune.id })
     }
+
+    @Test fun matchesGoByKickOffAndChannelsByQualityThenLanguage() {
+        val pl = "🏆 Premier League"
+        fun c(id: Int, name: String, tvgId: String, q: Int, badges: List<String> = emptyList(), home: String? = null) =
+            Channel(id = id, name = name, group = pl, tvgId = tvgId, home = home, family = "f$id", rank = 0, q = q, badges = badges)
+        val arabic = c(1, "beIN Sports 1", "a", 4, listOf("FHD", "50fps"), home = "🇸🇦 beIN & Arabic Sports")
+        val english = c(2, "UK: TNT Sports 1", "b", 4, listOf("FHD", "50fps"))
+        val uhd = c(3, "DE: Sky Sport Top Event", "c", 5)
+        val laterMatch = c(4, "UK: Sky Sports Main Event", "d", 4)
+        val feed = Feed(listOf(pl), ProviderRoute("http://p", "http://v", "u", "p"), listOf(laterMatch, arabic, english, uhd))
+        val late = "Arsenal vs Chelsea - Premier League"
+        val early = "Liverpool vs Everton - Premier League"
+        fun on(id: String, title: String, start: Long) = Airing(id, title.lowercase(), Programme(start, start + 7200, title, "", false, true), pl)
+        val live = feed.liveNow(listOf(on("d", late, 3600), on("a", early, 0), on("b", early, 0), on("c", early, 0)))
+
+        // The earlier kick-off leads; its 4K channel first, then English over Arabic at equal quality.
+        assertEquals(listOf(listOf(3, 2, 1), listOf(4)), live.matches.map { m -> listOf(m.tune.id) + m.alsoOn.map { it.id } })
+    }
 }

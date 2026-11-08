@@ -1,5 +1,7 @@
 package com.mohamed3on.iptv.data
 
+import com.mohamed3on.iptv.ui.feedFlag
+
 /** A Live now row: a confirmed match ([programme] set) or an unconfirmed event slot. [via] is the 🏆 row it was found on. */
 data class LiveEntry(
     val title: String, val programme: Programme?, val via: Channel, val tune: Channel, val comp: String? = null,
@@ -27,18 +29,19 @@ class SameMatch(channels: List<Channel>) : List<Channel> by channels
 
 /**
  * Live now from the guide's [airing] matches: one row per (normalized title, start) on a channel in a
- * 🏆 group, found on the first such row in server order (🏆 groups are quality-sorted) and tuned to the
- * top-ranked feed of its family. Then 🏆 event slots whose name reads as a fixture, one per name.
+ * 🏆 group, by kick-off, each with its channels best first ([BEST_FIRST]), every one on its family's
+ * top-ranked feed. Then 🏆 event slots whose name reads as a fixture, one per name.
  */
 fun Feed.liveNow(airing: List<Airing>): LiveNow {
     val byTvgId = airing.groupBy { it.tvgId }
     val trophy = channels.filter { it.group.startsWith(TROPHY) }
-    val seen = HashSet<Pair<String, Long>>()
+    // Once per channel: its 🏆 copies share the listing. Other channels with the same title join it in sameMatchOnce.
+    val seen = HashSet<Triple<String, String, Long>>()
     val matches = buildList {
         for (c in trophy) {
             if (c.tvgId.isEmpty()) continue
             for (a in byTvgId[c.tvgId].orEmpty()) {
-                if (seen.add(a.norm to a.programme.start)) add(LiveEntry(a.programme.title, a.programme, c, bestOf(c), a.comp))
+                if (seen.add(Triple(c.family, a.norm, a.programme.start))) add(LiveEntry(a.programme.title, a.programme, c, bestOf(c), a.comp))
             }
         }
     }
@@ -52,9 +55,29 @@ fun Feed.liveNow(airing: List<Airing>): LiveNow {
         folded += more.map { it.family }
         val alsoOn = (m.alsoOn + more.map { bestOf(it) }).distinctBy { it.family }.filter { it.family != m.tune.family }
         m.copy(alsoOn = alsoOn)
-    }
+    }.map { m ->
+        val all = (listOf(m.tune) + m.alsoOn).sortedWith(BEST_FIRST)
+        m.copy(tune = all.first(), alsoOn = all.drop(1))
+    }.sortedBy { it.programme!!.start }
     val slots = trophy.filter { it.slot && it.fixture && it.family !in folded }.distinctBy { it.name }.map { LiveEntry(it.name, null, it, bestOf(it)) }
     return LiveNow(confirmed, slots)
+}
+
+/** A match's channels: picture quality first (marker tier, then height, then fps); language only between equals. */
+private val BEST_FIRST = compareByDescending<Channel> { it.q }
+    .thenByDescending { it.h ?: NOMINAL_HEIGHT[it.q] ?: 0 }
+    .thenByDescending { c -> c.badges.firstNotNullOfOrNull { FPS.matchEntire(it)?.groupValues?.get(1)?.toInt() } ?: 0 }
+    .thenBy { languageRank(it) }
+private val NOMINAL_HEIGHT = mapOf(5 to 2160, 4 to 1080, 3 to 720)
+private val FPS = Regex("""(\d+)fps""")
+
+/** English (UK and Ireland before the US), then Arabic, then German and Spanish, then the rest. */
+private fun languageRank(c: Channel) = when (feedFlag(c)) {
+    "🇬🇧", "🇮🇪" -> 0
+    "🇺🇸", "🇨🇦", "🇦🇺", "🇳🇿" -> 1
+    "🇪🇬" -> 2
+    "🇩🇪", "🇪🇸" -> 3
+    else -> 4
 }
 
 /** A fixture's two sides as team words ("Atletico Madrid vs Barcelona" → atletico madrid, barcelona), or null. */
