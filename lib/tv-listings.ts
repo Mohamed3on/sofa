@@ -5,7 +5,10 @@
 // "LaLiga 26/27", and the provider's LaLiga TV lists a match that is on Premier Sports. So a match a
 // country's site gives a channel is put in that channel's guide, and a match the guide gives a channel
 // the site knows, but not for that match, is taken out.
-import { chanKey, teamWords, unxml, type Channel } from './curation.js'
+import { fileURLToPath } from 'node:url'
+import { chanKey, couldBeLiveMatch, teamWords, unxml, type Channel } from './curation.js'
+import { jsonFile } from './fs.js'
+import { askJev } from './jev.js'
 
 /** [home]: the group(s) of the site's country, whose channels its names map to; [mdy]: month-first dates. */
 interface Site { url: string; home: string | string[]; tz: string; mdy?: true }
@@ -111,15 +114,27 @@ export function placeListings(channels: Channel[], listings: { home: string | st
 
 // One team's word in another spelling: "atl" for "atletico", "barcelonne" for "barcelona".
 const sameWord = (a: string, b: string) => a.startsWith(b) || b.startsWith(a) || (a.length >= 6 && b.length >= 6 && a.slice(0, 6) === b.slice(0, 6))
-const names = (title: string, sides: [string[], string[]]) => {
+const named = (title: string, sides: [string[], string[]]) => {
   const w = teamWords(title)
-  return sides.every((side) => side.some((s) => w.some((t) => sameWord(s, t))))
+  return sides.map((side) => side.some((s) => w.some((t) => sameWord(s, t))))
 }
+const names = (title: string, sides: [string[], string[]]) => named(title, sides).every(Boolean)
+// A fixture ("X v Y", "X - Y", "X × Y") whose teams the words can't settle against [sides]: it names one side
+// (the other spelled another way), or it is in another script, where no word can match.
+const FIXTURE = /\S\s+(?:v|vs\.?|x|×|-|–|—|@)\s+\S|\S×\S/i
+const OTHER_SCRIPT = /[\p{Script=Arabic}\p{Script=Greek}\p{Script=Cyrillic}\p{Script=Hebrew}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u
+const unsettled = (title: string, sides: [string[], string[]]) =>
+  couldBeLiveMatch(title) && FIXTURE.test(title) && (OTHER_SCRIPT.test(title) || named(title, sides).some(Boolean))
+
+/** Whether a guide programme and a listed match airing at the same time are one match: true or false when known, else undefined. */
+export type SameMatch = (programme: string, listed: string) => boolean | undefined
 
 /**
  * A channel's programmes ([blocks], one channel's, with its [at] reader and [make] writer) with the
  * listings applied: a match the site gives it and its guide lacks is added over what was there, and a
- * match its guide gives it that the site lists elsewhere, while knowing the channel, is dropped.
+ * match its guide gives it that the site lists elsewhere, while knowing the channel, is dropped. A programme
+ * names the listed match when it names both sides; one whose team words settle nothing (another spelling or
+ * script, "بايرن ميونخ × دورتموند") and that names no other listed match is the listed match when [same] says so.
  */
 export function applyListings(
   id: string,
@@ -129,12 +144,19 @@ export function applyListings(
   title: (b: string) => string,
   make: (start: number, stop: number, title: string) => string,
   retime: (b: string, start: number, stop: number) => string,
+  same: SameMatch = () => undefined,
 ): string[] {
   let out = blocks
   for (const p of placed) {
+    if (!p.ids.has(id) && !p.known.has(id)) continue
     const stop = p.start + MATCH_MS
     const during = (b: string) => at(b, 'start') < stop && at(b, 'stop') > p.start
-    const shown = out.filter((b) => during(b) && names(title(b), p.sides))
+    const other = (t: string) => placed.some((q) => q !== p && Math.abs(q.start - p.start) < MATCH_MS && names(t, q.sides) && !names(q.title, p.sides))
+    const shown = out.filter((b) => {
+      if (!during(b)) return false
+      const t = title(b)
+      return names(t, p.sides) || (unsettled(t, p.sides) && !other(t) && same(t, p.title) === true)
+    })
     if (p.ids.has(id)) {
       if (shown.length) continue
       out = out.flatMap((b) => {
@@ -153,6 +175,50 @@ export function applyListings(
     }
   }
   return out
+}
+
+// Jev's verdicts on [SameMatch] pairs, by [programme, listed] (a Noul: 0.7 and over is one match, 0.3 and under
+// two, between unsettled, which leaves the guide as the team words had it). A guide build asks nothing:
+// it takes the verdicts it has and notes the pairs it lacks, judged after it (judgeSameMatches) for the next build.
+const verdicts = jsonFile<Record<string, number>>(
+  () => process.env.SAME_MATCH_FILE ?? fileURLToPath(new URL('../.cache/jev-same-match.json', import.meta.url)), () => ({}))
+const unjudged = new Map<string, [string, string]>()
+const KEEP_VERDICTS = 20_000
+
+export const sameMatch: SameMatch = (programme, listed) => {
+  const k = JSON.stringify([programme, listed])
+  const v = verdicts.read()[k]
+  if (v === undefined) unjudged.set(k, [programme, listed])
+  return v === undefined || (v > 0.3 && v < 0.7) ? undefined : v >= 0.7
+}
+
+const STATE = 'A football match listed by a TV listings site for some channel, and a programme in another channel\'s TV guide airing at the same time.'
+const sameQuestion = (programme: string, listed: string) => ({
+  type: 'noul' as const,
+  instructions: `Is the guide programme "${programme}" the listed match "${listed}"?`,
+  criteria: {
+    true: 'Both name the same two teams, in any language, spelling or order',
+    false: 'They name at least one different team, or the programme is not a live match of those teams',
+  },
+})
+
+let judging: Promise<void> | undefined
+/** Has Jev judge the pairs builds have noted and not had judged; one run at a time. A failed run's pairs come back next build. */
+export function judgeSameMatches(): Promise<void> {
+  if (judging || !unjudged.size) return judging ?? Promise.resolve()
+  const pairs = [...unjudged]
+  unjudged.clear()
+  judging = askJev(STATE, Object.fromEntries(pairs.map(([, [p, l]], i) => [`q${i}`, sameQuestion(p, l)])))
+    .then(async (answers) => {
+      const all = { ...verdicts.read(true) }
+      pairs.forEach(([k], i) => { const n = answers[`q${i}`]?.noul; if (typeof n === 'number') all[k] = n })
+      const keys = Object.keys(all)
+      for (const k of keys.slice(0, Math.max(0, keys.length - KEEP_VERDICTS))) delete all[k] // oldest first
+      await verdicts.write(all)
+    })
+    .catch((e) => console.warn(`same-match judge: ${e instanceof Error ? e.message : e}`))
+    .finally(() => { judging = undefined })
+  return judging
 }
 
 const LISTINGS_TTL = 2 * 3600_000

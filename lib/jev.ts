@@ -1,11 +1,12 @@
 // TypeSafe's Jev (https://docs.typesafe.ai): typed, calibrated judgments for calls our regexes
-// can't make reliably — which competition a guide title is, whether two channel names are one
-// channel. Only the offline scripts ask; the request path never waits on it. Billing is per
+// can't make reliably — whether two channel names are one channel, whether a guide programme is the match a
+// TV listings site lists. The request path never waits on it: offline scripts ask, and guide builds have
+// their missing verdicts judged after them (lib/tv-listings.ts judgeSameMatches). Billing is per
 // input token, so callers batch questions (each question carries its own item — a shared state
 // referenced by index measured less accurate) and cache every verdict.
 
 export type JevQuestion =
-  | { type: 'noul'; instructions: string }
+  | { type: 'noul'; instructions: string; criteria?: { true: string; false: string } }
   | { type: 'choice'; instructions: string; criteria: Record<string, string | null> }
 export interface JevAnswer {
   choice?: string

@@ -17,7 +17,7 @@
 import { audioRank, detailRank, qualityOf } from './quality.js'
 import { flakyRank } from './flaky.js'
 import { jsonFile } from './fs.js'
-import { applyListings, fetchListings, placeListings, type Placed } from './tv-listings.js'
+import { applyListings, fetchListings, judgeSameMatches, placeListings, sameMatch, type Placed } from './tv-listings.js'
 import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { apiGet, BACKUP_ID, backupConfigFromEnv, claims4K, configFromEnv, guideUrl, plainCategory, readName, streamUrl, vodCatalogue, type VodFilm, type XtreamConfig } from './provider.js'
@@ -1326,6 +1326,7 @@ export function buildEventEpg(
   providerXml = '',
   myepg?: MyepgGuide,
   placed: Placed[] = [],
+  same = sameMatch,
 ): string {
   const slots = channels.filter((c) => c.isEventSlot)
   const covered = myepg?.covered ?? new Set<string>()
@@ -1474,7 +1475,7 @@ export function buildEventEpg(
     const one = oneSchedule(ps)
     const listed = applyListings(id, one, placed, xmltvAt, titleOf,
       (start, stop, title) => `<programme start="${xmltvTime(new Date(start))}" stop="${xmltvTime(new Date(stop))}" channel="${xml(id)}"><title>${xml(title)}</title></programme>`,
-      (b, start, stop) => stamp(stamp(b, 'start', start), 'stop', stop))
+      (b, start, stop) => stamp(stamp(b, 'start', start), 'stop', stop), same)
     for (const p of listed === one ? one : listed.sort((x, y) => (xmltvAt(x, 'start') || 0) - (xmltvAt(y, 'start') || 0))) head.push(p)
   }
   head.push('</tv>')
@@ -1532,5 +1533,7 @@ async function buildCuratedGuide(): Promise<{ channels: Channel[]; xml: string }
     job.catch(() => { if (guides?.job === job) guides = undefined })
   }
   const [channels, [providerXml, myepg], listings] = await Promise.all([channelsPromise, guides.job, fetchListings()])
-  return { channels, xml: buildEventEpg(channels, providerXml, myepg, placeListings(channels, listings)) }
+  const xml = buildEventEpg(channels, providerXml, myepg, placeListings(channels, listings))
+  void judgeSameMatches() // for the next build
+  return { channels, xml }
 }

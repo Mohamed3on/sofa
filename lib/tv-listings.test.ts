@@ -17,6 +17,24 @@ describe('TV listings', () => {
     expect(parseListings(page('08.11.2026', '23:00', 'LaLiga', 'Atl. Madrid - Barcelona', ['beIN SPORTS 1 EN']), 'Asia/Riyadh')[0].start).toBe(Date.UTC(2026, 10, 8, 20))
   })
 
+  test('a guide match in another script is the listed one when Jev says so; titles naming neither side are never asked', () => {
+    const AR = '🇸🇦 beIN & Arabic Sports'
+    const ch = (streamId: number, name: string, tvgId: string): Channel => ({ streamId, name, logo: '', tvgId, group: AR, isEventSlot: false, q: 4 })
+    const channels = [ch(1, 'AR: BEIN SPORTS 1 HD', 'b1'), ch(2, 'AR: BEIN SPORTS 2 HD', 'b2')]
+    const placed = placeListings(channels, [{ home: AR, listings: [
+      ...parseListings(page('08/11/2026', '23:00', 'LaLiga', 'Atl. Madrid - Barcelona', ['beIN SPORTS 1']), 'Asia/Riyadh'),
+      ...parseListings(page('08/11/2026', '20:30', 'LaLiga', 'Celta Vigo - Levante', ['beIN SPORTS 2']), 'Asia/Riyadh'),
+    ] }])
+    const prog = (start: string, stop: string, title: string) => `<programme start="20261108${start}00 +0000" stop="20261108${stop}00 +0000" channel="b2"><title>${title}</title></programme>`
+    const arabic = 'مباشر: أتلتيكو مدريد × برشلونة'
+    const myepg = { programmes: [prog('1730', '1930', 'Celta Vigo v Levante'), prog('1930', '2000', 'Studio Live'), prog('2000', '2200', arabic)], covered: new Set(['b2']), icons: new Map() }
+    const asked: string[] = []
+    const xml = buildEventEpg(channels, '', myepg, placed, (p) => (asked.push(p), true))
+    // the site has the match on beIN 1 and knows beIN 2, so beIN 2's claim goes
+    expect(xml).not.toContain(arabic)
+    expect(asked).toEqual([arabic])
+  })
+
   test('month-first and year-first days; a site names only its own country\'s channels', () => {
     expect(parseListings(page('11/8/2026', '15:00', 'MLS', 'Inter Miami - Chicago Fire', ['FOX Sports 1']), 'America/New_York', true)[0].start).toBe(Date.UTC(2026, 10, 8, 20))
     expect(parseListings(page('2026-11-08', '20:00', 'Allsvenskan', 'Malmö - Hammarby', ['V Sport 1']), 'Europe/Stockholm')[0].start).toBe(Date.UTC(2026, 10, 8, 19))
