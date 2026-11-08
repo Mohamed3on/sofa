@@ -244,9 +244,9 @@ class TitlesClient(
     }
 }
 
-/** `/api/app/copies`: a title's copies, its original language (ISO 639-1, "" unknown), each source's state ("ok", "pending", "unavailable") and an episode's [intro] ([start, end] ms, empty unknown). */
+/** `/api/app/copies`: a title's copies, its original language (ISO 639-1, "" unknown), each source's state ("ok", "pending", "unavailable") and an episode's [intro], [recap] and end [credits] ([start, end] ms, empty unknown; a credits end of 0 runs to the end). */
 @Serializable
-data class CopiesAnswer(val titleId: String = "", val originalLanguage: String = "", val runtime: Int = 0, val sources: CopySources = CopySources(), val copies: List<ServerCopy> = emptyList(), val intro: List<Long> = emptyList())
+data class CopiesAnswer(val titleId: String = "", val originalLanguage: String = "", val runtime: Int = 0, val sources: CopySources = CopySources(), val copies: List<ServerCopy> = emptyList(), val intro: List<Long> = emptyList(), val recap: List<Long> = emptyList(), val credits: List<Long> = emptyList())
 
 /** `/api/app/subtitles`: [status] "ok", "none" or "quota" (no subtitles today); [subs] best first, English before Arabic. */
 @Serializable

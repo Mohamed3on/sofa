@@ -140,9 +140,12 @@ class FilmPlay(
         onClose()
     }
 
-    /** Next episode from Options: this one's place is kept now, so its leaving saves nothing over the next one's. */
-    fun next(play: () -> Unit) {
-        save()
+    /**
+     * Next episode (from Options, or the card over the credits): this one's place is kept now, so its leaving saves
+     * nothing over the next one's; from the credits ([done]) it counts as finished, as its end would.
+     */
+    fun next(play: () -> Unit, done: Boolean = false) {
+        if (done && started) record(player.duration, player.duration) else save()
         started = false
         play()
     }
