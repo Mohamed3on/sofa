@@ -212,11 +212,13 @@ export function judgeSameMatches(): Promise<void> {
   unjudged.clear()
   judging = askJev(STATE, Object.fromEntries(pairs.map(([, [p, l]], i) => [`q${i}`, sameQuestion(p, l)])))
     .then(async (answers) => {
-      const all = { ...verdicts.read(true) }
-      pairs.forEach(([k], i) => { const n = answers[`q${i}`]?.noul; if (typeof n === 'number') all[k] = n })
-      const keys = Object.keys(all)
-      for (const k of keys.slice(0, Math.max(0, keys.length - KEEP_VERDICTS))) delete all[k] // oldest first
-      await verdicts.write(all)
+      await verdicts.update((cur) => {
+        const all = { ...cur }
+        pairs.forEach(([k], i) => { const n = answers[`q${i}`]?.noul; if (typeof n === 'number') all[k] = n })
+        const keys = Object.keys(all)
+        for (const k of keys.slice(0, Math.max(0, keys.length - KEEP_VERDICTS))) delete all[k] // oldest first
+        return all
+      })
     })
     .catch((e) => console.warn(`same-match judge: ${e instanceof Error ? e.message : e}`))
     .finally(() => { judging = undefined })

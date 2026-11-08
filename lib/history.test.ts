@@ -2,7 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { followed, nextEpisodes, refreshHistory, type Kept } from './history'
+import { editHistory, followed, keepRefreshed, loadHistory, nextEpisodes, refreshHistory, type Kept } from './history'
 import { resetTrakt } from './trakt'
 
 const none: Kept = { at: 0, trakt: 'off', letterboxd: 'off', lb: [], movies: [], eps: [], shows: {}, hidden: [], watchlist: [] }
@@ -72,4 +72,18 @@ test("a show whose next episode aired yesterday enters Up next as a new episode"
   expect(next).toEqual([{ show: 'tv:95396', ep: 'tv:95396:s1e4', c: 'S1 E4', en: 'E4', air: day(1), new: 1 }])
   // Caught up: nothing.
   expect(await nextEpisodes(follow, async () => [ep(1, 30), ep(2, 23), ep(3, 16)])).toEqual([])
+})
+
+test('marks and watchlist changes made during a refresh survive it', async () => {
+  process.env.HISTORY_FILE = join(mkdtempSync(join(tmpdir(), 'history-')), 'history.json')
+  writeFileSync(process.env.HISTORY_FILE, JSON.stringify({ ...none, movies: ['movie:1'] }))
+  const started = Date.now()
+  // while Trakt is read: the stick marks a film, rates one and adds a show to the watchlist
+  await editHistory({ title: 'movie:2', watched: true })
+  await editHistory({ title: 'movie:1', rating: 8 })
+  await editHistory({ title: 'tv:3', on: true, runtime: 45 })
+  // the refresh, read from Trakt before those landed there
+  const h = await keepRefreshed({ ...none, at: Date.now(), movies: ['movie:1', 'movie:9'] }, started)
+  expect([h.movies, h.rated, h.watchlist, h.runtimes]).toEqual([['movie:2', 'movie:1', 'movie:9'], { 'movie:1': 8 }, ['tv:3'], { 'tv:3': 45 }])
+  expect(await loadHistory()).toEqual(h)
 })

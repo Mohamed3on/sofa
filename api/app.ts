@@ -31,7 +31,7 @@ import { liveMatches } from '../lib/live-matches.js'
 import { iptvCopies, markInfringing, titleCopies } from '../lib/copies.js'
 import { curatedGuide, fetchCuratedChannels, saneFps, vodChannels, withBackupFeeds, withCompetitionGroups } from '../lib/curation.js'
 import { backupConfigFromEnv, configFromEnv } from '../lib/provider.js'
-import { currentHistory, historyAnswer, loadHistory, saveHistory, watchedOf, watchlistOf, withMark } from '../lib/history.js'
+import { currentHistory, editHistory, historyAnswer, loadHistory, watchedOf, watchlistOf } from '../lib/history.js'
 import { currentLibrary, knownTitles } from '../lib/library.js'
 import { recordBitrate, recordReading, type Meta } from '../lib/quality.js'
 import { eventsFile } from '../lib/flaky.js'
@@ -320,10 +320,9 @@ export async function watchlist(req: Request) {
   const title = r.title
   const result = await trakt.setWatchlist(title, r.on)
   if (result !== 'ok') return traktRefused(result)
-  const h = await loadHistory()
   // Its runtime too, so the row (shortest first) places it at once.
   const runtime = r.on ? (await tmdbTitle(title.startsWith('tv:') ? 'tv' : 'movie', title.split(':')[1]))?.runtime : 0
-  if (h) await saveHistory({ ...h, watchlist: [...(r.on ? [title] : []), ...h.watchlist.filter((t) => t !== title)], ...(runtime && { runtimes: { ...h.runtimes, [title]: runtime } }) })
+  const h = await editHistory({ title, on: r.on, ...(runtime && { runtime }) })
   // Off the Letterboxd watchlist too, by the owner's browser (lib/letterboxd-log.ts); the row leaves it out meanwhile.
   if (!r.on && h?.lbw?.includes(title)) await noteMark(title, { watchlist: false })
   return new Response(null, { status: 204 })
@@ -346,8 +345,7 @@ export async function mark(req: Request) {
   const covered = show ? (await tmdbEpisodes(m[2], show.seasons)).filter((e) => (m[3] ? e.season === +m[3] : e.season > 0)).map((e) => episodeTitle(`tv:${m[2]}`, e.season, e.episode)) : [title]
   const result = await trakt.mark(title, { watched: watched as boolean | undefined, rating: rating as number | null | undefined }, m[3] ? [] : show?.seasons)
   if (result !== 'ok') return traktRefused(result)
-  const h = await loadHistory()
-  if (h) await saveHistory(withMark(h, title, covered, watched as boolean | undefined, rating as number | null | undefined))
+  await editHistory({ title, covered, watched: watched as boolean | undefined, rating: rating as number | null | undefined })
   await noteMark(title, { watched: watched as boolean | undefined, rating: rating as number | null | undefined })
   return new Response(null, { status: 204 })
 }

@@ -102,12 +102,15 @@ export function detailRank(m: Meta | null | undefined): number {
 
 const store = jsonFile<Readings>(() => process.env.QUALITY_FILE ?? fileURLToPath(new URL('../.cache/quality.json', import.meta.url)), () => ({}))
 
-/** Applies [change] to the latest readings and saves them when it changed any. */
+/** Applies [change] to a copy of the latest readings and saves it when it changed any. */
 async function update(change: (readings: Readings) => boolean): Promise<boolean> {
-  const readings = store.read(true)
-  if (!change(readings)) return false
-  await store.write(readings)
-  return true
+  let changed = false
+  await store.update((cur) => {
+    const readings = { ...cur }
+    changed = change(readings)
+    return changed ? readings : cur
+  })
+  return changed
 }
 
 /** A feed's reading: undefined when never probed, null when probed with no picture. */

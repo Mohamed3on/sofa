@@ -102,7 +102,7 @@ await Bun.write(cache, JSON.stringify(verdicts))
 const matches: Record<string, string[]> = {}
 for (const [id, { guide }] of Object.entries(verdicts)) if (guide && ours.has(id)) (matches[guide] ??= []).push(id)
 const sorted = Object.fromEntries(Object.keys(matches).sort().map((g) => [g, matches[g].sort()]))
-await epgMatchesFile.write(sorted)
+await epgMatchesFile.update(() => sorted)
 for (const [g, ids] of Object.entries(sorted)) for (const id of ids) console.log(`${ours.get(id)!.name}  →  ${g}`)
 console.log(`${unmatched.length} unmatched channels; asked Jev about ${todo.length}; ${Object.values(sorted).flat().length} matched`)
 console.log(`Jev: ${jevTokens()} input tokens ($${(jevTokens() * 0.042e-6).toFixed(4)})`)

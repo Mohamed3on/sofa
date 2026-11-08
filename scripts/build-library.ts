@@ -9,7 +9,7 @@
 // Usage: bun scripts/build-library.ts   (XTREAM_*, TMDB_TOKEN, TRAKT_CLIENT_ID, MDBLIST_KEY from env / .env.local)
 import { readFile } from 'node:fs/promises'
 import { dubbedFilms } from '../lib/arabp2p.js'
-import { historyTitles, loadHistory, refreshHistory, saveHistory, watchedOf, watchlistRuntimes } from '../lib/history.js'
+import { historyTitles, keepRefreshed, loadHistory, refreshHistory, updateHistory, watchedOf, watchlistRuntimes } from '../lib/history.js'
 import { LIBRARY_FILE, LIBRARY_FULL_FILE, providerTitles, rebuildLibrary, saveLibrary, withProviderCopies, type Library } from '../lib/library.js'
 import { configFromEnv } from '../lib/provider.js'
 import { imdbTopShows, letterboxdFilms, letterboxdLists, loadScores, refreshScores, saveScores } from '../lib/ratings.js'
@@ -22,7 +22,8 @@ import { readOnlyTokens } from '../lib/trakt.js'
 // Only the server refreshes Trakt's tokens.
 readOnlyTokens()
 const kept = await loadHistory()
-let history = await refreshHistory(kept, { full: true }).then(async (h) => (await saveHistory(h), h)).catch((e) => (console.log(`history not read: ${e}`), kept))
+const started = Date.now()
+let history = await refreshHistory(kept, { full: true }).then((h) => keepRefreshed(h, started)).catch((e) => (console.log(`history not read: ${e}`), kept))
 
 if (!process.env.TMDB_TOKEN) {
   console.log('TMDB_TOKEN unset: library not built')
@@ -32,8 +33,8 @@ if (!process.env.TMDB_TOKEN) {
 if (history) {
   const runtimes = await watchlistRuntimes(history)
   // Onto the history as it is now: the server may have written it meanwhile.
-  history = { ...((await loadHistory()) ?? history), runtimes }
-  await saveHistory(history)
+  const h = history
+  history = await updateHistory((cur) => ({ ...(cur ?? h), runtimes }))
 }
 
 const cfg = configFromEnv()

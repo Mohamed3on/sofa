@@ -4,10 +4,9 @@
 // (200 titles a request at night), IMDb weekly (100 a request), both daily for new releases ([due]); a title page asks
 // whatever is due at once ([scoreNow]). scripts/build-library.ts runs the nightly part.
 import { readFileSync, statSync, watch } from 'node:fs'
-import { readFile } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { writeAtomic } from './fs.js'
+import { jsonFile } from './fs.js'
 import { due, sum, type ScoreCache, type ScoreEntry, type StoreFilm, type StoreList } from './scores.js'
 import { parseTitleId, tmdbGet } from './tmdb.js'
 
@@ -176,15 +175,19 @@ export async function refreshScores(ids: string[], fresh: Set<string>, cache: Sc
 
 export const SCORES_FILE = fileURLToPath(new URL('../.cache/scores.json', import.meta.url))
 const OLD = new Set(['tk', 'd', 'ta']) // Trakt's answers, kept by older builds
-export const loadScores = (file = SCORES_FILE): Promise<ScoreCache> => readFile(file, 'utf8').then((s) => JSON.parse(s, (k, v) => (OLD.has(k) ? undefined : v)) as ScoreCache, () => ({}))
+const parseScores = (s: string) => JSON.parse(s, (k, v) => (OLD.has(k) ? undefined : v)) as ScoreCache
+const scoresFile = (file: string) => jsonFile<ScoreCache>(() => file, () => ({}), parseScores)
+export const loadScores = async (file = SCORES_FILE): Promise<ScoreCache> => scoresFile(file).read(true)
 /**
- * Writes [cache] atomically (temp + rename), merged over the file's entries field by field, so the nightly job
+ * Writes [cache] merged over the file's entries field by field, under the file's lock, so the nightly job
  * keeps what title pages asked meanwhile ([scoreNow]) and a title page's ask keeps the night's work.
  */
 export const saveScores = async (cache: ScoreCache, file = SCORES_FILE) => {
-  const disk = await loadScores(file)
-  for (const id in cache) disk[id] = { ...disk[id], ...cache[id] }
-  return writeAtomic(file, disk)
+  await scoresFile(file).update((disk) => {
+    const out = { ...disk }
+    for (const id in cache) out[id] = { ...disk[id], ...cache[id] }
+    return out
+  })
 }
 
 let mdbDay = '', mdbLeft = 0, saving = Promise.resolve()

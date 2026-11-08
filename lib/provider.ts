@@ -121,7 +121,7 @@ function snapshot<T>(name: string, pull: (cfg: XtreamConfig) => Promise<T | null
     (pulling ??= (async () => {
       tried = Date.now()
       const data = await pull(cfg).catch(() => null)
-      if (data) await file.write({ at: Date.now(), data }).catch(() => {}) // a background refresh must not throw
+      if (data) await file.update(() => ({ at: Date.now(), data })).catch(() => {}) // a background refresh must not throw
     })().finally(() => (pulling = null)))
   return async (cfg: XtreamConfig): Promise<T> => {
     let saved = file.read()

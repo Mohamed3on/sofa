@@ -37,13 +37,15 @@ const store = jsonFile<Store | LetterboxdLog[]>(
   () => ({ pending: [], made: {} }),
 )
 // The first queue was a bare list of logs.
-const read = (): Store => { const s = store.read(true); return Array.isArray(s) ? { pending: s.map((l) => ({ ...l, log: true as const })), made: {} } : s }
+const current = (s: Store | LetterboxdLog[]): Store => (Array.isArray(s) ? { pending: s.map((l) => ({ ...l, log: true as const })), made: {} } : s)
+const read = (): Store => current(store.read(true))
+const change = (f: (s: Store) => Store) => store.update((s) => f(current(s)))
 
 const isEmpty = (l: LetterboxdLog) => !l.log && l.rating === undefined && !l.unlog?.length && l.watchlist === undefined
 
-function put(s: Store, tmdb: number, next: LetterboxdLog | null) {
+function put(s: Store, tmdb: number, next: LetterboxdLog | null): Store {
   const rest = s.pending.filter((l) => l.tmdb !== tmdb)
-  return store.write({ ...s, pending: next && !isEmpty(next) ? [...rest, next] : rest })
+  return { ...s, pending: next && !isEmpty(next) ? [...rest, next] : rest }
 }
 
 /**
@@ -51,24 +53,25 @@ function put(s: Store, tmdb: number, next: LetterboxdLog | null) {
  * to be deleted, which then stay. Unwatched: an entry not yet added never is, and the ones the app made are deleted.
  * A rating set or cleared and a watchlist change go as asked. Anything but a film (movie:N) is left out.
  */
-export async function noteMark(title: string, change: { watched?: boolean; rating?: number | null; watchlist?: boolean; at?: number }): Promise<void> {
+export async function noteMark(title: string, mark: { watched?: boolean; rating?: number | null; watchlist?: boolean; at?: number }): Promise<void> {
   const tmdb = Number(title.match(/^movie:(\d+)$/)?.[1])
   if (!tmdb) return
-  const s = read()
-  const next: LetterboxdLog = { ...(s.pending.find((l) => l.tmdb === tmdb) ?? { tmdb, at: 0 }) }
-  const at = change.at ?? Date.now()
-  if (change.watched === true) {
-    if (next.unlog) delete next.unlog
-    else Object.assign(next, { log: true, at })
-  } else if (change.watched === false) {
-    delete next.log
-    const made = s.made[tmdb] ?? []
-    if (made.length) next.unlog = made
-  }
-  if (change.rating !== undefined) next.rating = change.rating
-  if (change.watchlist !== undefined) next.watchlist = change.watchlist
-  if (!next.at) next.at = at
-  await put(s, tmdb, next)
+  const at = mark.at ?? Date.now()
+  await change((s) => {
+    const next: LetterboxdLog = { ...(s.pending.find((l) => l.tmdb === tmdb) ?? { tmdb, at: 0 }) }
+    if (mark.watched === true) {
+      if (next.unlog) delete next.unlog
+      else Object.assign(next, { log: true, at })
+    } else if (mark.watched === false) {
+      delete next.log
+      const made = s.made[tmdb] ?? []
+      if (made.length) next.unlog = made
+    }
+    if (mark.rating !== undefined) next.rating = mark.rating
+    if (mark.watchlist !== undefined) next.watchlist = mark.watchlist
+    if (!next.at) next.at = at
+    return put(s, tmdb, next)
+  })
 }
 
 /** The changes waiting for the browser, oldest first. */
@@ -79,22 +82,23 @@ export const pendingLogs = (): LetterboxdLog[] => read().pending.slice().sort((a
  * stays), the diary entries it added join the app's own, and the ones it deleted leave them.
  */
 export async function logged(done: Done[]): Promise<void> {
-  const s = read()
-  const made = { ...s.made }
-  let pending = s.pending
-  for (const d of done) {
-    if (d.made) made[d.tmdb] = [...(made[d.tmdb] ?? []), d.made]
-    if (d.unlog) made[d.tmdb] = (made[d.tmdb] ?? []).filter((id) => !d.unlog!.includes(id))
-    if (!made[d.tmdb]?.length) delete made[d.tmdb]
-    pending = pending.flatMap((l) => {
-      if (l.tmdb !== d.tmdb) return [l]
-      const left: LetterboxdLog = { ...l }
-      if (d.log && l.log && l.at === d.at) delete left.log
-      if (d.rating !== undefined && l.rating === d.rating) delete left.rating
-      if (d.unlog && l.unlog) left.unlog = l.unlog.filter((id) => !d.unlog!.includes(id))
-      if (d.watchlist !== undefined && l.watchlist === d.watchlist) delete left.watchlist
-      return isEmpty(left) ? [] : [left]
-    })
-  }
-  await store.write({ pending, made })
+  await change((s) => {
+    const made = { ...s.made }
+    let pending = s.pending
+    for (const d of done) {
+      if (d.made) made[d.tmdb] = [...(made[d.tmdb] ?? []), d.made]
+      if (d.unlog) made[d.tmdb] = (made[d.tmdb] ?? []).filter((id) => !d.unlog!.includes(id))
+      if (!made[d.tmdb]?.length) delete made[d.tmdb]
+      pending = pending.flatMap((l) => {
+        if (l.tmdb !== d.tmdb) return [l]
+        const left: LetterboxdLog = { ...l }
+        if (d.log && l.log && l.at === d.at) delete left.log
+        if (d.rating !== undefined && l.rating === d.rating) delete left.rating
+        if (d.unlog && l.unlog) left.unlog = l.unlog.filter((id) => !d.unlog!.includes(id))
+        if (d.watchlist !== undefined && l.watchlist === d.watchlist) delete left.watchlist
+        return isEmpty(left) ? [] : [left]
+      })
+    }
+    return { pending, made }
+  })
 }

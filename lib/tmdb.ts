@@ -6,9 +6,8 @@
 // TMDB details (IMDb id, original language, runtime, cast, recommendations) are fetched only when
 // TMDB_TOKEN is set, and kept in .cache/tmdb-titles.json for 30 days; without the token everything
 // still answers, with title ids from the provider's tmdb column and no TMDB facts.
-import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { writeAtomic } from './fs.js'
+import { jsonFile } from './fs.js'
 import { getJson, HttpError } from './http.js'
 
 const tmdbId = (v: unknown) => {
@@ -163,11 +162,23 @@ function trim(kind: Kind, r: Raw): TmdbTitle {
 const MAX_AGE_MS = 30 * 864e5
 const cacheFile = () => process.env.TMDB_CACHE_FILE ?? fileURLToPath(new URL('../.cache/tmdb-titles.json', import.meta.url))
 type Entry = { at: number; t?: TmdbTitle | null; e?: TmdbEpisode[]; c?: TmdbPart[]; l?: string }
-let cache: Promise<Record<string, Entry>> | null = null
-const loaded = () => (cache ??= readFile(cacheFile(), 'utf8').then((s) => JSON.parse(s) as Record<string, Entry>).catch(() => ({} as Record<string, Entry>)))
+// The server and the nightly library build both add entries: each process's go to the file in batches
+// through update() (fs.ts), one write at a time, and the file is read again when the other writes it.
+const store = jsonFile<Record<string, Entry>>(cacheFile, () => ({}))
+const unsaved = new Map<string, Entry>()
+let saving: Promise<void> | null = null
+const get = (k: string): Entry | undefined => unsaved.get(k) ?? store.read()[k]
+function put(k: string, e: Entry) {
+  unsaved.set(k, e)
+  saving ??= (async () => {
+    while (unsaved.size) {
+      const batch = new Map(unsaved)
+      await store.update((cur) => ({ ...cur, ...Object.fromEntries(batch) })).catch(() => {})
+      for (const [key, v] of batch) if (unsaved.get(key) === v) unsaved.delete(key)
+    }
+  })().finally(() => (saving = null))
+}
 const pending = new Map<string, Promise<TmdbTitle | null>>()
-
-const save = (all: Record<string, Entry>) => writeAtomic(cacheFile(), all).catch(() => {})
 
 /** GET a TMDB v3 path ("discover/movie?with_genres=35"). A v3 API key (32 hex) goes in the query; a v4 read token as a Bearer header. */
 export function tmdbGet<T>(path: string, key = process.env.TMDB_TOKEN ?? ''): Promise<T> {
@@ -185,12 +196,12 @@ export async function tmdbTitle(kind: Kind, id: string | number): Promise<TmdbTi
   const tmdb = tmdbId(id)
   if (!key || !tmdb) return null
   const k = `${kind}:${tmdb}`
-  const all = await loaded()
+  const entry = get(k)
   // An entry kept before plots and backdrops, recommendations' votes, trailers, original titles, or genre ids were is fetched again;
   // a running show's daily, as its next episode moves.
-  const kept = all[k]?.t
+  const kept = entry?.t
   const maxAge = kept?.status === 'Returning Series' ? 864e5 : MAX_AGE_MS
-  if (all[k] && Date.now() - all[k].at < maxAge && (!kept || (kept.plot !== undefined && (kept.recommendations[0] ?? { votes: 0 }).votes !== undefined && kept.trailer !== undefined && kept.originalTitle !== undefined && kept.genreIds !== undefined))) return kept ?? null
+  if (entry && Date.now() - entry.at < maxAge && (!kept || (kept.plot !== undefined && (kept.recommendations[0] ?? { votes: 0 }).votes !== undefined && kept.trailer !== undefined && kept.originalTitle !== undefined && kept.genreIds !== undefined))) return kept ?? null
   let job = pending.get(k)
   if (!job) {
     job = tmdbGet<Raw>(`${kind}/${tmdb}?append_to_response=external_ids,credits,recommendations,videos&include_video_language=${VIDEO_LANGUAGES}`, key)
@@ -200,10 +211,9 @@ export async function tmdbTitle(kind: Kind, id: string | number): Promise<TmdbTi
         throw e
       })
       .then((t) => {
-        all[k] = { at: Date.now(), t }
-        save(all)
+        put(k, { at: Date.now(), t })
         return t
-      }, () => all[k]?.t ?? null)
+      }, () => entry?.t ?? null)
       .finally(() => pending.delete(k))
     pending.set(k, job)
   }
@@ -218,19 +228,18 @@ export async function tmdbCollection(id: number): Promise<TmdbPart[]> {
   const key = process.env.TMDB_TOKEN
   if (!key) return []
   const k = `collection:${id}`
-  const all = await loaded()
-  if (all[k] && Date.now() - all[k].at < MAX_AGE_MS) return all[k].c ?? []
+  const entry = get(k)
+  if (entry && Date.now() - entry.at < MAX_AGE_MS) return entry.c ?? []
   try {
     const r = await tmdbGet<{ parts?: TmdbPart[] }>(`collection/${id}`, key)
     const c = (r.parts ?? [])
       .filter((p) => p.release_date)
       .sort((a, b) => a.release_date!.localeCompare(b.release_date!))
       .map(({ id, title, release_date, poster_path, backdrop_path, original_language, genre_ids }) => ({ id, title, release_date, poster_path, backdrop_path, original_language, genre_ids }))
-    all[k] = { at: Date.now(), c }
-    save(all)
+    put(k, { at: Date.now(), c })
     return c
   } catch {
-    return all[k]?.c ?? []
+    return entry?.c ?? []
   }
 }
 
@@ -258,24 +267,20 @@ export async function tmdbLogo(kind: Kind, id: string | number): Promise<string>
   const tmdb = tmdbId(id)
   if (!key || !tmdb) return ''
   const k = `logo:${kind}:${tmdb}`
-  const all = await loaded()
-  if (all[k] && Date.now() - all[k].at < MAX_AGE_MS) return all[k].l ?? ''
+  const entry = get(k)
+  if (entry && Date.now() - entry.at < MAX_AGE_MS) return entry.l ?? ''
   try {
     const r = await tmdbGet<{ logos?: TmdbLogo[] }>(`${kind}/${tmdb}/images?include_image_language=en,null`, key)
     const l = pickLogo(r.logos ?? [])
-    all[k] = { at: Date.now(), l }
-    save(all)
+    put(k, { at: Date.now(), l })
     return l
   } catch {
-    return all[k]?.l ?? ''
+    return entry?.l ?? ''
   }
 }
 
 /** Runtimes in minutes (a show's: an episode's) from the kept details, whatever their age, by title id; never asks TMDB. */
-export const keptRuntimes = async () => {
-  const all = await loaded()
-  return (id: string) => all[id]?.t?.runtime || undefined
-}
+export const keptRuntimes = async () => (id: string) => get(id)?.t?.runtime || undefined
 
 /** [id]'s runtime: the kept one, else TMDB's details asked now; 0 when unknown. Nightly. */
 export async function runtimeOf(id: string): Promise<number> {
@@ -307,9 +312,9 @@ export async function tmdbEpisodes(id: string | number, seasons: number[]): Prom
   const tmdb = tmdbId(id)
   if (!key || !tmdb || !seasons.length) return []
   const k = `tv:${tmdb}:episodes`
-  const all = await loaded()
+  const entry = get(k)
   // A list kept before episodes had air dates is fetched again.
-  if (all[k] && Date.now() - all[k].at < EPISODES_MAX_AGE_MS && (!all[k].e?.length || all[k].e![0].air)) return all[k].e ?? []
+  if (entry && Date.now() - entry.at < EPISODES_MAX_AGE_MS && (!entry.e?.length || entry.e[0].air)) return entry.e ?? []
   const today = new Date().toISOString().slice(0, 10)
   const asked = [...seasons, Math.max(...seasons) + 1] // TMDB leaves out a season it doesn't have
   const chunks = Array.from({ length: Math.ceil(asked.length / 20) }, (_, i) => asked.slice(i * 20, i * 20 + 20))
@@ -320,10 +325,9 @@ export async function tmdbEpisodes(id: string | number, seasons: number[]): Prom
       .filter((x) => x.air_date && x.air_date <= today)
       .map((x) => ({ season: x.season_number, episode: x.episode_number, title: x.name ?? '', secs: (x.runtime ?? 0) * 60, image: tmdbImage(x.still_path, 'w300'), air: x.air_date! }))
       .sort((a, b) => a.season - b.season || a.episode - b.episode)
-    all[k] = { at: Date.now(), e }
-    save(all)
+    put(k, { at: Date.now(), e })
     return e
   } catch {
-    return all[k]?.e ?? []
+    return entry?.e ?? []
   }
 }

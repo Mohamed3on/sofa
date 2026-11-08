@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises'
 import { pendingLogs } from './letterboxd-log.js'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
-import { writeAtomic } from './fs.js'
+import { jsonFile, writeAtomic } from './fs.js'
 import { pool, ROW_CAP } from './library.js'
 import { decorate, fromDetails, type Known, type LibTitle } from './titles.js'
 import { episodeTitle, parseTitleId, tmdbEpisodes, tmdbTitle, type Kind, type TmdbEpisode } from './tmdb.js'
@@ -51,7 +51,12 @@ export interface Kept {
   imdb?: Record<string, number>
   /** Watchlist titles' runtimes in minutes (a show's episode), from TMDB nightly ([watchlistRuntimes]). */
   runtimes?: Record<string, number>
+  /** The stick's marks and watchlist changes of the last hour, which a refresh begun before one landed replays ([keepRefreshed]). */
+  edits?: Edit[]
 }
+
+/** A mark (POST /api/app/mark: [covered], watched or not, a rating set or cleared) or a watchlist change ([on], with the title's runtime). */
+export interface Edit { at: number; title: string; covered?: string[]; watched?: boolean; rating?: number | null; on?: boolean; runtime?: number }
 type TraktPart = Pick<Kept, 'trakt' | 'acts' | 'movies' | 'filmAt' | 'plays' | 'eps' | 'shows' | 'hidden' | 'watchlist' | 'rated'>
 
 const NONE = { movies: [], filmAt: {}, plays: {}, eps: [], shows: {}, hidden: [], watchlist: [], rated: {} }
@@ -199,10 +204,36 @@ export async function refreshHistory(prev: Kept | null, { full = false } = {}): 
   return { at: Date.now(), ...trakt, ...lb, imdb: imdb.ratings ?? prev?.imdb ?? {}, ...(prev && { runtimes: prev.runtimes }) }
 }
 
-export const loadHistory = (file = HISTORY_FILE) => readFile(file, 'utf8').then((s) => JSON.parse(s) as Kept, () => null)
+// The server and the nightly build both write it, so every change goes through update() (fs.ts).
+const store = jsonFile<Kept | null>(() => process.env.HISTORY_FILE ?? HISTORY_FILE, () => null)
 
-/** Writes the history atomically (temp + rename): the server and the nightly build both write it. */
-export const saveHistory = (h: Kept, file = HISTORY_FILE) => writeAtomic(file, h)
+/** The kept history as it is on disk now; null before the first refresh. */
+export const loadHistory = async () => store.read(true)
+
+/** Applies [change] to the kept history as it is on disk now, under the file's lock. */
+export const updateHistory = (change: (h: Kept | null) => Kept | null) => store.update(change)
+
+const EDITS_MS = 3600e3
+// Trakt's own reads may lag a write a little, so a refresh replays the edits from a minute before it began.
+const LAG_MS = 60e3
+const recent = (edits: Edit[] = [], now = Date.now()) => edits.filter((e) => now - e.at < EDITS_MS)
+const applyEdit = (h: Kept, e: Edit): Kept => (e.on !== undefined ? withWatchlist(h, e.title, e.on, e.runtime) : withMark(h, e.title, e.covered ?? [e.title], e.watched, e.rating))
+
+/** Applies a mark or watchlist change the stick made to the kept history, and notes it for refreshes under way; nothing before the first refresh. */
+export const editHistory = (edit: Omit<Edit, 'at'>) => {
+  const e = { ...edit, at: Date.now() }
+  return store.update((h) => h && { ...applyEdit(h, e), edits: [...recent(h.edits), e] })
+}
+
+/**
+ * Keeps [next], a refresh begun at [started], as the history: with the edits made since it began
+ * replayed onto it (what it read may predate them) and the runtimes the nightly build kept meanwhile.
+ */
+export const keepRefreshed = (next: Kept, started: number) =>
+  store.update((cur) => {
+    const edits = recent(cur?.edits)
+    return edits.filter((e) => e.at >= started - LAG_MS).reduce(applyEdit, { ...next, runtimes: cur?.runtimes ?? next.runtimes, edits })
+  }) as Promise<Kept>
 
 const FRESH_MS = 10 * 60e3
 let reading: Promise<Kept | null> | null = null
@@ -212,9 +243,8 @@ export function currentHistory(): Promise<Kept | null> {
   return (reading ??= (async () => {
     const prev = await loadHistory()
     if (prev && Date.now() - prev.at < FRESH_MS) return prev
-    const next = await refreshHistory(prev)
-    await saveHistory(next)
-    return next
+    const started = Date.now()
+    return keepRefreshed(await refreshHistory(prev), started)
   })().finally(() => (reading = null)))
 }
 
@@ -299,6 +329,10 @@ export async function watchlistRuntimes(h: Kept): Promise<Record<string, number>
 
 /** [ids] shortest runtime first ([Kept.runtimes]); unknown ones last, in their order. */
 const byRuntime = (h: Kept | null, ids: string[]) => ids.slice().sort((a, b) => (h?.runtimes?.[a] || 1e9) - (h?.runtimes?.[b] || 1e9))
+
+/** [h] with [title] put on the Watchlist first ([on], its runtime kept so the row, shortest first, places it at once) or taken off. */
+export const withWatchlist = (h: Kept, title: string, on: boolean, runtime?: number): Kept =>
+  ({ ...h, watchlist: [...(on ? [title] : []), ...h.watchlist.filter((t) => t !== title)], ...(runtime && { runtimes: { ...h.runtimes, [title]: runtime } }) })
 
 /** [h] with a mark the stick wrote to Trakt (POST /api/app/mark): [covered], its films or episodes, watched or not; its Trakt rating set or cleared. */
 export function withMark(h: Kept, title: string, covered: string[], watched?: boolean, rating?: number | null): Kept {

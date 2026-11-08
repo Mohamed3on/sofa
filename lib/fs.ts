@@ -1,5 +1,5 @@
-import { readFileSync, statSync } from 'node:fs'
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
+import { readFileSync, statSync, writeFileSync } from 'node:fs'
+import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 const writes = new Map<string, Promise<void>>()
@@ -27,11 +27,41 @@ export function writeAtomic(file: string, data: unknown, mode?: number): Promise
   return next
 }
 
+// A crashed holder's lock is taken over after this; an update holds it for milliseconds.
+const LOCK_STALE_MS = 30_000
+
+/** Runs [fn] holding [file]'s lock (`<file>.lock`, created exclusively), which every process updating the file takes. */
+async function locked<R>(file: string, fn: () => Promise<R>): Promise<R> {
+  const lock = `${file}.lock`
+  await mkdir(dirname(file), { recursive: true })
+  for (;;) {
+    try {
+      await writeFile(lock, String(process.pid), { flag: 'wx' })
+      break
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
+      const st = await stat(lock).catch(() => null)
+      if (st && Date.now() - st.mtimeMs > LOCK_STALE_MS) await rm(lock, { force: true })
+      else await Bun.sleep(5)
+    }
+  }
+  try {
+    return await fn()
+  } finally {
+    await rm(lock, { force: true })
+  }
+}
+
 /**
  * A JSON data file kept in memory and read again when it changes on disk (looked at once a second
  * at most, or at once with `read(true)`), so another process's write takes effect without a
- * restart. A missing file reads as [empty]. [path] is a function so tests can point it elsewhere;
- * [parse] turns the file's text into the data held (JSON by default).
+ * restart. [path] is a function so tests can point it elsewhere; [parse] turns the file's text into
+ * the data held (JSON by default).
+ *
+ * The same for every caller: a missing file reads as [empty]; so does a malformed one, after its text
+ * is copied to `<file>.malformed` (the next update writes a good file over it, nothing is lost).
+ * Changes go through update(), which re-reads, applies and writes under a lock every process takes,
+ * so the server and the nightly scripts writing one file never drop each other's changes.
  */
 export function jsonFile<T>(path: () => string, empty: () => T, parse: (text: string) => T = JSON.parse) {
   let held: { file: string; version: string; checked: number; data: T } | null = null
@@ -40,19 +70,40 @@ export function jsonFile<T>(path: () => string, empty: () => T, parse: (text: st
     const st = statSync(file, { throwIfNoEntry: false })
     return st ? `${st.ino}:${st.mtimeMs}` : ''
   }
+  const load = (file: string, version: string): T => {
+    if (!version) return empty()
+    const text = readFileSync(file, 'utf8')
+    try {
+      return parse(text)
+    } catch (e) {
+      console.warn(`${file} is malformed (${e}): read as missing, its text kept as ${file}.malformed`)
+      writeFileSync(`${file}.malformed`, text)
+      return empty()
+    }
+  }
+  const read = (now = false): T => {
+    const file = path()
+    const t = Date.now()
+    if (held?.file === file && !now && t - held.checked < 1000) return held.data
+    const version = versionOf(file)
+    if (held?.file !== file || held.version !== version) held = { file, version, checked: t, data: load(file, version) }
+    else held.checked = t
+    return held.data
+  }
   return {
-    read(now = false): T {
+    read,
+    /** Writes [change] of the file as it is on disk now; a change answering its input unchanged writes nothing. Answers the data kept. */
+    update: (change: (cur: T) => T): Promise<T> => {
       const file = path()
-      const t = Date.now()
-      if (held?.file === file && !now && t - held.checked < 1000) return held.data
-      const version = versionOf(file)
-      if (held?.file !== file || held.version !== version) {
-        held = { file, version, checked: t, data: version ? parse(readFileSync(file, 'utf8')) : empty() }
-      } else held.checked = t
-      return held.data
+      return locked(file, async () => {
+        const cur = read(true)
+        const next = change(cur)
+        if (next === cur) return cur
+        await writeAtomic(file, next)
+        // The file is ours until the lock goes, so the held copy is exactly what is on disk.
+        held = { file, version: versionOf(file), checked: Date.now(), data: next }
+        return next
+      })
     },
-    // The held copy's version is left as it was, so the next read loads the file again: another
-    // process's write that landed around this one is picked up, never masked by ours.
-    write: (data: T): Promise<void> => writeAtomic(path(), data),
   }
 }
