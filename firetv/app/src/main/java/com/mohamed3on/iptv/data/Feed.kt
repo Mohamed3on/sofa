@@ -33,6 +33,8 @@ data class Channel(
     val detail: Int = 1,
     /** The provider keeps letting this feed down (the server learns it from the watch log). */
     val flaky: Boolean = false,
+    /** From outside the preferred regions: Live now lists it only when its picture holds up ([liveNow]). */
+    val abroad: Boolean = false,
 ) {
     val identity get() = ChannelIdentity(id, group)
 }

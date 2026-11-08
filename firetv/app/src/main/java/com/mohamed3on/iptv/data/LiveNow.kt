@@ -30,7 +30,8 @@ class SameMatch(channels: List<Channel>) : List<Channel> by channels
 /**
  * Live now from the guide's [airing] matches: one row per (normalized title, start) on a channel in a
  * 🏆 group, by kick-off, each with its channels best first ([BEST_FIRST]), every one on its family's
- * top-ranked feed. Then 🏆 event slots whose name reads as a fixture, one per name.
+ * top-ranked feed, abroad ones only when their picture holds up ([withinBar]). Then 🏆 event slots whose
+ * name reads as a fixture, one per name.
  */
 fun Feed.liveNow(airing: List<Airing>): LiveNow {
     val byTvgId = airing.groupBy { it.tvgId }
@@ -56,7 +57,7 @@ fun Feed.liveNow(airing: List<Airing>): LiveNow {
         val alsoOn = (m.alsoOn + more.map { bestOf(it) }).distinctBy { it.family }.filter { it.family != m.tune.family }
         m.copy(alsoOn = alsoOn)
     }.map { m ->
-        val all = (listOf(m.tune) + m.alsoOn).sortedWith(BEST_FIRST)
+        val all = withinBar((listOf(m.tune) + m.alsoOn).sortedWith(BEST_FIRST))
         m.copy(tune = all.first(), alsoOn = all.drop(1))
     }.sortedBy { it.programme!!.start }
     val slots = trophy.filter { it.slot && it.fixture && it.family !in folded }.distinctBy { it.name }.map { LiveEntry(it.name, null, it, bestOf(it)) }
@@ -69,12 +70,21 @@ fun Feed.liveNow(airing: List<Airing>): LiveNow {
  * language. Like the server's order: a "4K" name is mostly a 1080p feed, so unmeasured it counts as 1080p
  * (an event slot keeps its marker's height, since between matches it shows low filler).
  */
-private val BEST_FIRST = compareBy<Channel> { it.flaky }
-    .thenByDescending { it.h ?: NOMINAL_HEIGHT[it.q]?.let { h -> if (it.slot) h else minOf(h, 1080) } ?: 0 }
+private val PICTURE = compareByDescending<Channel> { height(it) }
     .thenByDescending { c -> c.badges.firstNotNullOfOrNull { FPS.matchEntire(it)?.groupValues?.get(1)?.toInt() } ?: 0 }
     .thenByDescending { it.detail }
     .thenByDescending { it.q }
-    .thenBy { languageRank(it) }
+private val BEST_FIRST = compareBy<Channel> { it.flaky }.then(PICTURE).thenBy { languageRank(it) }
+private fun height(c: Channel) = c.h ?: NOMINAL_HEIGHT[c.q]?.let { h -> if (c.slot) h else minOf(h, 1080) } ?: 0
+
+/**
+ * A match's channels from outside the preferred regions only when 1080p or better and at least as good a
+ * picture as its worst in-region channel; all of them when no in-region channel shows it. Order is kept.
+ */
+internal fun withinBar(channels: List<Channel>): List<Channel> {
+    val worst = channels.filter { !it.abroad }.maxWithOrNull(PICTURE) ?: return channels
+    return channels.filter { !it.abroad || (height(it) >= 1080 && PICTURE.compare(it, worst) <= 0) }
+}
 private val NOMINAL_HEIGHT = mapOf(5 to 2160, 4 to 1080, 3 to 720)
 private val FPS = Regex("""(\d+)fps""")
 

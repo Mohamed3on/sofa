@@ -48,4 +48,29 @@ class LiveNowTest {
         // name, which counts as a 1080p feed of unknown fps.
         assertEquals(listOf(listOf(2, 1, 3), listOf(4)), live.matches.map { m -> listOf(m.tune.id) + m.alsoOn.map { it.id } })
     }
+
+    @Test fun abroadChannelsAreListedOnlyWhenTheirPictureHoldsUp() {
+        val pl = "🏆 Premier League"
+        fun c(id: Int, h: Int, q: Int, abroad: Boolean = false) =
+            Channel(id = id, name = "C$id", group = pl, tvgId = "t$id", family = "f$id", rank = 0, h = h, q = q, abroad = abroad)
+        val title = "Arsenal vs Chelsea - Premier League"
+        fun ids(vararg chs: Channel): List<Int> {
+            val feed = Feed(listOf(pl), ProviderRoute("http://p", "http://v", "u", "p"), chs.toList())
+            val live = feed.liveNow(chs.map { Airing(it.tvgId, title.lowercase(), Programme(0, 7200, title, "", false, true), pl) })
+            return live.matches.flatMap { m -> listOf(m.tune.id) + m.alsoOn.map { it.id } }
+        }
+        val uk720 = c(1, 720, 3)
+        val uk1080 = c(2, 1080, 4)
+        val uk2160 = c(3, 2160, 5)
+        val ab1080 = c(11, 1080, 4, abroad = true)
+        val ab720 = c(12, 720, 3, abroad = true)
+        val ab2160 = c(13, 2160, 5, abroad = true)
+        // 1080p abroad next to 720p in-region, 720p abroad never while anything in-region shows the match
+        assertEquals(listOf(11, 1), ids(uk720, ab1080, ab720))
+        assertEquals(listOf(3), ids(uk2160, ab1080))
+        // nothing in-region: every abroad channel, best first
+        assertEquals(listOf(11, 12), ids(ab720, ab1080))
+        // a better abroad picture leads
+        assertEquals(listOf(13, 2), ids(uk1080, ab2160))
+    }
 }
