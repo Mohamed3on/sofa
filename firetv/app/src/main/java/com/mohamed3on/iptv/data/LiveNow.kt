@@ -64,14 +64,16 @@ fun Feed.liveNow(airing: List<Airing>): LiveNow {
 }
 
 /**
- * A match's channels: steady before ones the provider keeps letting down, then picture quality (marker tier,
- * height, fps, then the detail its bitrate leaves room for); language only between equals.
+ * A match's channels: steady before ones the provider keeps letting down, then picture quality as measured
+ * (height, fps, then the detail its bitrate leaves room for), the name's marker tier only between equals, then
+ * language. Like the server's order: a "4K" name is mostly a 1080p feed, so unmeasured it counts as 1080p
+ * (an event slot keeps its marker's height, since between matches it shows low filler).
  */
 private val BEST_FIRST = compareBy<Channel> { it.flaky }
-    .thenByDescending { it.q }
-    .thenByDescending { it.h ?: NOMINAL_HEIGHT[it.q] ?: 0 }
+    .thenByDescending { it.h ?: NOMINAL_HEIGHT[it.q]?.let { h -> if (it.slot) h else minOf(h, 1080) } ?: 0 }
     .thenByDescending { c -> c.badges.firstNotNullOfOrNull { FPS.matchEntire(it)?.groupValues?.get(1)?.toInt() } ?: 0 }
     .thenByDescending { it.detail }
+    .thenByDescending { it.q }
     .thenBy { languageRank(it) }
 private val NOMINAL_HEIGHT = mapOf(5 to 2160, 4 to 1080, 3 to 720)
 private val FPS = Regex("""(\d+)fps""")

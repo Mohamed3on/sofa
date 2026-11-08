@@ -44,7 +44,8 @@ class LiveNowTest {
         fun on(id: String, title: String, start: Long) = Airing(id, title.lowercase(), Programme(start, start + 7200, title, "", false, true), pl)
         val live = feed.liveNow(listOf(on("d", late, 3600), on("a", early, 0), on("b", early, 0), on("c", early, 0)))
 
-        // The earlier kick-off leads; its 4K channel first, then English over Arabic at equal quality.
-        assertEquals(listOf(listOf(3, 2, 1), listOf(4)), live.matches.map { m -> listOf(m.tune.id) + m.alsoOn.map { it.id } })
+        // The earlier kick-off leads; English over Arabic at equal measured quality, then the unmeasured "4K"
+        // name, which counts as a 1080p feed of unknown fps.
+        assertEquals(listOf(listOf(2, 1, 3), listOf(4)), live.matches.map { m -> listOf(m.tune.id) + m.alsoOn.map { it.id } })
     }
 }
