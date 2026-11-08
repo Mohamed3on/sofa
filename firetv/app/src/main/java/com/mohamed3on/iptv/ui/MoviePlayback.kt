@@ -108,6 +108,23 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.DpSize
+import coil3.compose.AsyncImage
+import coil3.compose.LocalPlatformContext
+import coil3.request.ImageRequest
+import coil3.request.crossfade
+import com.mohamed3on.iptv.data.Episode
+import com.mohamed3on.iptv.data.TitlesClient
+import com.mohamed3on.iptv.data.posterUrl
+import com.mohamed3on.iptv.data.tmdbAt
 import com.mohamed3on.iptv.player.PlayOf
 import com.mohamed3on.iptv.player.openFilmPlay
 import com.mohamed3on.iptv.ui.theme.PanelRow
@@ -246,6 +263,48 @@ internal fun MoviePlayback(
     val controlsHeight = remember { mutableIntStateOf(0) }
     val cornerHeight = remember { mutableIntStateOf(0) }
     val controlsLift = animateFloatAsState(if (controls && !error) controlsHeight.intValue.toFloat() else 0f, Motion.panel(reduced), label = "lift")
+
+    // Post-play: an episode with one after it shows that one's card over its end credits (else its last 20 s);
+    // OK or the 10 s countdown plays it, Back keeps the credits (the file's end then moves on as before).
+    val nextUp = remember(of) { nextUpOf(graph.titles, of) }
+    val credits by remember { opened.plan.state.map { it.answer?.copies?.credits }.distinctUntilChanged() }.collectAsState(null)
+    var card by remember { mutableStateOf(false) }
+    var dismissed by remember { mutableStateOf(false) }
+    val drain = remember { Animatable(0f) }
+    LaunchedEffect(onNext != null && nextUp != null, credits, dismissed) {
+        card = false
+        if (onNext == null || nextUp == null || dismissed) return@LaunchedEffect
+        while (true) {
+            val dur = exo.duration
+            val at = exo.currentPosition
+            card = dur > 0 && at >= creditsStart(credits, dur) && at < dur
+            delay(500)
+        }
+    }
+    // firetv/check.sh: `play:<id>~<seconds>` starts that long before the end, to reach the card quickly.
+    LaunchedEffect(ui.playing) {
+        val back = Check.fromEnd ?: return@LaunchedEffect
+        val dur = exo.duration
+        if (!ui.playing || dur <= 0) return@LaunchedEffect
+        Check.fromEnd = null
+        exo.seekTo((dur - back).coerceAtLeast(0))
+    }
+    fun playNext() {
+        if (dismissed) return
+        dismissed = true
+        onNext?.let { next -> play.next(next, done = true) }
+    }
+    LaunchedEffect(card, ui.playing) {
+        if (!card) return@LaunchedEffect drain.snapTo(0f)
+        if (!ui.playing) return@LaunchedEffect
+        // Reduced motion: the fill steps once a second instead of gliding.
+        if (reduced) while (drain.value < 1f) {
+            delay(1_000)
+            drain.snapTo((drain.value + 1_000f / COUNTDOWN_MS).coerceAtMost(1f))
+        }
+        else drain.animateTo(1f, tween(((1f - drain.value) * COUNTDOWN_MS).toInt(), easing = LinearEasing))
+        playNext()
+    }
     // While the controls show, the bar follows the player; elapsed and remaining recompose once a second.
     LaunchedEffect(controls) {
         while (controls) {
@@ -297,7 +356,7 @@ internal fun MoviePlayback(
                 val down = e.type == KeyEventType.KeyDown
                 val keys = FilmKeys(
                     error = error, panel = panel, seeking = target != null, sessionBack = session.takesBack, controls = controls, playing = exo.playWhenReady,
-                    skip = session.state.value.notice is Notice.Skip,
+                    skip = session.state.value.notice is Notice.Skip, card = card,
                 )
                 val action = filmKey(native.keyCode, down, native.repeatCount, native.eventTime - native.downTime, native.eventTime - lastStep[0], keys)
                 when (action) {
@@ -319,7 +378,9 @@ internal fun MoviePlayback(
                         seekBy(action.by)
                     }
                     FilmAction.Accept -> session.accept()
-                    FilmAction.NextEpisode, FilmAction.DismissCard, FilmAction.Wake -> {}
+                    FilmAction.NextEpisode -> playNext()
+                    FilmAction.DismissCard -> dismissed = true
+                    FilmAction.Wake -> {}
                     FilmAction.Swallow -> {}
                 }
                 if (down && !keys.panel && !keys.error && action != FilmAction.HideControls) kick++
@@ -376,16 +437,21 @@ internal fun MoviePlayback(
             }
         }
 
-        // The corner's Skip button, above the controls while they show (their top edge, on the panel spring).
+        // The corner: the next episode's card or a Skip button, above the controls while they show (on the panel spring).
         val skip = (filmNotice as? Notice.Skip)?.takeIf { !panel && !error }
-        Box(
+        Column(
             Modifier
                 .align(Alignment.BottomEnd)
                 .offset { IntOffset(0, -controlsLift.value.roundToInt()) }
                 .padding(Space.safe)
                 .onSizeChanged { cornerHeight.intValue = it.height },
+            horizontalAlignment = Alignment.End,
         ) {
-            AnimatedVisibility(visible = skip != null, enter = EnterTransition.None, exit = ExitTransition.None) {
+            AnimatedVisibility(visible = card && !panel && !error && nextUp != null, enter = EnterTransition.None, exit = ExitTransition.None) {
+                val shown = reveal()
+                nextUp?.let { NextCard(it, { drain.value }, Modifier.slideFade({ shown.value }, Edge.Right, reduced)) }
+            }
+            AnimatedVisibility(visible = skip != null && !card, enter = EnterTransition.None, exit = ExitTransition.None) {
                 val shown = reveal()
                 // Kept through the fade out, after the notice has gone.
                 var part by remember { mutableStateOf(SkipPart.Intro) }
@@ -525,6 +591,83 @@ private fun SkipButton(label: String, modifier: Modifier = Modifier) {
         maxLines = 1,
         modifier = modifier
             .drawBehind { drawRoundRect(Palette.textPrimary, cornerRadius = CornerRadius(Radius.row.toPx())) }
+            .padding(horizontal = Space.xl, vertical = Space.m),
+    )
+}
+
+/** The next episode's card counts down this long before playing it. */
+private const val COUNTDOWN_MS = 10_000L
+/** Without known credits, the card comes this long before the end. */
+private const val CREDITS_FALLBACK_MS = 20_000L
+private val CARD_WIDTH = 400.dp
+private val STILL = DpSize(128.dp, 72.dp)
+private val STILL_SHAPE = RoundedCornerShape(Radius.row)
+/** "Episode 4" says nothing a number doesn't. */
+private val GENERIC_EPISODE = Regex("""(?i)episode\s*\d+""")
+
+/**
+ * Where the card comes: the end credits' start when it falls in this file's last 30% (the box's times are for the
+ * episode, and a different cut can move them), else 20 s before the end.
+ */
+private fun creditsStart(credits: Long?, duration: Long): Long =
+    credits?.takeIf { it in (duration * 7 / 10) until duration } ?: (duration - CREDITS_FALLBACK_MS)
+
+/** The episode after the one playing, as its card shows it. */
+private class NextUp(val episode: Episode, val line: String, val caption: String?, val still: String?)
+
+/** From the show's episodes the app already holds: none for a film, the last episode, or a show not loaded. */
+private fun nextUpOf(titles: TitlesClient, of: PlayOf): NextUp? {
+    val now = of.episode ?: return null
+    val show = titles.peekShowOf(of.title) ?: return null
+    val i = show.episodes.indexOfFirst { if (now.titleId.isNotEmpty()) it.titleId == now.titleId else it.id == now.id }
+    val next = show.episodes.getOrNull(i + 1)?.takeIf { i >= 0 } ?: return null
+    val name = next.title.takeUnless { it.isEmpty() || GENERIC_EPISODE.matches(it) }
+    val still = next.image.ifEmpty { null }?.let { tmdbAt(it, "w300") }
+        ?: show.backdrop.ifEmpty { null }?.let { tmdbAt(it, "w300") }
+        ?: of.title.poster.ifEmpty { null }?.let(::posterUrl)
+    return NextUp(next, listOfNotNull(next.code, name).joinToString(" · "), if (next.season != now.season) "Starts season ${next.season}" else null, still)
+}
+
+/** The next episode's card: its still, "S2 E4 · Title", a new season's word, and Next episode counting down ([drain] 0 → 1). */
+@Composable
+private fun NextCard(next: NextUp, drain: () -> Float, modifier: Modifier = Modifier) {
+    val context = LocalPlatformContext.current
+    val density = LocalDensity.current
+    val request = remember(next.still) {
+        next.still?.let { with(density) { ImageRequest.Builder(context).data(it).size(STILL.width.roundToPx(), STILL.height.roundToPx()).crossfade(Motion.IMAGE_FADE_MS).build() } }
+    }
+    Column(modifier.width(CARD_WIDTH).material().padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.l)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.l), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(STILL).graphicsLayer { shape = STILL_SHAPE; clip = true }.drawBehind { drawRect(Palette.raised) }, contentAlignment = Alignment.Center) {
+                if (request != null) AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                else Text("${next.episode.episode}", style = Type.title.copy(color = Palette.textSecondary))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                ScrollText(next.line, style = Type.headline, lines = 2)
+                next.caption?.let { Text(it, style = Type.caption, maxLines = 1) }
+            }
+        }
+        CountdownButton("Next episode", drain, Modifier.fillMaxWidth())
+    }
+}
+
+/**
+ * A focused page button whose light fill drains right to left as the countdown runs ([drain] read while drawing),
+ * over a dimmer light, so its ink label reads all the way.
+ */
+@Composable
+private fun CountdownButton(label: String, drain: () -> Float, modifier: Modifier = Modifier) {
+    Text(
+        label,
+        style = Type.headline.copy(color = Palette.ink, textAlign = TextAlign.Center),
+        maxLines = 1,
+        modifier = modifier
+            .drawBehind {
+                val r = CornerRadius(Radius.row.toPx())
+                drawRoundRect(Palette.textSecondary, cornerRadius = r)
+                val w = size.width * (1f - drain().coerceIn(0f, 1f))
+                if (w > 0f) clipRect(right = w) { drawRoundRect(Palette.textPrimary, cornerRadius = r) }
+            }
             .padding(horizontal = Space.xl, vertical = Space.m),
     )
 }
