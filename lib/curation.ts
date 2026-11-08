@@ -1399,7 +1399,8 @@ export async function curatedGuide(): Promise<{ channels: Channel[]; xml: string
   if (!guides || Date.now() - guides.at > GUIDE_TTL) {
     // provider EPG doesn't need the channel list, so its download overlaps curation;
     // myepg needs the channels, so it waits for them
-    const providerEpgPromise = fetchProviderEpg(cfg)
+    // a failed download is '' and would be reused for 6h, so it gets one more try 30s later
+    const providerEpgPromise = fetchProviderEpg(cfg).then((x) => x || Bun.sleep(30_000).then(() => fetchProviderEpg(cfg)))
     const job = channelsPromise.then((channels) =>
       Promise.all([providerEpgPromise, fetchMyepgGuide(epgUrls, channels).then(async (g) => (await saveEpgIcons(g.icons), g))]))
     guides = { at: Date.now(), job }
