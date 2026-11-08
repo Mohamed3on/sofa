@@ -47,7 +47,8 @@ export interface AppFeed {
 }
 
 const isComp = (group: string) => group.startsWith('🏆')
-const compLogos = Object.fromEntries(COMPS.filter((c) => c.logo).map((c) => [c.group, `https://a.espncdn.com/combiner/i?img=/i/leaguelogos/soccer/${c.logo}.png&w=64&h=64`]))
+// The full-colour version (made for light grounds): the app sets each on the same light tile, so every logo has one weight and its own colours.
+  const compLogos = Object.fromEntries(COMPS.filter((c) => c.logo).map((c) => [c.group, `https://a.espncdn.com/combiner/i?img=/i/leaguelogos/soccer/${c.logo!.replace('500-dark/', '500/')}.png&w=64&h=64`]))
 
 function badges(streamId: number): string[] {
   const m = qualityOf(streamId)

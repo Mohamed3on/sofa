@@ -111,9 +111,10 @@ internal fun Crest(url: String?, size: Dp = CREST, modifier: Modifier = Modifier
 val LocalCompLogos = staticCompositionLocalOf<Map<String, String>> { emptyMap() }
 
 /**
- * A competition's [group] ("🏆 Premier League") as its logo, then its name: the logo straight on the ground (ESPN draws
- * these for dark ones), on a square [COMP_LOGO] slot held from the start, so the name never moves when it loads. With no
- * logo known, [fallback] reads as it always did.
+ * A competition's [group] ("🏆 Premier League") as its logo, then its name: the logo's full-colour version on a light
+ * [COMP_TILE] tile, as sports apps badge competitions, so a solid mark (Bundesliga) and a line one (Ligue 1) weigh the same
+ * and a thin red one (Copa del Rey) keeps its contrast. The tile is there from the start, so the name never moves when the
+ * logo loads. With no logo known, [fallback] reads as it always did.
  */
 @Composable
 fun CompName(group: String, style: TextStyle, modifier: Modifier = Modifier, fallback: String = group, active: Boolean = LocalFocused.current) {
@@ -122,12 +123,15 @@ fun CompName(group: String, style: TextStyle, modifier: Modifier = Modifier, fal
     val density = LocalDensity.current
     val request = remember(logo) { with(density) { ImageRequest.Builder(context).data(logo).size(COMP_LOGO.roundToPx()).build() } }
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
-        AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(COMP_LOGO))
+        Box(Modifier.size(COMP_TILE).background(Palette.textPrimary, RoundedCornerShape(Radius.chip)), contentAlignment = Alignment.Center) {
+            AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(COMP_LOGO))
+        }
         FitText(remember(group) { groupName(group) }, style, active = active)
     }
 }
 
-/** ESPN's logos sit inside a square canvas, so the mark itself is about 20 dp tall. */
-private val COMP_LOGO = 24.dp
+/** ESPN's logos sit inside a square canvas with its own margin, so the mark fills about 26 of the tile's 30 dp. */
+private val COMP_TILE = 30.dp
+private val COMP_LOGO = 30.dp
 private val CREST = 18.dp
 private val CREST_GAP = 2.dp
