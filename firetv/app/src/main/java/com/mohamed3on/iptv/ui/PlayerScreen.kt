@@ -1,6 +1,7 @@
 package com.mohamed3on.iptv.ui
 
 import android.view.SurfaceView
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
@@ -224,9 +225,11 @@ private fun PlayerChrome(
     var layer by remember { mutableStateOf(Layer.None) }
     // What Up/Down walk: a Live now tune carries its list; a tune from a group carries none (its group).
     var zapContext by remember { mutableStateOf<List<Channel>?>(null) }
-    // The last zap's direction, for the banner's motion; null for a jump (Back to the previous channel).
+    // The last zap's direction, for the banner's motion; null for a jump (a promoted tile).
     var down by remember { mutableStateOf<Boolean?>(true) }
     val focus = remember { FocusRequester() }
+    // Back over the bare picture leaves the app the activity's way (its default back finishes it).
+    val exit = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
     val scope = rememberCoroutineScope()
     // The channel list's search and place, kept between openings; each opening starts afresh (ChannelOverlay).
     val memory = remember { ListMemory() }
@@ -291,10 +294,7 @@ private fun PlayerChrome(
                 down = action.down
                 session.zap(action.to, feed)
             }
-            is KeyAction.Previous -> {
-                down = null
-                session.zap(action.to, feed)
-            }
+            KeyAction.Exit -> exit?.onBackPressed()
             is KeyAction.OpenOverlay -> openList(groups = action.groups)
             KeyAction.ShowInfo -> {
                 val opened = graph.prefs.get(HINT_OPENS_KEY)?.toIntOrNull() ?: 0
@@ -399,7 +399,7 @@ private fun PlayerChrome(
                     return@onKeyEvent key == RemoteKey.Back
                 }
                 if ((layer == Layer.ChannelList || layer == Layer.Recent) && !layerFocused && key != RemoteKey.Back) return@onKeyEvent true
-                val action = keyAction(key, PlayerKeys(state.requested, graph.history.last, graph.history.previous, layer, zapContext, multiView, info), feed)
+                val action = keyAction(key, PlayerKeys(state.requested, layer, zapContext, multiView, info), feed)
                 if (key == RemoteKey.Ok && layer == Layer.None && !multiView && state.requested != null) {
                     if (event.type == KeyEventType.KeyDown && event.nativeKeyEvent.repeatCount > 0) okHeld = true
                     if (event.type == KeyEventType.KeyUp) {
@@ -415,7 +415,7 @@ private fun PlayerChrome(
                     return@onKeyEvent true
                 }
                 if (event.type == KeyEventType.KeyDown) perform(action)
-                true // the key-up too, so Back never reaches the activity and leaves the app
+                true // the key-up too, so Back leaves the app only through Exit
             }
             .focusRequester(focus)
             .focusable(),

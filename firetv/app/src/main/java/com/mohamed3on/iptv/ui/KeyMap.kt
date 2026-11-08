@@ -27,14 +27,12 @@ fun remoteKey(keyCode: Int): RemoteKey? = when (keyCode) {
 enum class Layer { None, ChannelList, Recent, QuickPanel }
 
 /**
- * What a key press needs to know: the requested channel, the watch history, what is open, and the
+ * What a key press needs to know: the requested channel, what is open, and the
  * zap context when the channel was tuned from a list other than its group (Live now); null = its group;
  * and whether multi-view's tiles are on screen.
  */
 data class PlayerKeys(
     val current: Channel?,
-    val last: Watched?,
-    val previous: Watched?,
     val layer: Layer = Layer.None,
     val context: List<Channel>? = null,
     val multiView: Boolean = false,
@@ -44,8 +42,8 @@ data class PlayerKeys(
 
 sealed interface KeyAction {
     data class Zap(val to: Channel, val down: Boolean) : KeyAction
-    /** Back to the channel watched before this one. */
-    data class Previous(val to: Channel) : KeyAction
+    /** Back over the bare picture: leaves the app. */
+    data object Exit : KeyAction
     /** The channel list (U9), focused on [at]'s row, or on its group in the groups column with [groups]. */
     data class OpenOverlay(val at: Channel, val groups: Boolean = false) : KeyAction
     data object OpenPanel : KeyAction
@@ -62,7 +60,7 @@ sealed interface KeyAction {
     data object Promote : KeyAction
     /** Closes the open layer. */
     data object Close : KeyAction
-    /** Swallowed with no effect: Back must never leave the app from the player (Home does). */
+    /** Swallowed with no effect. */
     data object Ignore : KeyAction
     /** Not the player's key: the open layer moves its own focus with it. */
     data object Pass : KeyAction
@@ -98,12 +96,7 @@ fun keyAction(key: RemoteKey, screen: PlayerKeys, feed: Feed): KeyAction {
         // Live can't pause: Play/Pause shows what is on (the info view), and hides it again.
         RemoteKey.PlayPause -> if (screen.info) KeyAction.HideInfo else KeyAction.ShowInfo
         RemoteKey.Menu -> KeyAction.OpenPanel // handled above, with or without a channel
-        RemoteKey.Back -> {
-            if (screen.info) return KeyAction.HideInfo
-            // History records a channel once it plays, so until the requested one does, the last is the one before it.
-            val before = screen.last?.takeIf { it.identity != current.identity } ?: screen.previous
-            before?.let(feed::resolve)?.takeIf { it.identity != current.identity }?.let(KeyAction::Previous) ?: KeyAction.Ignore
-        }
+        RemoteKey.Back -> if (screen.info) KeyAction.HideInfo else KeyAction.Exit
     }
 }
 
