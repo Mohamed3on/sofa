@@ -108,6 +108,11 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -320,6 +325,8 @@ internal fun MoviePlayback(
 
     val commit = remember { arrayOfNulls<Job>(1) }
     val lastStep = remember { longArrayOf(0) }
+    // Where a run of steps began, for the bubble's "+30 s".
+    val seekFrom = remember { longArrayOf(0) }
     fun seekNow() {
         commit[0]?.cancel()
         val to = target ?: return
@@ -329,6 +336,7 @@ internal fun MoviePlayback(
     }
     fun seekBy(delta: Long) {
         val dur = exo.duration
+        if (target == null) seekFrom[0] = exo.currentPosition
         val base = target ?: exo.currentPosition
         target = (base + delta).coerceIn(0, if (dur > 0) (dur - 1_000).coerceAtLeast(0) else Long.MAX_VALUE)
         commit[0]?.cancel()
@@ -445,6 +453,7 @@ internal fun MoviePlayback(
                     duration = { duration.longValue },
                     buffered = { buffered.longValue },
                     seeking = target != null,
+                    seekFrom = { seekFrom[0] },
                     modifier = Modifier.onSizeChanged { controlsHeight.intValue = it.height }.slideFade({ shown.value }, Edge.Bottom, reduced).padding(Space.safe),
                 )
             }
@@ -540,6 +549,7 @@ private fun Controls(
     duration: () -> Long,
     buffered: () -> Long,
     seeking: Boolean,
+    seekFrom: () -> Long,
     modifier: Modifier,
 ) {
     val elapsed by remember { derivedStateOf { playTime(position()) } }
@@ -562,7 +572,7 @@ private fun Controls(
         if (note != null) Text(note, style = Type.body)
         Row(horizontalArrangement = Arrangement.spacedBy(Space.l), verticalAlignment = Alignment.CenterVertically) {
             Text(elapsed, style = TIME_STYLE.copy(color = Palette.textPrimary))
-            SeekBar(position, duration, buffered, seeking, Modifier.weight(1f))
+            SeekBar(position, duration, buffered, seeking, seekFrom, Modifier.weight(1f))
             Text(left, style = TIME_STYLE)
         }
     }
@@ -571,25 +581,63 @@ private fun Controls(
 /** Elapsed and left tick each second: tabular, so the bar between them never twitches. */
 private val TIME_STYLE = Type.body.tabular
 
-/** Played (accent), buffered ahead (faint) and the rest, with a thumb at the place; all read while drawing. */
+/**
+ * Played (accent), buffered ahead (faint) and the rest, with a thumb at the place; while [seeking], a material bubble
+ * above the thumb names where the run of steps lands and how far from [seekFrom] ("1:02:40 · +30 s"). All read while drawing.
+ */
 @Composable
-private fun SeekBar(position: () -> Long, duration: () -> Long, buffered: () -> Long, seeking: Boolean, modifier: Modifier) {
+private fun SeekBar(position: () -> Long, duration: () -> Long, buffered: () -> Long, seeking: Boolean, seekFrom: () -> Long, modifier: Modifier) {
     val grow by animateFloatAsState(if (seeking) 1f else 0f, Motion.focus(), label = "thumb")
+    val measurer = rememberTextMeasurer()
+    // The bubble's last words stay while it fades out, after the seek has gone in.
+    val said = remember { arrayOfNulls<TextLayoutResult>(1) }
     Box(
-        modifier.height(THUMB).drawBehind {
-            val dur = duration().toFloat()
-            val f = if (dur > 0) (position() / dur).coerceIn(0f, 1f) else 0f
-            val b = if (dur > 0) (buffered() / dur).coerceIn(f, 1f) else 0f
-            val h = BAR_HEIGHT.toPx()
-            val top = (size.height - h) / 2
-            val r = CornerRadius(h / 2)
-            drawRoundRect(Palette.track, topLeft = Offset(0f, top), size = Size(size.width, h), cornerRadius = r)
-            drawRoundRect(Palette.track, topLeft = Offset(0f, top), size = Size(size.width * b, h), cornerRadius = r)
-            drawRoundRect(Palette.accent, topLeft = Offset(0f, top), size = Size(size.width * f, h), cornerRadius = r)
-            val thumb = (THUMB.toPx() * (0.6f + 0.4f * grow)) / 2
-            drawCircle(Palette.textPrimary, radius = thumb, center = Offset(size.width * f, size.height / 2))
+        modifier.height(THUMB).drawWithCache {
+            if (seeking) {
+                val to = position()
+                said[0] = measurer.measure("${playTime(to)} · ${jump(to - seekFrom())}", BUBBLE_STYLE)
+            }
+            val pad = Offset(Space.m.toPx(), Space.xs.toPx())
+            val gap = Space.s.toPx()
+            val edge = 1.dp.toPx()
+            val r = CornerRadius(Radius.chip.toPx())
+            onDrawBehind {
+                val dur = duration().toFloat()
+                val f = if (dur > 0) (position() / dur).coerceIn(0f, 1f) else 0f
+                val b = if (dur > 0) (buffered() / dur).coerceIn(f, 1f) else 0f
+                val h = BAR_HEIGHT.toPx()
+                val top = (size.height - h) / 2
+                val bar = CornerRadius(h / 2)
+                drawRoundRect(Palette.track, topLeft = Offset(0f, top), size = Size(size.width, h), cornerRadius = bar)
+                drawRoundRect(Palette.track, topLeft = Offset(0f, top), size = Size(size.width * b, h), cornerRadius = bar)
+                drawRoundRect(Palette.accent, topLeft = Offset(0f, top), size = Size(size.width * f, h), cornerRadius = bar)
+                val thumb = (THUMB.toPx() * (0.6f + 0.4f * grow)) / 2
+                drawCircle(Palette.textPrimary, radius = thumb, center = Offset(size.width * f, size.height / 2))
+                val text = said[0] ?: return@onDrawBehind
+                if (grow <= 0f) return@onDrawBehind
+                val box = Size(text.size.width + pad.x * 2, text.size.height + pad.y * 2)
+                // Centred on the thumb, kept inside the bar's ends.
+                val x = (size.width * f - box.width / 2).coerceIn(0f, (size.width - box.width).coerceAtLeast(0f))
+                val at = Offset(x, -box.height - gap)
+                drawRoundRect(Palette.material, topLeft = at, size = box, cornerRadius = r, alpha = grow)
+                drawRoundRect(Palette.edge, topLeft = at, size = box, cornerRadius = r, style = Stroke(edge), alpha = grow)
+                drawText(text, topLeft = at + pad, alpha = grow)
+            }
         },
     )
+}
+
+private val BUBBLE_STYLE = Type.caption.tabular.copy(color = Palette.textPrimary)
+
+/** A jump in words: "+30 s", "−1 min 10 s", "+1 h 5 min". */
+private fun jump(ms: Long): String {
+    val sign = if (ms < 0) "−" else "+"
+    val s = kotlin.math.abs(ms) / 1000
+    return sign + when {
+        s >= 3600 -> "${s / 3600} h" + (s % 3600 / 60).let { if (it > 0) " $it min" else "" }
+        s >= 60 -> "${s / 60} min" + (s % 60).let { if (it > 0) " $it s" else "" }
+        else -> "$s s"
+    }
 }
 
 /**
