@@ -31,6 +31,7 @@ export const routes: Record<string, Route> = {
   '/api/epg': { gate: 'playlist', cache: { fresh: 900 }, run: epg },
   '/api/app/channels': { gate: 'app', cache: { fresh: 1800, stale: 3600 }, run: app.channels },
   '/api/app/guide': { gate: 'app', cache: { fresh: 900 }, run: app.guide },
+  '/api/app/matches': { gate: 'app', cache: { fresh: 20 }, run: app.matches },
   '/api/app/movies': { gate: 'app', cache: { fresh: 1800, stale: 3600 }, run: app.movies },
   '/api/app/vod-search': { gate: 'app', cache: { fresh: 600, stale: 3600 }, run: app.vodSearch },
   '/api/app/shows': { gate: 'app', cache: { fresh: 1800, stale: 86400 }, run: app.shows },

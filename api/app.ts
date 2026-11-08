@@ -3,6 +3,7 @@
 // header) and owns their caching and errors.
 // GET /api/app/channels?t=TOKEN — groups, channels, feed families, badges and both provider fronts.
 // GET /api/app/guide?t=TOKEN — the guide as a gzip SQLite file the stick opens without parsing.
+// GET /api/app/matches?t=TOKEN — today's football scores and match clocks, by "home_key|away_key" (the guide's crests table).
 // GET /api/app/movies?t=TOKEN — the on-demand library: 4K movies, UFC replays and Blu-ray films.
 // GET /api/app/vod-search?t=TOKEN&q=… — films across the provider's whole catalogue.
 // GET /api/app/version, /api/app/apk, /api/app/dm ?t=TOKEN — the latest build and its dex metadata (the
@@ -25,7 +26,8 @@ import { appendFile, mkdir, rename, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { buildAppFeed, buildAppGuide } from '../lib/app-feed.js'
 import { arabp2pSeasonDubs } from '../lib/arabp2p.js'
-import { crestsReady, titleCrests } from '../lib/crests.js'
+import { crestsReady, titleMatch } from '../lib/crests.js'
+import { liveMatches } from '../lib/live-matches.js'
 import { iptvCopies, markInfringing, titleCopies } from '../lib/copies.js'
 import { curatedGuide, fetchCuratedChannels, saneFps, vodChannels, withBackupFeeds, withCompetitionGroups } from '../lib/curation.js'
 import { backupConfigFromEnv, configFromEnv } from '../lib/provider.js'
@@ -50,8 +52,10 @@ export async function channels() {
 
 export async function guide() {
   const [{ channels, xml }] = await Promise.all([curatedGuide(), crestsReady()])
-  return new Response(buildAppGuide(channels, xml, Date.now(), titleCrests), { headers: { 'Content-Type': 'application/gzip' } })
+  return new Response(buildAppGuide(channels, xml, Date.now(), titleMatch), { headers: { 'Content-Type': 'application/gzip' } })
 }
+
+export const matches = () => liveMatches()
 
 // Builds live in app/, which deploys never touch, at fixed paths never taken from the request.
 // No file extension in the route, so Cloudflare never caches the APK.

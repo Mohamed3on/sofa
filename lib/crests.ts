@@ -18,66 +18,69 @@ const file = () => process.env.CRESTS_FILE ?? fileURLToPath(new URL('../.cache/c
 type Kept = Record<string, { at: number; url: string | null }>
 
 /** ESPN's soccer leagues and cups the household's competitions play in; top leagues first, so a shared short name keeps theirs. */
-const ESPN_LEAGUES = ['eng.1', 'esp.1', 'ger.1', 'ita.1', 'fra.1', 'uefa.champions', 'uefa.europa', 'uefa.europa.conf', 'eng.2', 'por.1', 'ned.1',
+export const ESPN_LEAGUES = ['eng.1', 'esp.1', 'ger.1', 'ita.1', 'fra.1', 'uefa.champions', 'uefa.europa', 'uefa.europa.conf', 'eng.2', 'por.1', 'ned.1',
   'sco.1', 'tur.1', 'ksa.1', 'usa.1', 'eng.fa', 'eng.league_cup', 'esp.copa_del_rey', 'ger.dfb_pokal', 'ita.coppa_italia', 'fra.coupe_de_france']
 const ESPN_MS = 7 * 864e5
 const espnFile = () => process.env.CRESTS_ESPN_FILE ?? fileURLToPath(new URL('../.cache/crests-espn.json', import.meta.url))
-interface EspnTeam { displayName?: string; shortDisplayName?: string; name?: string; location?: string; logos?: { href?: string }[] }
+export interface EspnTeam { displayName?: string; shortDisplayName?: string; name?: string; location?: string; logos?: { href?: string }[] }
 
-/** Team key → crest, from ESPN's lists ([espnTeams] builds it); loaded from disk on first use, fetched again when a week old. */
-let espn: { at: number; teams: Record<string, string> } | null = null
-let espnLoading = false
+/** An ESPN team: its small crest, short name ("Man Utd") and the one key every name of it maps to (its full name's). */
+type EspnEntry = [crest: string, short: string, key: string]
+/** Team key → its ESPN team, from ESPN's lists ([espnTeams] builds it); loaded from disk on first use, fetched again when a week old. */
+let espn: { at: number; teams: Record<string, EspnEntry> } | null = null
+let espnLoading: Promise<void> | null = null
 
-/** Every name an ESPN team goes by, as a key, to a small (64 px) crest; the first league to name a key keeps it. */
-export function espnTeams(lists: EspnTeam[][]): Record<string, string> {
-  const out: Record<string, string> = {}
+/** ESPN's key for a team: its full name's, which its scoreboard rows carry too ([espnKey] of their team). */
+export const espnKey = (t: EspnTeam) => crestKey(t.displayName || t.name || t.location || '')
+
+/** Every name an ESPN team goes by, as a key, to its crest (small, 64 px) and names; the first league to name a key keeps it. */
+export function espnTeams(lists: EspnTeam[][]): Record<string, EspnEntry> {
+  const out: Record<string, EspnEntry> = {}
   for (const teams of lists) for (const t of teams) {
     const href = t.logos?.[0]?.href
     if (!href) continue
     const url = `https://a.espncdn.com/combiner/i?img=${new URL(href).pathname}&w=64&h=64`
+    const entry: EspnEntry = [url, t.shortDisplayName || t.displayName || '', espnKey(t)]
     for (const n of [t.displayName, t.shortDisplayName, t.name, t.location]) {
       const k = n ? crestKey(n) : ''
-      if (k && !(k in out)) out[k] = url
+      if (k && !(k in out)) out[k] = entry
     }
   }
   return out
 }
 
-function espnCrest(key: string): string | null {
+function espnTeam(key: string): EspnEntry | null {
   if (!espn) {
     try { espn = JSON.parse(readFileSync(espnFile(), 'utf8')) } catch { espn = { at: 0, teams: {} } }
+    // Lists kept before they had names (crests only) are read again now, as on a first start.
+    if (typeof Object.values(espn!.teams)[0] === 'string') espn = { at: 0, teams: {} }
   }
-  if (Date.now() - espn!.at > ESPN_MS && !espnLoading && process.env.NODE_ENV !== 'test') void loadEspn()
+  if (Date.now() - espn!.at > ESPN_MS && !espnLoading && process.env.NODE_ENV !== 'test') espnLoading = loadEspn().finally(() => (espnLoading = null))
   return espn!.teams[key] ?? null
 }
 
 async function loadEspn() {
-  espnLoading = true
-  try {
-    const lists: EspnTeam[][] = []
-    for (const league of ESPN_LEAGUES) {
-      try {
-        const res = await getJson<{ sports?: { leagues?: { teams?: { team: EspnTeam }[] }[] }[] }>(`https://site.api.espn.com/apis/site/v2/sports/soccer/${league}/teams`, { timeoutMs: 10_000, retries: 1 })
-        lists.push((res.sports?.[0]?.leagues?.[0]?.teams ?? []).map((t) => t.team))
-      } catch (e) {
-        console.warn(`crests: ESPN ${league}: ${e instanceof Error ? e.message : e}`)
-      }
+  const lists: EspnTeam[][] = []
+  for (const league of ESPN_LEAGUES) {
+    try {
+      const res = await getJson<{ sports?: { leagues?: { teams?: { team: EspnTeam }[] }[] }[] }>(`https://site.api.espn.com/apis/site/v2/sports/soccer/${league}/teams`, { timeoutMs: 10_000, retries: 1 })
+      lists.push((res.sports?.[0]?.leagues?.[0]?.teams ?? []).map((t) => t.team))
+    } catch (e) {
+      console.warn(`crests: ESPN ${league}: ${e instanceof Error ? e.message : e}`)
     }
-    const teams = espnTeams(lists)
-    console.log(`crests: ESPN lists ${lists.length}/${ESPN_LEAGUES.length} leagues, ${Object.keys(teams).length} names`)
-    // A failed run keeps the last lists and tries again in an hour, not a week.
-    if (Object.keys(teams).length < 200) { espn = { at: Date.now() - ESPN_MS + 3_600_000, teams: { ...espn?.teams, ...teams } }; return }
-    espn = { at: Date.now(), teams }
-    await writeAtomic(espnFile(), espn)
-  } finally {
-    espnLoading = false
   }
+  const teams = espnTeams(lists)
+  console.log(`crests: ESPN lists ${lists.length}/${ESPN_LEAGUES.length} leagues, ${Object.keys(teams).length} names`)
+  // A failed run keeps the last lists and tries again in an hour, not a week.
+  if (Object.keys(teams).length < 200) { espn = { at: Date.now() - ESPN_MS + 3_600_000, teams: { ...espn?.teams, ...teams } }; return }
+  espn = { at: Date.now(), teams }
+  await writeAtomic(espnFile(), espn)
 }
 
 /** Before a guide build: ESPN's lists once there are none on disk yet (a first start), a few seconds, so that build already has them. */
 export async function crestsReady() {
-  espnCrest('')
-  if (espn!.at === 0 && !espnLoading && process.env.NODE_ENV !== 'test') await loadEspn()
+  espnTeam('')
+  if (espn!.at === 0) await espnLoading
 }
 interface Team { strTeam: string; strTeamAlternate?: string | null; strSport?: string; strGender?: string; strBadge?: string | null }
 
@@ -156,20 +159,29 @@ function load(): Kept {
 export function crestOf(team: string, onNow = false): string | null {
   const key = crestKey(team)
   if (!key) return null
-  const listed = espnCrest(key)
-  if (listed) return listed
+  const listed = espnTeam(key)
+  if (listed) return listed[0]
   const k = load()[key]
   // While ESPN's lists are still loading, wait for them rather than spend TheSportsDB's slow calls on teams they have.
   if ((!k || Date.now() - k.at > (k.url ? FOUND_MS : NONE_MS)) && !espnLoading) enqueue(key, onNow)
   return k?.url ?? null
 }
 
-/** A match title's crests, home and away, as kept; null when neither is. A match [onNow] is looked up before later ones. */
-export function titleCrests(title: string, onNow = false): [string | null, string | null] | null {
+/** A match title's two teams: crests as kept, the keys its live state is filed under, and short names. */
+export interface TitleMatch { home: string | null; away: string | null; homeKey: string; awayKey: string; homeName: string; awayName: string }
+
+/**
+ * A match title's teams, home first: an ESPN team by its crest, key and short name ("Man Utd"), another by its crest
+ * as kept and the name the title gives it. Null when neither has a crest. A match [onNow] is looked up before later ones.
+ */
+export function titleMatch(title: string, onNow = false): TitleMatch | null {
   const teams = fixtureTeams(title)
   if (!teams) return null
-  const crests = teams.map((t) => crestOf(t, onNow)) as [string | null, string | null]
-  return crests[0] || crests[1] ? crests : null
+  const [h, a] = teams.map((t) => {
+    const e = espnTeam(crestKey(t))
+    return e ? { crest: e[0], name: e[1], key: e[2] } : { crest: crestOf(t, onNow), name: t, key: crestKey(t) }
+  })
+  return h.crest || a.crest ? { home: h.crest, away: a.crest, homeKey: h.key, awayKey: a.key, homeName: h.name, awayName: a.name } : null
 }
 
 function enqueue(key: string, first: boolean) {
