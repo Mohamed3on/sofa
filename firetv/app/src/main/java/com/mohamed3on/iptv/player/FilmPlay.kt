@@ -128,7 +128,7 @@ class FilmPlay(
     }
 
     fun fromStart() {
-        player.seek(0)
+        session.seek(0)
         resume()
     }
 

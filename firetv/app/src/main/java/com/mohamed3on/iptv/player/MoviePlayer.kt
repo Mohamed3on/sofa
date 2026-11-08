@@ -196,7 +196,7 @@ class ExoFilmPlayer(private val exo: ExoPlayer) : FilmPlayer {
             .apply { if (place.subtitles != null) setPreferredTextLanguage(place.subtitles).setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false) }
             .build()
         exo.setMediaItem(MediaItem.fromUri(url), place.position)
-        exo.playWhenReady = true
+        exo.playWhenReady = !place.paused
         exo.prepare()
     }
 

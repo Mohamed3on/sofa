@@ -18,6 +18,7 @@ import com.mohamed3on.iptv.player.OfferKind
 import com.mohamed3on.iptv.player.Passthrough
 import com.mohamed3on.iptv.player.Place
 import com.mohamed3on.iptv.player.SetupProfile
+import com.mohamed3on.iptv.player.SkipPart
 import com.mohamed3on.iptv.player.StreamFailure
 import com.mohamed3on.iptv.player.TitleCopies
 import kotlinx.coroutines.CoroutineScope
@@ -312,6 +313,57 @@ class FilmSessionTest {
         runCurrent()
         assertEquals(2, r.debrid.links)
         assertEquals("https://rd.test/rd:a/2" to Place(MIN, audio = "en"), r.player.opens.last())
+    }
+
+    // #21: paused while the copy still loads, the start timeout waits; resumed, it plays, and Skip still comes.
+    @Test fun pausingWhileACopyLoadsStaysPausedWithoutFailingOver() = runTest {
+        val r = rig()
+        r.player.readyMs = 3_000
+        r.plan.answered(TitleAnswer(TitleCopies(listOf(iptv1080), originalLanguage = "en", intro = 5_000L..60_000L)))
+        r.session.play(Place(0, audio = "en"))
+        runCurrent()
+        r.session.pause()
+        advance(20_000)
+        assertEquals(1, r.player.opens.size)
+        assertEquals(FilmPhase.Starting, r.state.phase)
+        assertTrue(r.state.paused)
+        r.session.resume()
+        advance(6_000)
+        assertEquals(FilmPhase.Playing, r.state.phase)
+        assertEquals(1, r.player.opens.size)
+        assertEquals(Notice.Skip(SkipPart.Intro, 60_000L), r.state.notice)
+    }
+
+    @Test fun aFailoverWhilePausedStaysPaused() = runTest {
+        val r = rig()
+        play(r, rd4k, iptv1080)
+        advance(MIN)
+        r.session.pause()
+        r.player.fail(StreamFailure.Http(500))
+        advance(5_000)
+        assertEquals(2, r.player.opens.size)
+        assertEquals(Place(MIN, audio = "en", paused = true), r.player.opens.last().second)
+        assertEquals(MIN, r.player.place.position) // still, not playing
+        assertTrue(r.state.paused)
+        r.session.resume()
+        advance(10_000)
+        assertEquals(MIN + 10_000, r.player.place.position)
+    }
+
+    // A trial counts time played: a seek ahead neither ends it nor marks the copy as working.
+    @Test fun aSeekDuringATrialDoesNotCountAsPlayed() = runTest {
+        val r = rig(dvTv)
+        play(r, dv, iptvHdr)
+        advance(11_000)
+        r.session.accept()
+        runCurrent()
+        advance(5_000)
+        r.session.seek(r.player.place.position + 60_000)
+        advance(5_000)
+        assertTrue(r.state.trial)
+        assertTrue(r.session.takesBack)
+        advance(25_000)
+        assertEquals(true, r.choices.marks(dvTv)[dv.id]?.works)
     }
 
     @Test fun everyCopyFailingEndsUnavailable() = runTest {

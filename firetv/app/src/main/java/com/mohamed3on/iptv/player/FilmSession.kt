@@ -20,12 +20,15 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** Where a film is: carried across every copy switch with the audio and subtitle languages chosen; [orAudio] when the file has no [audio] track. */
-data class Place(val position: Long, val audio: String? = null, val subtitles: String? = null, val orAudio: String? = null)
+/**
+ * Where a film is: carried across every copy switch with the audio and subtitle languages chosen; [orAudio] when the file has no
+ * [audio] track; [paused], so a copy opened while the owner has paused (a failover, a fresh link, an undone trial) stays paused.
+ */
+data class Place(val position: Long, val audio: String? = null, val subtitles: String? = null, val orAudio: String? = null, val paused: Boolean = false)
 
 /** The slice of a film player a [FilmSession] drives; ExoPlayer in the app, a fake in tests. Main thread only. */
 interface FilmPlayer {
-    /** Stops whatever is open, then opens [url] at [place] (position and languages) and plays. */
+    /** Stops whatever is open, then opens [url] at [place] (position and languages), and plays once ready unless [Place.paused]. */
     fun open(url: String, place: Place)
     fun stop()
     fun pause()
@@ -103,6 +106,8 @@ data class FilmState(
     /** The copy plays as a trial: Back in its first 30 s returns to the previous one (R28). */
     val trial: Boolean = false,
     val notice: Notice? = null,
+    /** The owner paused: the one answer, which the keys and the screen read (#21). */
+    val paused: Boolean = false,
 )
 
 /**
@@ -150,7 +155,10 @@ class FilmSession(
     /** Where a switch that fails returns: the copy before an accepted offer, a trial or a pick in Versions. */
     private var back: Copy? = null
     private var trial = false
-    private var trialFrom = 0L
+    /** The trial's time played (R28), and the position and time at the last tick it was counted from. */
+    private var trialPlayed = 0L
+    private var lastPos = 0L
+    private var lastTick = 0L
     private val rebuffers = ArrayDeque<Long>()
     /** R10: the copy bandwidth held back (left by a step-down, or ranked out at start). */
     private var better: Copy? = null
@@ -250,7 +258,7 @@ class FilmSession(
     /** Whether [back] would act now: a trial's first 30 s, or a notice showing. */
     val takesBack: Boolean get() = undoable() || notices.isNotEmpty()
 
-    private fun undoable() = trial && current != null && back != null && here().position - trialFrom < TRIAL_MS
+    private fun undoable() = trial && current != null && back != null && trialPlayed < TRIAL_MS
 
     /** Versions: plays [copyId] at the same place and pins it for the title (KTD12). */
     fun choose(copyId: String) {
@@ -260,9 +268,11 @@ class FilmSession(
         if (to.id != current?.id || phase != FilmPhase.Playing) switch(to, back = current.takeIf { phase == FilmPhase.Playing }, trial = false)
     }
 
+    /** Pauses, a copy still loading too: it stays paused through any reopen until [resume], and its start timeout waits. */
     fun pause() {
         if (pausedAt == null) pausedAt = now()
         player.pause()
+        publish()
     }
 
     /** After a pause over [PAUSE_MS], or an IP change meanwhile, a Real-Debrid copy gets a fresh link first (KTD2). */
@@ -270,8 +280,18 @@ class FilmSession(
         val at = pausedAt ?: return player.play()
         pausedAt = null
         val copy = current
-        if (copy?.source == Source.Debrid && phase == FilmPhase.Playing && (stale || now() - at > PAUSE_MS)) reopen(copy, player.place) else player.play()
+        if (copy?.source == Source.Debrid && phase == FilmPhase.Playing && (stale || now() - at > PAUSE_MS)) reopen(copy, player.place) else {
+            if (phase == FilmPhase.Starting) openedAt = now() // a copy loading gets its full start time from here
+            player.play()
+        }
         stale = false
+        publish()
+    }
+
+    /** ⏪ ⏩, a seek step or start over: to [position] in the copy open (one loading starts there). A trial doesn't count it as played. */
+    fun seek(position: Long) {
+        if (phase != FilmPhase.Playing) openPlace = openPlace.copy(position = position)
+        player.seek(position)
     }
 
     /** The network or VPN changed: a Real-Debrid link is tied to the old IP, so it is fetched afresh (KTD2). */
@@ -323,7 +343,7 @@ class FilmSession(
             if (current == null && r.copy.id == ranking?.pick?.copy?.id && r.support == Support.Unsure && dub != null) {
                 trial = true
                 back = dub
-                trialFrom = place.position
+                trialPlayed = 0
             }
             return open(r.copy, url, place)
         }
@@ -376,7 +396,7 @@ class FilmSession(
             at.audio != null && at.audio != "und" -> at // "und": a track without a language, none to keep
             want != null -> at.copy(audio = want, orAudio = originalLanguage)
             else -> at.copy(audio = originalLanguage)
-        }
+        }.copy(paused = pausedAt != null)
         current = copy
         openPlace = place
         attempt = true
@@ -466,7 +486,7 @@ class FilmSession(
             val place = here()
             this@FilmSession.back = back
             this@FilmSession.trial = trial
-            trialFrom = place.position
+            trialPlayed = 0
             tried += to.id
             open(to, url, place)
         }
@@ -519,15 +539,24 @@ class FilmSession(
         val t = now()
         // A Skip stays while its part plays ([skips] takes it away).
         notices.firstOrNull()?.let { if (it !is Notice.Skip && t - noticeAt >= if (it is Notice.Offer) OFFER_MS else INFO_MS) dismiss(accepted = false) }
-        if (attempt && phase == FilmPhase.Starting && t - openedAt >= START_MS) return failed(StreamFailure.Timeout)
+        if (attempt && phase == FilmPhase.Starting && pausedAt == null && t - openedAt >= START_MS) return failed(StreamFailure.Timeout)
+        played(t)
         if (phase != FilmPhase.Playing) return
         val copy = current ?: return
-        if (trial && player.place.position - trialFrom >= TRIAL_MS) {
+        if (trial && trialPlayed >= TRIAL_MS) {
             back = null
             trialOver(copy, works = true)
         }
         skips()
         offers(t, copy)
+    }
+
+    /** A trial's time played: what the position gained since the last tick, not a jump past the time gone by (a seek). */
+    private fun played(t: Long) {
+        val at = player.place.position
+        if (trial && phase == FilmPhase.Playing && at - lastPos in 0..t - lastTick + SLACK_MS) trialPlayed += at - lastPos
+        lastPos = at
+        lastTick = t
     }
 
     /** R33: while the intro or recap plays (not in its last seconds), its Skip shows, once a play; leaving the part takes it away. */
@@ -604,7 +633,7 @@ class FilmSession(
 
     private fun publish() {
         val p = plan.state.value
-        _state.value = FilmState(phase, current, p.ranking, p.debrid, trial, notices.firstOrNull())
+        _state.value = FilmState(phase, current, p.ranking, p.debrid, trial, notices.firstOrNull(), pausedAt != null)
     }
 
     companion object {
@@ -615,6 +644,8 @@ class FilmSession(
         /** A Skip leaves this long before its part ends: by then the jump saves nothing. */
         private const val TAIL_MS = 3_000L
         private const val TICK_MS = 1_000L
+        /** A tick late by up to this still counts the play it saw. */
+        private const val SLACK_MS = 500L
         /** First frame of a film, over a connect and the 1.5 s start buffer. */
         private const val START_MS = 15_000L
         private const val BUSY_RETRY_MS = 5_000L

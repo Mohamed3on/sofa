@@ -210,10 +210,6 @@ internal fun MoviePlayback(
                 ui.playing = isPlaying
             }
 
-            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                ui.paused = !playWhenReady
-            }
-
             override fun onPlaybackStateChanged(state: Int) {
                 ui.buffering = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
             }
@@ -229,6 +225,8 @@ internal fun MoviePlayback(
             play.close()
         }
     }
+    // Paused is the session's answer (#21), whatever the player is doing.
+    LaunchedEffect(Unit) { session.state.map { it.paused }.distinctUntilChanged().collect { ui.paused = it } }
     // firetv/check.sh (system/Check): each notice, and the subtitles that switch on (the copy's own or fetched).
     LaunchedEffect(Unit) {
         launch { session.state.map { it.notice }.distinctUntilChanged().collect { n -> n?.let { Check.log("notice", "kind" to it.toString().substringBefore('(')) } } }
@@ -311,7 +309,7 @@ internal fun MoviePlayback(
         val dur = exo.duration
         if (!ui.playing || dur <= 0) return@LaunchedEffect
         Check.fromEnd = null
-        exo.seekTo((dur - back).coerceAtLeast(0))
+        session.seek((dur - back).coerceAtLeast(0))
     }
     fun playNext() {
         if (dismissed) return
@@ -348,7 +346,7 @@ internal fun MoviePlayback(
     fun seekNow() {
         commit[0]?.cancel()
         val to = target ?: return
-        exo.seekTo(to)
+        session.seek(to)
         position.longValue = to
         target = null
     }
@@ -382,7 +380,7 @@ internal fun MoviePlayback(
                 val native = e.nativeKeyEvent
                 val down = e.type == KeyEventType.KeyDown
                 val keys = FilmKeys(
-                    error = error, panel = panel, seeking = target != null, sessionBack = session.takesBack, controls = controls, playing = exo.playWhenReady,
+                    error = error, panel = panel, seeking = target != null, sessionBack = session.takesBack, controls = controls, playing = !session.state.value.paused,
                     skip = session.state.value.notice is Notice.Skip, card = card, asleep = asleep,
                 )
                 val action = filmKey(native.keyCode, down, native.repeatCount, native.eventTime - native.downTime, native.eventTime - lastStep[0], keys)

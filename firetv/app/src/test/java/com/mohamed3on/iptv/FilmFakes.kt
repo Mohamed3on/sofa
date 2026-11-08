@@ -13,45 +13,69 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
-/** Opens are recorded; each answers asynchronously, like ExoPlayer: [respond]'s failure, else the first frame. */
+/**
+ * Opens are recorded; each answers asynchronously, like ExoPlayer: [respond]'s failure, else ready after [readyMs]. Like
+ * ExoPlayer's play-when-ready, a ready film plays (its first frame: onPlaying) only while not paused: opened paused, or
+ * paused while it loads, it waits for [play].
+ */
 internal class FakeFilm(private val scope: CoroutineScope, private val clock: () -> Long) : FilmPlayer {
     val opens = mutableListOf<Pair<String, Place>>()
     var respond: (String) -> StreamFailure? = { null }
+    var readyMs = 0L
     override var duration = 120 * 60_000L
     private var listener: FilmPlayer.Listener? = null
     private var base = Place(0)
     private var since: Long? = null
     private var gen = 0
+    private var playWhenReady = true
+    private var ready = false
+    private var played = false
 
     override val place get() = since?.let { base.copy(position = base.position + clock() - it) } ?: base
 
     override fun open(url: String, place: Place) {
         stop()
-        base = place
+        base = place.copy(paused = false)
         opens += url to place
+        playWhenReady = !place.paused
+        played = false
         val g = gen
         scope.launch {
+            if (readyMs > 0) kotlinx.coroutines.delay(readyMs)
             if (g != gen) return@launch
             val failure = respond(url)
             if (failure != null) listener!!.onError(failure) else {
-                since = clock()
-                listener!!.onPlaying()
+                ready = true
+                start()
             }
         }
     }
 
+    private fun start() {
+        if (!ready || !playWhenReady || since != null) return
+        since = clock()
+        if (!played) {
+            played = true
+            listener!!.onPlaying()
+        }
+    }
+
     override fun stop() {
-        pause()
+        base = place
+        since = null
+        ready = false
         gen++
     }
 
     override fun pause() {
         base = place
         since = null
+        playWhenReady = false
     }
 
     override fun play() {
-        if (since == null) since = clock()
+        playWhenReady = true
+        start()
     }
 
     override fun seek(position: Long) {
@@ -63,6 +87,7 @@ internal class FakeFilm(private val scope: CoroutineScope, private val clock: ()
         this.listener = listener
     }
 
+    fun fail(failure: StreamFailure) = listener!!.onError(failure)
     fun rebuffer() = listener!!.onRebuffer()
     fun end() = listener!!.onEnded()
 }
