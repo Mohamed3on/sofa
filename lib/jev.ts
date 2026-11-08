@@ -13,8 +13,10 @@ export interface JevAnswer {
   noul?: number
 }
 
-// Thresholds were tuned on this version, so pin it rather than follow jev-latest.
-const MODEL = 'jev-1.13.0'
+// Pinned rather than jev-latest, so a new version's verdicts are compared before it takes over. 1.14 against 1.13 on
+// 1,313 cached guide titles: 21 differ, mostly matches just under the learner's thresholds that 1.13 tagged; since
+// lib/tv-listings.ts titles listed matches with their competition, the regexes catch those without Jev.
+const MODEL = 'jev-1.14.0'
 let inputTokens = 0
 /** Input tokens billed so far in this process ($0.042 per million). */
 export const jevTokens = () => inputTokens
