@@ -150,6 +150,13 @@ class TitlesClient(
         return Result.success(ShowEpisodes(info.episodes, info.plot, info.backdrop, info.genre, info.cast, info.rating))
     }
 
+    /** A TMDB show's Arabic dub by season ("ar", "arz": Egyptian) (/api/app/dubs), none when the box can't say. */
+    suspend fun dubs(show: TitleId): Map<Int, String> = withContext(Dispatchers.IO) {
+        get("dubs?id=${q(show)}") { text ->
+            json.decodeFromString<Map<String, String>>(text).mapNotNull { (s, l) -> s.toIntOrNull()?.let { it to l } }.toMap()
+        }.getOrDefault(emptyMap())
+    }
+
     /** What [showOf] already holds for [m]. */
     fun peekShowOf(m: Movie): ShowEpisodes? {
         if (m.id > 0) return peekShow(m.id)

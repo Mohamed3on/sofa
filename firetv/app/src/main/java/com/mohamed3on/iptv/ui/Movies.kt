@@ -1426,7 +1426,8 @@ private fun Rows(
         val target = opened?.takeIf { active } ?: return@LaunchedEffect
         val index = rows.indexOfFirst { it.key == target.first }
         if (index >= 0) {
-            if (list.layoutInfo.visibleItemsInfo.none { it.index == index }) list.scrollToItem(index)
+            // Up at the top, where a focused row sits; one only partly on screen would leave its card half below it.
+            list.scrollToItem(index)
             repeat(FOCUS_FRAMES) {
                 withFrameNanos {}
                 if (lastFocused[0] == target) return@repeat
@@ -2331,6 +2332,9 @@ private fun ShowPage(
         withFrameNanos {}
         Check.log("title_shown", "title" to show.titleId)
     }
+    // Each season's Arabic dub, for its heading.
+    var dubs by remember { mutableStateOf(emptyMap<Int, String>()) }
+    LaunchedEffect(Unit) { if (Regex("^tv:\\d+$").matches(show.titleId)) dubs = sync.dubs(show.titleId) }
     var attempt by remember { mutableStateOf(0) }
     LaunchedEffect(attempt) {
         failed = false
@@ -2430,7 +2434,13 @@ private fun ShowPage(
                     ) {
                         items(lines, key = { if (it is EpisodeLine.Item) it.episode.id else "s${(it as EpisodeLine.Season).season}" }) { line ->
                             when (line) {
-                                is EpisodeLine.Season -> Text("Season ${line.season}", style = Type.headline, modifier = Modifier.padding(start = Space.m, top = Space.l, bottom = Space.xs))
+                                is EpisodeLine.Season -> Row(
+                                    Modifier.padding(start = Space.m, top = Space.l, bottom = Space.xs),
+                                    horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text("Season ${line.season}", style = Type.headline)
+                                    dubs[line.season]?.let { l -> FormatChips(listOf("${FLAGS[l]} ${audioName(l)}")) }
+                                }
                                 is EpisodeLine.Item -> EpisodeRow(
                                     line.episode,
                                     watched = line.episode.titleId in seen,

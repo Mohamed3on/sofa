@@ -24,6 +24,7 @@
 import { appendFile, mkdir, rename, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { buildAppFeed, buildAppGuide } from '../lib/app-feed.js'
+import { arabp2pSeasonDubs } from '../lib/arabp2p.js'
 import { iptvCopies, markInfringing, titleCopies } from '../lib/copies.js'
 import { curatedGuide, fetchCuratedChannels, saneFps, vodChannels, withBackupFeeds, withCompetitionGroups } from '../lib/curation.js'
 import { backupConfigFromEnv, configFromEnv } from '../lib/provider.js'
@@ -168,6 +169,13 @@ export async function movie(req: Request) {
   if (!Number.isInteger(id) || id <= 0) return new Response('Bad id', { status: 400 })
   const info = await movieInfo(configFromEnv(), id)
   return { ...info, ...(await tmdbFacts(info.titleId)) }
+}
+
+// GET /api/app/dubs?t=TOKEN&id=tv:TMDB_ID — a show's Arabic dub by season ({"1": "ar", "2": "arz"}: Fusha, Egyptian), for its page's season headings.
+export async function dubs(req: Request) {
+  const m = new URL(req.url).searchParams.get('id')?.match(/^tv:(\d+)$/)
+  if (!m) return new Response('Bad id', { status: 400 })
+  return arabp2pSeasonDubs(m[1])
 }
 
 // GET /api/app/episodes?t=TOKEN&id=SERIES_ID — a show's plot and episodes, in order.

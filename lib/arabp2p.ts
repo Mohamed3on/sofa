@@ -740,6 +740,28 @@ function probeDialects(s: Store, key: string, hash: string, filename: string) {
 const dubLangs = (row: Row, heard: string[] | undefined, named: string[]) =>
   [...new Set(['ar', ...(row.egyptian || heard?.includes('arz') ? ['arz'] : []), ...named])]
 
+/**
+ * A dubbed show's Arabic by season, from its packs TorBox holds: "arz" where a season is Egyptian (an episode's
+ * track, or its upload's name, says so), else "ar". A season not yet read is read in the background.
+ */
+export async function arabp2pSeasonDubs(tmdb: string): Promise<Record<string, string>> {
+  const s = await db()
+  const packs = (s.shows?.[tmdb]?.rows ?? []).flatMap((row) => {
+    const p = s.packs?.[row.id]
+    return p && 'hash' in p ? [{ row, p }] : []
+  })
+  const held = await onTorBox([...new Set(packs.map(({ p }) => p.hash))], s)
+  const out: Record<string, string> = {}
+  for (const { row, p } of packs.filter(({ p }) => held.has(p.hash))) {
+    for (const [ep, [, filename]] of Object.entries(p.eps)) {
+      const season = ep.split(':')[0], key = `${p.hash}:s${season}`
+      probeDialects(s, key, p.hash, filename)
+      if (out[season] !== 'arz') out[season] = dubLangs(row, s.dialects?.[key], []).includes('arz') ? 'arz' : 'ar'
+    }
+  }
+  return out
+}
+
 // --- Dubbed shows ------------------------------------------------------------------------------------------
 
 /** Whether a show's upload names [season]: "S02", "S01-02-03", "[م2]", "الموسم 2"; one naming no season (a complete pack) does too. */

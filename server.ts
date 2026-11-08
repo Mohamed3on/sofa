@@ -36,6 +36,7 @@ export const routes: Record<string, Route> = {
   '/api/app/shows': { gate: 'app', cache: { fresh: 1800, stale: 86400 }, run: app.shows },
   '/api/app/movie': { gate: 'app', cache: { fresh: 604800, stale: 604800 }, run: app.movie },
   '/api/app/episodes': { gate: 'app', cache: { fresh: 21600, stale: 86400 }, run: app.episodes },
+  '/api/app/dubs': { gate: 'app', cache: { fresh: 600, stale: 86400 }, run: app.dubs },
   // Kept once both sources answered (Torrentio's cached flags change).
   '/api/app/copies': typed({ gate: 'app', cache: (c) => (c.sources.iptv === 'ok' && c.sources.rd === 'ok' ? { fresh: 3600, stale: 86400 } : 'no-store'), run: app.copies }),
   // Kept once IMDb's histogram is in; until then each ask builds it again, so scores asked now show up.
