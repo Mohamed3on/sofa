@@ -206,11 +206,15 @@ export function upcomingCompetitions(channels: Channel[], xmltv: string, now = D
   return out
 }
 
+// Worked out once per built guide: the playlist and the app's channel list both want it, and each pass parses all ~18 MB.
+let upcomingOf: { xml: string; upcoming: Map<string, Map<string, number>> } | undefined
+
 /** [upcomingCompetitions] of the current guide, for withCompetitionGroups; none (groups by name only) if it fails. */
 export async function guideUpcoming(): Promise<Map<string, Map<string, number>>> {
   try {
     const { channels, xml } = await curatedGuide()
-    return upcomingCompetitions(channels, xml)
+    if (upcomingOf?.xml !== xml) upcomingOf = { xml, upcoming: upcomingCompetitions(channels, xml) }
+    return upcomingOf.upcoming
   } catch {
     return new Map()
   }

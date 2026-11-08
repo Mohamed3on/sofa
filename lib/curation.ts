@@ -737,26 +737,29 @@ export async function saveEpgIcons(icons: Map<string, string>): Promise<void> {
   if (icons.size) await writeFile(EPG_ICONS, JSON.stringify(Object.fromEntries(icons))).catch(() => {})
 }
 
-// Pulls already running are shared: the app's channel list and the guide build its 🏆 groups wait on
-// ask at the same moment. Nothing is kept once a pull ends, so the next list is fresh.
+// Pulls already running are shared: the playlist, the app's channel list and the guide build its 🏆 groups
+// wait on ask at the same moment, and the stream list is ~56k entries. Nothing is kept once a pull ends, so
+// the next list is fresh.
 const pulling = new Map<string, Promise<Channel[]>>()
 
 /** Fetch + filter provider channels into ordered, quality-sorted buckets. `vod: false`
  *  leaves out the on-demand entries, for the EPG. */
-export function fetchCuratedChannels(cfg: XtreamConfig, vod = true): Promise<Channel[]> {
-  const k = `${cfg.host}|${cfg.user}|${vod}`
-  const running = pulling.get(k)
-  if (running) return running
-  const job = pullCuratedChannels(cfg, vod).finally(() => pulling.delete(k))
-  pulling.set(k, job)
-  return job
+export async function fetchCuratedChannels(cfg: XtreamConfig, vod = true): Promise<Channel[]> {
+  const k = `${cfg.host}|${cfg.user}`
+  let job = pulling.get(k)
+  if (!job) {
+    job = pullCuratedChannels(cfg).finally(() => pulling.delete(k))
+    pulling.set(k, job)
+  }
+  // On-demand UFC PPV replays + the 4K movie library, after the live, EPG-tagged channels (VOD, no tvg-id, no EPG row).
+  const [live, vodList] = await Promise.all([job, vod ? vodChannels(cfg).catch(() => []) : []])
+  return vod ? [...live, ...vodList] : live
 }
 
-async function pullCuratedChannels(cfg: XtreamConfig, vod: boolean): Promise<Channel[]> {
-  const [cats, streams, vodList, icons] = await Promise.all([
+async function pullCuratedChannels(cfg: XtreamConfig): Promise<Channel[]> {
+  const [cats, streams, icons] = await Promise.all([
     apiGet<Category[]>(cfg, 'get_live_categories'),
     apiGet<Stream[]>(cfg, 'get_live_streams'),
-    vod ? vodChannels(cfg).catch(() => []) : [],
     readFile(EPG_ICONS, 'utf8').then((j) => new Map<string, string>(Object.entries(JSON.parse(j)))).catch(() => new Map<string, string>()),
   ])
   const catName = new Map(cats.map((c) => [Number(c.category_id), c.category_name]))
@@ -903,9 +906,6 @@ async function pullCuratedChannels(cfg: XtreamConfig, vod: boolean): Promise<Cha
     if (k && !sibId.has(k)) sibId.set(k, c.tvgId)
   }
 
-  // On-demand UFC PPV replays + the 4K movie library (appended after the live,
-  // EPG-tagged channels; both are VOD with no tvg-id, so they get no EPG row).
-  channels.push(...vodList)
   return channels
 }
 
@@ -1482,6 +1482,15 @@ export function buildEventEpg(
   return head.join('\n')
 }
 
+/** The provider guide's programmes for [channels], and every Qatari one (buildEventEpg's clock check reads
+ *  them): a tenth of its ~73M characters, which would otherwise be held for the 6 h a download is reused. */
+export function scopeProviderEpg(xml: string, channels: Channel[]): string {
+  const ids = new Set(channels.map((c) => c.tvgId))
+  const keep: string[] = []
+  for (const m of xml.matchAll(/<programme\b[^>]*\bchannel="([^"]*)"[^>]*>[\s\S]*?<\/programme>/g)) if (ids.has(m[1]) || m[1].endsWith('.qa')) keep.push(m[0])
+  return keep.join('\n')
+}
+
 /** Fetch the provider's full XMLTV guide; '' on any failure (best-effort). */
 export async function fetchProviderEpg(cfg: XtreamConfig): Promise<string> {
   try {
@@ -1528,7 +1537,7 @@ async function buildCuratedGuide(): Promise<{ channels: Channel[]; xml: string }
     // a failed download is '' and would be reused for 6h, so it gets one more try 30s later
     const providerEpgPromise = fetchProviderEpg(cfg).then((x) => x || Bun.sleep(30_000).then(() => fetchProviderEpg(cfg)))
     const job = channelsPromise.then((channels) =>
-      Promise.all([providerEpgPromise, fetchMyepgGuide(epgUrls, channels).then(async (g) => (await saveEpgIcons(g.icons), g))]))
+      Promise.all([providerEpgPromise.then((x) => scopeProviderEpg(x, channels)), fetchMyepgGuide(epgUrls, channels).then(async (g) => (await saveEpgIcons(g.icons), g))]))
     guides = { at: Date.now(), job }
     job.catch(() => { if (guides?.job === job) guides = undefined })
   }
