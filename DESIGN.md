@@ -235,7 +235,7 @@ Corners grow with surface size: 6dp on chips, keys and small marks; 12dp on rows
 Quiet until focused; the press is felt on the same frame as the key.
 - **Shape:** gently rounded (12dp).
 - **Action button:** headline label, 24 x 12dp padding, no fill at rest; focus applies the focus lift (raised slate fill, soft white 1.5dp ring, 1.03 scale). OK presses it in to 0.96. Weight never changes with state.
-- **Page button** (title pages and Up next): a Night Glass pill with a 1dp lit edge at rest; focus fills it solid text-primary with ink text and scales it 1.06, so the one thing OK will press reads from across the room. Same 0.96 press. The primary action (Resume or Play) is focused on arrival.
+- **Page button** (title pages and Up next): a Night Glass capsule 44dp tall (chips 36dp) with a 1dp lit edge at rest; focus fills it solid text-primary with ink text and scales it 1.06, so the one thing OK will press reads from across the room. Same 0.96 press. Only the primary action (Resume or Play, a drawn play mark before the label) is labelled at rest and focused on arrival; secondary actions (Start over, Versions, Trailer, Details, Episodes) and Movies' corner Search and Live TV are round drawn icons (`Glyph`, 20dp, 2dp round strokes) whose label slides out while focused, revealed in the layout phase.
 
 ### Chips and Badges
 - **Watched line** (film and show pages): the cards' check disc at 18dp and a body line, "Watched 15 Dec 2024", "Watched twice · last 3 Nov", a show's "Last watched yesterday", plain "Watched" when no day is known. It shares the progress slot under the meta line (after the time left and its bar on a part-way rewatch), so the page gains no row for it.
