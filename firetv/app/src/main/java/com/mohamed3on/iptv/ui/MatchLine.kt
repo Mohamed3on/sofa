@@ -11,6 +11,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import kotlin.math.roundToInt
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -62,7 +64,8 @@ fun MatchPill(state: MatchState) = StatusPill(
 )
 
 private val scoreSpan = SpanStyle(color = Palette.textPrimary, fontFeatureSettings = "tnum")
-private val scoreStyle = Type.title.tabular
+/** The matchup's score: the heading's largest figures, bigger than the names it sits between. */
+private val scoreStyle = Type.display.tabular
 
 private fun MatchState.score() = "$hs–$away"
 
@@ -89,19 +92,30 @@ fun MatchLine(match: Match, style: TextStyle, modifier: Modifier = Modifier) {
 
 private val MATCHUP_CREST = 32.dp
 
-/** A known match as the banner's heading: crests flanking the short names, score and clock between them, then its 🏆 competition. */
+/**
+ * A known match as the banner's heading, as a scorebug reads: crests flanking the short names, the score between them at
+ * display size, centred on the names' line, with the clock's pill hanging under it; then its 🏆 competition.
+ */
 @Composable
 fun Matchup(match: Match, comp: String?) {
+    // Everything in the row centres on the names' line; the score's column on its score alone, so the pill hangs below.
+    val scoreHalf = with(LocalDensity.current) { (scoreStyle.lineHeight.toPx() / 2).roundToInt() }
     Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
-            Crest(match.crests.home, MATCHUP_CREST)
-            FitText(match.crests.homeName.orEmpty(), Type.title)
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (match.state.state != "pre") Text(match.state.score(), style = scoreStyle)
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+            val centre = Modifier.alignBy { it.measuredHeight / 2 }
+            Crest(match.crests.home, MATCHUP_CREST, centre)
+            FitText(match.crests.homeName.orEmpty(), Type.title, centre)
+            val scored = match.state.state != "pre"
+            Column(
+                if (scored) Modifier.alignBy { scoreHalf } else centre,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(Space.xs),
+            ) {
+                if (scored) Text(match.state.score(), style = scoreStyle)
                 MatchPill(match.state)
             }
-            FitText(match.crests.awayName.orEmpty(), Type.title)
-            Crest(match.crests.away, MATCHUP_CREST)
+            FitText(match.crests.awayName.orEmpty(), Type.title, centre)
+            Crest(match.crests.away, MATCHUP_CREST, centre)
         }
         if (comp != null) FitText(comp, Type.caption)
     }
