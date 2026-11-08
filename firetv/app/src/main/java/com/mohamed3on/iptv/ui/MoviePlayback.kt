@@ -405,7 +405,19 @@ internal fun MoviePlayback(
                 delay(100)
             }
         }
-        Subtitles(cues, line)
+        // Subtitles rise above whatever sits at the foot (the controls, the corner's card or Skip), on the same spring.
+        val density = LocalDensity.current
+        val cornerShown = !panel && !error && (card || filmNotice is Notice.Skip)
+        val subtitleLift = animateFloatAsState(
+            with(density) {
+                val controlsTop = if (controls && !error) controlsHeight.intValue.toFloat() else 0f
+                val cornerTop = if (cornerShown) controlsTop + cornerHeight.intValue - Space.safeY.toPx() else 0f
+                (maxOf(controlsTop, cornerTop) + Space.l.toPx() - SUBTITLE_BOTTOM.toPx()).coerceAtLeast(0f)
+            },
+            Motion.panel(reduced),
+            label = "subtitles",
+        )
+        Subtitles(cues, line) { subtitleLift.value }
 
         var spinner by remember { mutableStateOf(false) }
         LaunchedEffect(ui.buffering, error) {
@@ -827,9 +839,9 @@ private fun fetchedNote(f: SubtitleFetch.State) = when (f.status) {
     else -> f.selected?.let { if (f.offset == 0L) "From OpenSubtitles" else "From OpenSubtitles · moved %+.1f s".format(java.util.Locale.ROOT, f.offset / 1000.0) }
 }
 
-/** The film's subtitles over the picture: text cues low and centred, picture cues (PGS) where the file puts them, and a fetched file's [line]. */
+/** The film's subtitles over the picture: text cues low and centred, picture cues (PGS) where the file puts them, and a fetched file's [line]; those in the lower half rise by [lift] (px, read while placing). */
 @Composable
-private fun Subtitles(cues: List<Cue>, line: String?) {
+private fun Subtitles(cues: List<Cue>, line: String?, lift: () -> Float) {
     if (cues.isEmpty() && line == null) return
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val text = cues.mapNotNull { it.text?.toString()?.takeIf(String::isNotBlank) } + listOfNotNull(line)
@@ -847,12 +859,13 @@ private fun Subtitles(cues: List<Cue>, line: String?) {
                 Cue.ANCHOR_TYPE_END -> h
                 else -> 0.dp
             } else maxHeight - h - SUBTITLE_BOTTOM
-            androidx.compose.foundation.Image(bitmap.asImageBitmap(), contentDescription = null, modifier = Modifier.offset(x, y).size(w, h))
+            val low = y + h / 2 > maxHeight / 2
+            androidx.compose.foundation.Image(bitmap.asImageBitmap(), contentDescription = null, modifier = Modifier.offset(x, y).offset { IntOffset(0, if (low) -lift().roundToInt() else 0) }.size(w, h))
         }
         if (text.isNotEmpty()) Text(
             text.joinToString("\n"),
             style = Type.subtitle,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(start = Space.xxxl, end = Space.xxxl, bottom = SUBTITLE_BOTTOM),
+            modifier = Modifier.align(Alignment.BottomCenter).offset { IntOffset(0, -lift().roundToInt()) }.padding(start = Space.xxxl, end = Space.xxxl, bottom = SUBTITLE_BOTTOM),
         )
     }
 }
