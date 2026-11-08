@@ -84,6 +84,7 @@ import com.mohamed3on.iptv.data.shownTitle
 import com.mohamed3on.iptv.data.groupName
 import com.mohamed3on.iptv.data.isEventOnly
 import com.mohamed3on.iptv.data.liveNow
+import com.mohamed3on.iptv.data.SameMatch
 import com.mohamed3on.iptv.data.RouteKind
 import com.mohamed3on.iptv.graph
 import com.mohamed3on.iptv.player.AudioState
@@ -721,8 +722,8 @@ private fun Banner(
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
             if (note != null) Text(note, style = Type.headline, maxLines = 1)
             if (health != null) HealthLine(health)
-            Text(if (inLiveNow != null) "Live now" else groupName(channel.group), style = Type.caption, maxLines = 1)
-            if (position >= 0) Text("${position + 1} of ${list.size}", style = Type.caption.tabular)
+            if (inLiveNow !is SameMatch) Text(if (inLiveNow != null) "Live now" else groupName(channel.group), style = Type.caption, maxLines = 1)
+            if (position >= 0) Text("${position + 1} of ${list.size}${if (inLiveNow is SameMatch) " channels" else ""}", style = Type.caption.tabular)
         }
     }
 }

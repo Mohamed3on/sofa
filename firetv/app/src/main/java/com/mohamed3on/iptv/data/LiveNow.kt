@@ -19,8 +19,11 @@ data class LiveNow(val matches: List<LiveEntry>, val slots: List<LiveEntry>) {
     fun matchOf(channel: Channel) = entries.firstOrNull { e -> e.tune.family == channel.family || e.alsoOn.any { it.family == channel.family } }
 
     /** What Up/Down walk after tuning [channel]: the channels showing its match when there are several, else [context]. */
-    fun contextFor(channel: Channel) = matchOf(channel)?.takeIf { it.alsoOn.isNotEmpty() }?.let { listOf(it.tune) + it.alsoOn } ?: context
+    fun contextFor(channel: Channel): List<Channel> = matchOf(channel)?.takeIf { it.alsoOn.isNotEmpty() }?.let { SameMatch(listOf(it.tune) + it.alsoOn) } ?: context
 }
+
+/** One match's channels as a zap context, so the banner can say so. */
+class SameMatch(channels: List<Channel>) : List<Channel> by channels
 
 /**
  * Live now from the guide's [airing] matches: one row per (normalized title, start) on a channel in a
