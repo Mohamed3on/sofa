@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { arabp2pCopies, arabp2pEpisodeCopies } from './arabp2p.js'
 import { writeAtomic } from './fs.js'
 import { getJson } from './http.js'
-import { introFor, type Intro } from './intros.js'
+import { segmentsFor, type Intro } from './intros.js'
 import { languageClaim, readName, type XtreamConfig } from './provider.js'
 import { claimedPicture, measuredStream, streamLabels, type Measured, type ProbedStream } from './quality-labels.js'
 import { flagLanguages, parseRelease, type Attrs } from './release-name.js'
@@ -54,8 +54,10 @@ export interface Copies {
   /** Minutes (an episode's for shows); 0 unknown. */
   runtime: number
   sources: { iptv: Status; rd: Status }
-  /** An episode's intro, for Skip intro; absent when unknown or not in time. */
+  /** An episode's intro, recap and end credits ([start, end] ms; a credits end of 0 = to the end), for Skip intro / Skip recap and the next-episode card; each absent when unknown or not in time. */
   intro?: Intro
+  recap?: Intro
+  credits?: Intro
   copies: (IptvCopy | RdCopy)[]
 }
 
@@ -241,7 +243,7 @@ export async function titleCopies(title: string, iptv: Promise<IptvCopy[]>, wait
       .filter((c) => !DISC.test(`${c.name} ${c.filename ?? ''}`))
       .map((c) => ({ ...c, kbps: t.runtime > 0 ? Math.round((c.size * 8) / (t.runtime * 60) / 1000) : 0 }))
   })
-  const intro = p?.season != null ? meta.then((t) => introFor(title, t?.imdb)) : Promise.resolve(null)
+  const intro = p?.season != null ? meta.then((t) => segmentsFor(title, t?.imdb)) : Promise.resolve(null)
   const late = Bun.sleep(waitMs).then(() => 'pending' as const)
   const settle = <T>(p: Promise<T>) => Promise.race([p.then((v) => ({ v }), () => 'unavailable' as const), late])
   const [i, r, t, o] = await Promise.all([iptv.then((v) => ({ v }), () => 'unavailable' as const), settle(rd), settle(meta), settle(intro)])
@@ -252,7 +254,7 @@ export async function titleCopies(title: string, iptv: Promise<IptvCopy[]>, wait
     runtime: tmdb?.runtime ?? 0,
     // An ArabP2P lookup still running makes the debrid side pending, so the copies aren't kept without what it finds.
     sources: { iptv: typeof i === 'object' ? 'ok' : i, rd: typeof r === 'object' ? (arabp2pPending ? 'pending' : 'ok') : r },
-    ...(typeof o === 'object' && o.v && { intro: o.v }),
+    ...(typeof o === 'object' && o.v),
     copies: [...(typeof i === 'object' ? i.v : []), ...(typeof r === 'object' ? r.v : [])],
   }
 }
