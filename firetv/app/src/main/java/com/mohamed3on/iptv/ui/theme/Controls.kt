@@ -1,5 +1,6 @@
 package com.mohamed3on.iptv.ui.theme
 
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -131,14 +132,18 @@ fun FitText(text: String, style: TextStyle, modifier: Modifier = Modifier, color
 private val FADE = 24.dp
 
 /**
- * Lines that never end in "…": a slot [lines] high (at least [minLines]); text that runs past it scrolls up slowly once
- * it has rested 1.5 s, pauses at the end, and starts over from the top when the text changes, clipped under a soft fade
- * at the bottom. With reduced motion the slot grows to hold all of it.
+ * Lines that never end in "…": a slot [lines] high (at least [minLines]); text that runs past it moves up a line at a
+ * time once it has rested 1.5 s (a short glide, then a pause to read the new line), so at rest the slot always shows
+ * whole lines, never one cut through; it pauses at the end and starts over from the top, and from the top when the text
+ * changes, clipped under a soft fade at the bottom. With reduced motion the slot grows to hold all of it.
  */
 @Composable
 fun ScrollText(text: String, style: TextStyle, lines: Int, modifier: Modifier = Modifier, minLines: Int = 1, color: Color = Color.Unspecified) {
     if (LocalReducedMotion.current) return Text(text, style = style, color = color, minLines = minLines, modifier = modifier)
-    val slot = with(LocalDensity.current) { style.lineHeight.toDp() } * lines
+    val density = LocalDensity.current
+    val line = with(density) { style.lineHeight.toDp() }
+    val step = with(density) { line.roundToPx() }
+    val slot = line * lines
     val scroll = rememberScrollState()
     val still = LocalStill.current
     LaunchedEffect(text, still) {
@@ -146,8 +151,10 @@ fun ScrollText(text: String, style: TextStyle, lines: Int, modifier: Modifier = 
         while (!still) {
             delay(1_500)
             val end = scroll.maxValue.takeIf { it in 1 until Int.MAX_VALUE } ?: return@LaunchedEffect
-            scroll.animateScrollTo(end, tween((end * SCROLL_MS_PER_PX).toInt(), easing = LinearEasing))
-            delay(2_000)
+            while (scroll.value < end) {
+                scroll.animateScrollTo((scroll.value + step).coerceAtMost(end), tween(LINE_GLIDE_MS, easing = FastOutSlowInEasing))
+                delay(LINE_READ_MS)
+            }
             scroll.scrollTo(0)
         }
     }
@@ -156,8 +163,9 @@ fun ScrollText(text: String, style: TextStyle, lines: Int, modifier: Modifier = 
     }
 }
 
-/** About 25 px a second: slow enough to read along. */
-private const val SCROLL_MS_PER_PX = 40f
+/** A line moves up in this long, then rests [LINE_READ_MS] to be read (about a line of prose at sofa distance). */
+private const val LINE_GLIDE_MS = 450
+private const val LINE_READ_MS = 2_500L
 
 /** Fades the bottom [FADE] of a slot while more text waits below it. */
 private fun Modifier.fadeBottom(scroll: ScrollState): Modifier = graphicsLayer {

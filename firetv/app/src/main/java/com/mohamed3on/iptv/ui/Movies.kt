@@ -1133,12 +1133,19 @@ private fun MetaLine(movie: Movie, info: MovieInfo?, extra: String? = null, modi
     // Without TrueScore's own ratio, the title page's histogram share stands in (TrueScore's line, no recent trend).
     val net = info?.takeIf { it.hn != null && scored?.tr == null }?.let { it.copy(tr = it.hn, s = it.s ?: scored?.s, ir = it.ir ?: scored?.ir, iv = it.iv ?: scored?.iv, lb = it.lb ?: scored?.lb, lv = it.lv ?: scored?.lv) }
     val scores = remember(scored, yours, net, hero) { if (hero) heroScores(scored, yours) else scoresLine(net ?: scored, yours, onImdb = net?.hs == "i") }
+    val group = movie.group.takeIf { movie.lib != null } ?: groupLabel(movie.group).name
+    val facts = listOfNotNull(movie.title.year, extra, runtime, info?.language?.ifEmpty { null }, genre ?: group.ifEmpty { null }, rating).joinToString(" · ")
+    // A hero's box is a fixed height: its meta stays one line (the facts scroll sideways), so the plot below always has its whole slot.
+    if (hero) return Row(modifier, horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
+        if (scores != null) Text(scores, style = SCORE_STYLE, maxLines = 1, inlineContent = SCORE_LOGOS)
+        movie.title.badge?.let { Badges(remember(it) { listOf(it) }) }
+        FitText(facts, style = Type.body, active = true)
+    }
     // The facts go under the scores when both don't fit on one line (beside a show's episodes); only then does a line scroll.
     FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(Space.m), itemVerticalAlignment = Alignment.CenterVertically) {
         if (scores != null) Text(scores, style = SCORE_STYLE, maxLines = 1, inlineContent = SCORE_LOGOS)
         movie.title.badge?.let { Badges(remember(it) { listOf(it) }) }
-        val group = movie.group.takeIf { movie.lib != null } ?: groupLabel(movie.group).name
-        FitText(listOfNotNull(movie.title.year, extra, runtime, info?.language?.ifEmpty { null }, genre ?: group.ifEmpty { null }, rating).joinToString(" · "), style = Type.body, active = true)
+        FitText(facts, style = Type.body, active = true)
     }
 }
 
