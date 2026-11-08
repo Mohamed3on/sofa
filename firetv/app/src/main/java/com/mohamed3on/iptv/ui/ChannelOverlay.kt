@@ -1148,6 +1148,7 @@ internal fun ChannelRow(
                 lines?.noGuide == true -> Text("No guide", style = Type.body, maxLines = 1)
                 now != null -> {
                     if (now.match) LiveMark()
+                    MatchCrests(now.title)
                     FitText(remember(now) { shownTitle(now) }, style = Type.body, modifier = Modifier.weight(1f))
                     Progress(now, clock)
                 }
@@ -1174,6 +1175,7 @@ private fun LiveRow(entry: LiveEntry, clock: State<Long>, playing: Boolean, watc
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
             if (playing) PlayingDot()
             if (programme != null) LiveMark()
+            MatchCrests(programme?.title)
             FitText(title, style = Type.headline)
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {

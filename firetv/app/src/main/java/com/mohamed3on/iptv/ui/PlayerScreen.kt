@@ -21,6 +21,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
@@ -40,6 +42,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,6 +81,7 @@ import com.mohamed3on.iptv.data.displayName
 import com.mohamed3on.iptv.data.NowNext
 import com.mohamed3on.iptv.data.shownTitle
 import com.mohamed3on.iptv.data.groupName
+import com.mohamed3on.iptv.data.isEventOnly
 import com.mohamed3on.iptv.data.liveNow
 import com.mohamed3on.iptv.data.RouteKind
 import com.mohamed3on.iptv.graph
@@ -165,7 +169,13 @@ fun PlayerScreen(feed: Feed, session: StreamSession?, audio: AudioTracks?, surfa
         // The picture keeps its shape: a 4:3 channel is pillarboxed, never stretched; widescreen fills the screen.
         val fill = aspect <= 0f || abs(aspect - SCREEN_ASPECT) < ASPECT_SLACK
         if (grid.tiles.isEmpty() && !movie) AndroidView(factory = { surface }, modifier = Modifier.align(Alignment.Center).then(if (fill) Modifier.fillMaxSize() else Modifier.aspectRatio(aspect)))
-        if (session != null) PlayerChrome(feed, session, audio, tiles, grid, live, health, onMovie = { movie = it })
+        if (session != null) {
+            // Match rows draw their crests from the guide (LocalCrests), in the list, Live now and the banner.
+            val guide by LocalContext.current.graph.sync.guide.collectAsState()
+            CompositionLocalProvider(LocalCrests provides (guide?.crests ?: emptyMap())) {
+                PlayerChrome(feed, session, audio, tiles, grid, live, health, onMovie = { movie = it })
+            }
+        }
     }
 }
 
@@ -174,7 +184,7 @@ private enum class Pick { MultiView, AddTile, ReplaceTile }
 
 @Composable
 private fun PlayerChrome(
-    feed: Feed,
+    arranged: Feed,
     session: StreamSession,
     audio: AudioTracks?,
     tiles: MultiView<ExoStreamPlayer>,
@@ -190,6 +200,13 @@ private fun PlayerChrome(
     val state by session.state.collectAsState()
     val guide by graph.sync.guide.collectAsState()
     val clock = rememberMinuteClock()
+    // Event-only feeds ("TNT Sports (event)") sit out of their groups while the guide has nothing on them, the one playing
+    // excepted; they come back when something is on. Read each minute, a new feed only when the set changes.
+    val events = remember(arranged) { eventOnlyFamilies(arranged) }
+    val idle by remember(arranged, guide) {
+        derivedStateOf(structuralEqualityPolicy()) { idleEvents(events, guide, clock.value, state.requested?.family) }
+    }
+    val feed = remember(arranged, idle) { if (idle.isEmpty()) arranged else arranged.copy(hidden = idle) }
     var layer by remember { mutableStateOf(Layer.None) }
     // What Up/Down walk: a Live now tune carries its list; a tune from a group carries none (its group).
     var zapContext by remember { mutableStateOf<List<Channel>?>(null) }
@@ -209,6 +226,8 @@ private fun PlayerChrome(
     var bannerKick by remember { mutableStateOf(0) }
     // OK's info view: the banner stays up, with the stream's numbers, across zaps until Back.
     var info by remember { mutableStateOf(false) }
+    // The key line shows in the info view's first few opens on this device, then never again.
+    var hints by remember { mutableStateOf(false) }
     // Movies rise over the open channel list, which keeps its place underneath for Back.
     var movies by remember { mutableStateOf(false) }
     val moviesShown = animateFloatAsState(if (movies) 1f else 0f, Motion.panel(reduced), label = "movies")
@@ -257,7 +276,12 @@ private fun PlayerChrome(
                 session.zap(action.to, feed)
             }
             is KeyAction.OpenOverlay -> openList(groups = action.groups)
-            KeyAction.ShowInfo -> info = true
+            KeyAction.ShowInfo -> {
+                val opened = graph.prefs.get(HINT_OPENS_KEY)?.toIntOrNull() ?: 0
+                hints = opened < HINT_OPENS
+                if (hints) graph.prefs.put(HINT_OPENS_KEY, (opened + 1).toString())
+                info = true
+            }
             KeyAction.HideInfo -> info = false
             KeyAction.OpenPanel -> layer = Layer.QuickPanel
             KeyAction.OpenRecent -> layer = Layer.Recent
@@ -414,7 +438,7 @@ private fun PlayerChrome(
                         health = health.takeIf { here },
                         info = if (info && here) {
                             val members = feed.familyMembers(channel.family)
-                            StreamInfo(quality, audioSelected, health, route, members.indexOfFirst { it.id == state.feed?.id }, members.size)
+                            StreamInfo(quality, audioSelected, health, route, members.indexOfFirst { it.id == state.feed?.id }, members.size, hints)
                         } else null,
                     )
                 }
@@ -592,6 +616,12 @@ private fun PlayerChrome(
                 refreshStatus = refreshStatus,
                 favourite = state.requested?.takeIf { !multiView }?.let { graph.lineup.isFavourite(it.family) },
                 onFavourite = { state.requested?.let { graph.lineup.toggleFavourite(it.family) } },
+                stream = {
+                    val playing = state.requested?.takeIf { !multiView } ?: return@QuickPanel
+                    val members = feed.familyMembers(playing.family)
+                    val quality = live?.takeIf { it.first == state.feed?.id }?.second
+                    ConnectionStats(StreamInfo(quality, audioSelected, health, effective, members.indexOfFirst { it.id == state.feed?.id }, members.size))
+                },
                 onRefresh = {
                     if (refreshStatus != REFRESHING) {
                         refreshStatus = REFRESHING
@@ -661,7 +691,7 @@ private fun Banner(
                 kept[0]?.let {
                     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                         StreamStats(it, badges)
-                        KeyHints()
+                        if (it.hints) KeyHints()
                     }
                 }
             }
@@ -697,6 +727,7 @@ private fun Guide(channel: Channel, guide: GuideDb?, clock: State<Long>, describ
     if (now != null) {
         Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
             if (now.match) LiveMark()
+            MatchCrests(now.title)
             Text(remember(now) { shownTitle(now) }, style = Type.headline, maxLines = 2)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
@@ -779,22 +810,36 @@ private fun rememberMinuteClock(): State<Long> = produceState(System.currentTime
 /** What the info view shows about the playing stream; [quality] is null until the player has measured it. */
 private class StreamInfo(
     val quality: LiveQuality?, val audio: AudioOption?, val health: Health?, val route: RouteKind, val feedAt: Int, val feeds: Int,
+    /** The key line, in the info view's first [HINT_OPENS] opens. */
+    val hints: Boolean = false,
 )
 
 /**
- * The info view's row, colour before words: the picture as measured (its height too, which the
- * badges leave out below 1080p), sound, route, which of the family's feeds plays as dots, then the
- * buffer as a gauge in the health dot's colour and the bitrate. The line's speed shows only when it
- * falls behind, in the health line's reason.
+ * The info view's one quality mark: the picture as measured (its height too, which the badges leave out
+ * below 1080p) and Atmos. The view is about the programme; the stream's numbers are in Options →
+ * Connection ([ConnectionStats]) and its health is the banner's corner dot.
  */
 @Composable
 private fun StreamStats(info: StreamInfo, badges: List<String>) {
-    Row(horizontalArrangement = Arrangement.spacedBy(Space.l), verticalAlignment = Alignment.CenterVertically) {
-        val q = info.quality
-        if (q != null) {
+    val q = info.quality ?: return Badges(badges)
+    Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
+        Pill(pictureLabel(q), if (q.height >= 1080) Palette.good else if (q.height >= 720) Palette.textPrimary else Palette.warning)
+        if (q.atmos) Pill("Atmos", Palette.textPrimary)
+    }
+}
+
+/**
+ * Options → Connection's stream row, colour before words: picture, sound, route, which of the family's feeds
+ * plays as dots, then the buffer as a gauge in the health dot's colour and the bitrate. The line's speed shows
+ * only when it falls behind, in the health line's reason.
+ */
+@Composable
+private fun ConnectionStats(info: StreamInfo) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        info.quality?.let { q ->
             Pill(pictureLabel(q), if (q.height >= 1080) Palette.good else if (q.height >= 720) Palette.textPrimary else Palette.warning)
             if (q.atmos) Pill("Atmos", Palette.textPrimary)
-        } else Badges(badges)
+        }
         info.audio?.let { a -> channelLayout(a.channels)?.let { Pill(it, Palette.textSecondary) } }
         if (info.route == RouteKind.Vpn) Pill("VPN", Palette.accent) else Pill("Plain", Palette.textSecondary)
         if (info.feeds > 1 && info.feedAt >= 0) Row(horizontalArrangement = Arrangement.spacedBy(FEED_DOT)) {
@@ -819,19 +864,16 @@ private fun StreamStats(info: StreamInfo, badges: List<String>) {
     }
 }
 
-/** The remote's keys, under the info view's stats: the ones nothing else on screen points at. */
+/**
+ * One line of the remote's keys that nothing on screen points at, under the quality mark in the info view's first
+ * [HINT_OPENS] opens on this device; after that the view is the programme alone. Scrolls rather than cutting off.
+ */
 @Composable
-private fun KeyHints() {
-    Column(Modifier.padding(top = Space.xs), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        for (line in KEY_HINTS) FitText(line, style = Type.caption)
-    }
-}
+private fun KeyHints() = FitText(KEY_HINTS, style = Type.caption, active = true, modifier = Modifier.padding(top = Space.xs))
 
-private val KEY_HINTS = listOf(
-    "OK again: channel list · Left: groups · Right: recent · Hold OK: search · Menu: options",
-    "Rewind, Fast-forward: the previous or next live match · Hold Back: Movies & Shows",
-    "In the list: Right: schedule · Menu: favourite or move · Rewind, Fast-forward: top, bottom",
-)
+private const val KEY_HINTS = "OK: channel list · Hold Back: Movies & Shows · Hold OK: search · Menu: options"
+private const val HINT_OPENS = 5
+private const val HINT_OPENS_KEY = "live.info.hintOpens"
 
 /** "720p50", "1080p25", "4K50": the measured picture in one word. */
 private fun pictureLabel(q: LiveQuality): String {
@@ -892,3 +934,17 @@ private fun HealthCorner(health: Health?, modifier: Modifier) = CornerNotice(hea
 }
 
 private val HEALTH_DOT = 10.dp
+
+/** Each family whose every feed is event-only, with the guide ids its feeds carry. */
+private fun eventOnlyFamilies(feed: Feed): Map<String, List<String>> =
+    feed.channels.groupBy { it.family }
+        .filterValues { feeds -> feeds.all(::isEventOnly) }
+        .mapValues { (_, feeds) -> feeds.map { it.tvgId }.filter(String::isNotEmpty).distinct() }
+
+/** The event-only families with nothing on in the guide at [nowSec], never [playing]; none while there is no guide. */
+private fun idleEvents(events: Map<String, List<String>>, guide: GuideDb?, nowSec: Long, playing: String?): Set<String> {
+    if (events.isEmpty() || guide == null) return emptySet()
+    // The guide can be swapped (and the old file closed) mid-read after a download.
+    val on = runCatching { guide.nowNextFor(events.values.flatten(), nowSec) }.getOrNull() ?: return emptySet()
+    return events.filter { (family, ids) -> family != playing && ids.none { on[it]?.now?.let { p -> !p.synthetic } == true } }.keys
+}

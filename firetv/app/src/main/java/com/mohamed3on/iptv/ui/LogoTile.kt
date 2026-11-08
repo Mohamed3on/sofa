@@ -1,7 +1,9 @@
 package com.mohamed3on.iptv.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -11,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -23,6 +26,7 @@ import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
 import com.mohamed3on.iptv.data.Channel
+import com.mohamed3on.iptv.data.Crests
 import com.mohamed3on.iptv.data.displayName
 import com.mohamed3on.iptv.ui.theme.Palette
 import com.mohamed3on.iptv.ui.theme.Radius
@@ -69,3 +73,34 @@ private fun monogram(name: String): String =
     displayName(name).split(' ')
         .mapNotNull { word -> word.firstOrNull { it.isLetterOrDigit() } }
         .take(2).joinToString("") { it.uppercase() }
+
+/** The crests the guide gives each 🏆 match title (GuideDb.crests); empty outside the live screen. */
+val LocalCrests = staticCompositionLocalOf<Map<String, Crests>> { emptyMap() }
+
+/**
+ * A match's two crests, home then away, before its fixture: each on a faint chip so a dark crest still reads on the
+ * scrim, sized to the line. Nothing at all when the guide has none for [title], so a row without them keeps its text
+ * where it was; a crest that fails to load leaves its chip empty rather than moving the text.
+ */
+@Composable
+fun MatchCrests(title: String?) {
+    val crests = title?.let { LocalCrests.current[it] } ?: return
+    Row(horizontalArrangement = Arrangement.spacedBy(CREST_GAP), verticalAlignment = Alignment.CenterVertically) {
+        Crest(crests.home)
+        Crest(crests.away)
+    }
+}
+
+@Composable
+private fun Crest(url: String?) {
+    val context = LocalPlatformContext.current
+    val density = LocalDensity.current
+    val request = remember(url) { url?.let { with(density) { ImageRequest.Builder(context).data(it).size(CREST.roundToPx()).build() } } }
+    Box(Modifier.size(CREST_CHIP).background(Palette.tile, RoundedCornerShape(Radius.chip)), contentAlignment = Alignment.Center) {
+        if (request != null) AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(CREST))
+    }
+}
+
+private val CREST = 18.dp
+private val CREST_CHIP = 22.dp
+private val CREST_GAP = 2.dp

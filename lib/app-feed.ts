@@ -129,13 +129,14 @@ export function guideDescr(title: string, raw: string): string {
  * carries the same corrections. Rows flag name-as-title filler (synthetic) and titles
  * that could be a live match, and name the 🏆 group of the competition a live match
  * belongs to (comp, by the same rules as the 🏆 groups); programmes that ended over 2h
- * ago are dropped.
+ * ago are dropped. With [crests], a crests table gives each such match title's two crests
+ * (home, away, either null), for the app's match rows; an app before it never reads the table.
  */
 // Broadcasters' superscript tags ("ᴸᶦᵛᵉ") are letters too, never a team.
 const SUPERSCRIPT = /[ᴬ-ᶿ⁰-₟]+/g
 const compGroup = new Map(COMPS.map((c) => [c.key, c.group]))
 
-export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now()): Uint8Array {
+export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now(), crests?: (title: string) => [string | null, string | null] | null): Uint8Array {
   // Name-as-title filler: ours (slots, uncovered channels) and the provider's own 2-hour blocks
   // named for the channel ("IT: DAZN DIRETTA GOL EUROPA LEAGUE" all day), never a programme.
   const filler = new Set(channels.map((c) => `${c.tvgId}\n${c.name.toLowerCase()}`))
@@ -169,13 +170,18 @@ export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now
     const found = new Set([...shared].filter(([, n]) => n === most).map(([j]) => comps[j]))
     if (most >= 2 && found.size === 1) comps[i] = [...found][0]
   })
+  db.run('CREATE TABLE crests (title TEXT PRIMARY KEY, home TEXT, away TEXT)')
+  const crest = db.prepare('INSERT OR IGNORE INTO crests VALUES (?, ?, ?)')
   db.transaction(() => {
     rows.forEach((r, i) => {
       if (!(r.stop > cutoff)) return
       const rerun = replays.has(i)
       const comp = comps[i]
+      const match = !rerun && couldBeLiveMatch(r.title)
       insert.run(r.tvgId, r.start, r.stop, r.title, searchNorm(r.title), r.descr,
-        r.synthetic ? 1 : 0, !rerun && couldBeLiveMatch(r.title) ? 1 : 0, comp ? compGroup.get(comp)! : null)
+        r.synthetic ? 1 : 0, match ? 1 : 0, comp ? compGroup.get(comp)! : null)
+      const found = comp && match ? crests?.(r.title) : null
+      if (found) crest.run(r.title, found[0], found[1])
     })
   })()
   db.run('CREATE INDEX programmes_channel ON programmes (tvg_id, start)')

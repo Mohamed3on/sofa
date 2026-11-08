@@ -10,6 +10,9 @@ data class Programme(val start: Long, val stop: Long, val title: String, val des
 
 data class NowNext(val now: Programme?, val next: Programme?)
 
+/** A live match's two crests as image URLs, home first; either may be missing. */
+data class Crests(val home: String?, val away: String?)
+
 /**
  * A guide entry on [tvgId] (a live match, or a search hit); [norm] is the server's search form of its
  * title and [comp] the 🏆 group of the live match it names (the server decides, with the 🏆 groups' own rules).
@@ -18,6 +21,13 @@ data class Airing(val tvgId: String, val norm: String, val programme: Programme,
 
 /** The cached guide (the server's SQLite file), opened read-only. */
 class GuideDb private constructor(private val db: SQLiteDatabase) : Closeable {
+    /** Each 🏆 match title's crests (the server's crests table; none in a guide from before it), read once at open. */
+    val crests: Map<String, Crests> = runCatching {
+        db.rawQuery("SELECT title, home, away FROM crests", null).use { c ->
+            buildMap { while (c.moveToNext()) put(c.getString(0), Crests(c.getString(1), c.getString(2))) }
+        }
+    }.getOrDefault(emptyMap())
+
     /** What airs on [tvgId] at [nowSec] (null in a gap) and what follows it. */
     fun nowNext(tvgId: String, nowSec: Long): NowNext = nowNextOf(programmes(tvgId, nowSec, limit = 2), nowSec)
 

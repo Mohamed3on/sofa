@@ -75,6 +75,8 @@ fun QuickPanel(
     onFavourite: () -> Unit = {},
     modifier: Modifier = Modifier,
     open: Boolean = true,
+    /** The playing stream's numbers (picture, sound, feed, buffer, bitrate), under Connection's routes. */
+    stream: @Composable ColumnScope.() -> Unit = {},
     views: @Composable ColumnScope.() -> Unit = {},
 ) {
     val stay by rememberUpdatedState(open)
@@ -181,6 +183,7 @@ fun QuickPanel(
                             style = Type.caption,
                             modifier = Modifier.padding(start = Space.l, top = Space.m),
                         )
+                        Column(Modifier.padding(start = Space.l, top = Space.xl), content = stream)
                     }
                     Page.Trakt -> TraktPage(trakt, traktStatus)
                 }
