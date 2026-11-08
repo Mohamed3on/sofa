@@ -47,7 +47,7 @@ export interface AppFeed {
 }
 
 const isComp = (group: string) => group.startsWith('🏆')
-const compLogos = Object.fromEntries(COMPS.filter((c) => c.logo).map((c) => [c.group, `https://a.espncdn.com/combiner/i?img=/i/leaguelogos/soccer/500-dark/${c.logo}.png&w=64&h=64`]))
+const compLogos = Object.fromEntries(COMPS.filter((c) => c.logo).map((c) => [c.group, `https://a.espncdn.com/combiner/i?img=/i/leaguelogos/soccer/${c.logo}.png&w=64&h=64`]))
 
 function badges(streamId: number): string[] {
   const m = qualityOf(streamId)
