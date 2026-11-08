@@ -48,7 +48,7 @@
 // the stale and below-marker ones, in playlist order, so the 🏆 groups' feeds get theirs first.
 //
 // Usage: bun scripts/probe-quality.ts [concurrency] [refresh] [mins=N]  (creds from env/.env.local)
-import { EVENT_ONLY, fetchCuratedChannels, saneFps, withCompetitionGroups } from '../lib/curation.js'
+import { EVENT_ONLY, fetchCuratedChannels, isAbroad, saneFps, withCompetitionGroups } from '../lib/curation.js'
 import { configFromEnv, connectionSlots as slotsOf, streamUrl } from '../lib/provider.js'
 import { writeAtomic } from '../lib/fs.ts'
 // better() keeps the cache monotonic in refresh mode; the app's readings (/api/app/quality) share these rules.
@@ -84,11 +84,12 @@ const probed: Readings = {} // what this run changed, for the box to merge
 const channels = await fetchCuratedChannels(cfg, false) // live feeds only; VOD is never probed
 // A feed "matches its marker" when its real height reaches the tier's nominal resolution.
 const nominalH = (q: number) => (q >= 5 ? 2160 : q >= 4 ? 1080 : q >= 3 ? 720 : 0)
-// Probe in playlist order (🏆 groups first), so the channels at the top get checked first.
+// Probe in playlist order (🏆 groups first), so the channels at the top get checked first; the abroad
+// buckets' feeds (listed only under 🏆 groups, when their picture holds up) after every in-region one.
 const rank = new Map<number, number>()
 for (const c of withCompetitionGroups(channels)) if (!rank.has(c.streamId)) rank.set(c.streamId, rank.size)
 const live = channels.filter((c) => !c.isEventSlot && !c.vodExt)
-  .sort((a, b) => (rank.get(a.streamId) ?? 1e9) - (rank.get(b.streamId) ?? 1e9))
+  .sort((a, b) => Number(isAbroad(a.group)) - Number(isAbroad(b.group)) || (rank.get(a.streamId) ?? 1e9) - (rank.get(b.streamId) ?? 1e9))
 // Re-verify (refresh only): every feed with a stale reading, whatever its marker; ones that
 // last had no signal go to the back.
 // Dead feeds (null, or a stale reading whose re-probe got no picture) get one retry a week,

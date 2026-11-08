@@ -26,11 +26,22 @@ describe('app channel feed', () => {
   })
 
   test('a Premier League abroad channel appears only in its 🏆 group, with no home group', () => {
-    const abroad = ch(900002, 'NZ: SKY SPORT PREMIER LEAGUE', 'test.nz', { group: '🌏 Premier League abroad', comps: ['pl'] })
+    const abroad = ch(900002, 'NZ: SKY SPORT PREMIER LEAGUE', 'test.nz', { group: '🌍 Premier League abroad', comps: ['pl'] })
     const feed = buildAppFeed(cfg, withCompetitionGroups([abroad]))
     const rows = byId(feed, 900002)
     expect(rows.map((r) => r.group)).toEqual(['🏆 Premier League'])
     expect(rows[0].home).toBeUndefined()
+  })
+
+  test('channels named alike in two countries are two families, both abroad', () => {
+    const feed = buildAppFeed(cfg, withCompetitionGroups([
+      ch(900003, 'PLAY+: CANAL+ SPORT ᴿᴬᵂ', 'test.pl', { group: '🌍 PL', comps: ['ucl'] }),
+      ch(900004, 'SKY: CANAL+ SPORT ᴿᴬᵂ', 'test.cz', { group: '🌍 CZ', comps: ['ucl'] }),
+    ]))
+    const [pl, cz] = [byId(feed, 900003), byId(feed, 900004)]
+    expect(feed.groups).toEqual(['🏆 Champions League'])
+    expect(pl[0].family).not.toBe(cz[0].family)
+    expect([pl[0].abroad, cz[0].abroad]).toEqual([true, true])
   })
 
   test('feeds of one channel share a family, ranked in server order; a mislabelled id stays out', () => {

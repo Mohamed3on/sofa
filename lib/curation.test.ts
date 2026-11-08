@@ -326,10 +326,25 @@ describe('competition groups', () => {
     const out = withCompetitionGroups([
       mk(1, 'UK: SKY SPORTS PREMIER LEAGUE 4K', '🏴 Sky Sports & UK Sports'),
       mk(2, 'NOW: SKY SPORTS PREMIER LEAGUE 4K', '🏴 Sky Sports & UK Sports'),
-      mk(3, 'NZ: SKY SPORTS PREMIER LEAGUE 4K', '🌏 Premier League abroad'),
+      mk(3, 'NZ: SKY SPORTS PREMIER LEAGUE 4K', '🌍 Premier League abroad'),
     ])
     expect(out.filter((c) => c.group === '🏆 Premier League').map((c) => c.streamId).sort()).toEqual([1, 2, 3])
     expect(out.filter((c) => c.group !== '🏆 Premier League').map((c) => c.streamId)).toEqual([1, 2])
+  })
+
+  test('an abroad channel joins a 🏆 group at 1080p+ and at least the worst in-region picture, or when nothing in-region is there', () => {
+    const mk = (streamId: number, name: string, group: string, q: number, extra: Partial<Channel> = {}): Channel =>
+      ({ streamId, name, logo: '', tvgId: 'x', group, isEventSlot: false, q, comps: ['pl'], ...extra })
+    const pl = (chs: Channel[]) => withCompetitionGroups(chs).filter((c) => c.group === '🏆 Premier League').map((c) => c.streamId)
+    const pt1080 = mk(900000011, 'MEO: SPORT TV 1 ᴿᴬᵂ', '🌍 PT', 4)
+    const pt720 = mk(900000012, 'VIP: SPORT TV 2 ᴴᴰ', '🌍 PT', 3)
+    const uk720 = mk(900000001, 'UK: SKY SPORTS PREMIER LEAGUE HD', '🏴 Sky Sports & UK Sports', 3)
+    const uk2160 = mk(900000002, 'UK: EPL 1 PPV ᵁᴴᴰ ³⁸⁴⁰ᴾ', '⚽ Football — Match PPV', 5, { isEventSlot: true })
+    expect(pl([uk720, pt1080, pt720])).toEqual([900000011, 900000001])
+    expect(pl([uk2160, pt1080, pt720])).toEqual([900000002])
+    expect(pl([pt1080, pt720])).toEqual([900000011, 900000012])
+    // never listed on its own
+    expect(withCompetitionGroups([uk720, pt1080]).filter((c) => c.streamId === 900000011).map((c) => c.group)).toEqual(['🏆 Premier League'])
   })
 
   test('a 100fps reading is the 50p field rate, not a better feed', () => {

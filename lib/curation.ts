@@ -160,8 +160,8 @@ const B = {
   es: '🇪🇸 Spanish Sports',
   it: '🇮🇹 Italian Sports',
   fr: '🇫🇷 French Sports',
-  // SG/NZ/HK Premier League channels — listed only under 🏆 Premier League
-  plAbroad: '🌏 Premier League abroad',
+  // SG/NZ/HK Premier League channels — hidden like the other abroad buckets (isAbroad)
+  plAbroad: '🌍 Premier League abroad',
   fbReplay: '📼 Football — Replays',
   ru: '🇷🇺 Russian Channels',
   // Every language's kids channels in one group, by language (English, Arabic, then the rest)
@@ -194,6 +194,38 @@ const CAT_BUCKET: Record<number, string> = {
   304: B.kids, 490: B.kids, 105: B.kids, 42: B.kids, 334: B.kids,
   2063: B.kids247, 2064: B.kids247,
 }
+
+// The provider's 24/7 sports categories from outside the preferred regions, by country. Each country
+// is a hidden bucket ("🌍 PT"): its channels are listed only under the 🏆 groups whose matches they
+// show, and only when their picture holds up against the in-region channels there
+// (withCompetitionGroups; the app's Live now does the same per match). Event/PPV slots are left out.
+const ABROAD: Record<number, string> = {
+  2122: 'PT', 1808: 'PT', 1457: 'PT', 1025: 'PT', // MEO, Desporto VIP, DAZN, Desporto
+  124: 'NL', 1645: 'NL', 1647: 'NL', 1609: 'NL', // Ziggo/ESPN, Canal+ Online, Tele2
+  530: 'BE', // Play Sports, DAZN Pro League, VOO
+  1861: 'CH', 1714: 'CH', 1862: 'CH', // MySports, Blue Sport
+  1630: 'AT', // Canal+ Online (ORF Sport+, Sportdigital)
+  1643: 'PL', 2324: 'PL', 1212: 'PL', // Canal+ Sport, Eleven, Polsat Sport
+  492: 'US', 1094: 'CA', 585: 'CA', 580: 'CA', // US sport, TSN/Sportsnet, TVA/RDS
+  1666: 'BR', // Disney+ ESPN, CazéTV
+  1220: 'GR', 2414: 'GR', // ANT1+/ERT, Nova Sports
+  1328: 'TR', 1466: 'TR', // beIN Türkiye, Tabii
+  2348: 'SE', 1848: 'DK', // Viaplay
+  2341: 'NZ', 2340: 'NZ', // Sky Sport NZ
+  1680: 'CZ', // Skylink (Canal+ Sport, Nova Sport)
+  2195: 'AL', 1668: 'AL', 1425: 'AL', // SuperSport, Tring, K-Sport
+  1214: 'AFR', // Canal+ Afrique
+  557: 'FR', 1627: 'FR', 1491: 'FR', 2119: 'FR', // Canal+, beIN, RMC, Eurosport (Ligue 1+ is in-region)
+}
+// Mixed abroad categories: only their channels this matches.
+const ABROAD_ONLY: Record<number, RegExp> = {
+  1680: /sport/i, 1214: /sport/i, 1848: /sport/i, 2348: /sport|fotboll/i,
+  492: /premier league|tudn|bein|fox sports? [12]\b|fox soccer|eleven|espn (usa|hd|2)|fubo|gol tv|cbs sports|nbc sports network/i,
+}
+// Abroad channels for other sports, film or news; Ligue 1+ abroad is the in-region channel again.
+const ABROAD_NOT = /golf|motor|moto|\bf1\b|formula|\bnba\b|\bnfl\b|\bmlb\b|tennis|cricket|racing|equidia|virtual|fight|kombat|boxing|\bwwe\b|toro|film|series|cinema|news|haber|extreme|olympic|padel|vinter|euro ?sport 360|multi ?sports|ligue ?1 ?\+/i
+/** A hidden bucket: abroad channels, listed only under 🏆 groups. */
+export const isAbroad = (group: string): boolean => group.startsWith('🌍')
 
 // A few of the home provider's categories, by id and exact name: two still there means KEEP's ids are its.
 const HOME_CATEGORIES: Record<number, string> = {
@@ -371,6 +403,8 @@ export interface Channel {
   vodExt?: string
   /** A provider-B feed (withBackupFeeds); its streamId is BACKUP_ID + B's own id. */
   backup?: true
+  /** On a 🏆 copy: the original's group, its family's home even when that group is hidden (isAbroad). */
+  home?: string
 }
 
 const EVENT_GROUP = /PPV|EVENT|REPLAY/i
@@ -735,7 +769,7 @@ async function pullCuratedChannels(cfg: XtreamConfig, vod: boolean): Promise<Cha
   }
 
   const home = isHomeProvider(catName)
-  const keep = home ? KEEP : []
+  const keep = home ? [...KEEP, ...Object.keys(ABROAD).map(Number)] : []
   const keepSet = new Set(keep)
   // Without KEEP, a region's general sport categories ("UK| SPORTS HD") count too: KEEP holds the home ones.
   const auto = (name: string) => autoIncluded(name) || (!home && AUTO_REGION.test(name) && /SPORT/i.test(name) && !STALE_EVENT.test(name))
@@ -750,17 +784,22 @@ async function pullCuratedChannels(cfg: XtreamConfig, vod: boolean): Promise<Cha
   for (const [idx, id] of ids.entries()) {
     const group = catName.get(id)
     if (!group) continue
-    const bucket = (home ? CAT_BUCKET[id] : undefined) ?? (auto(group) ? bucketForCategory(group) : group)
+    const abroad = home ? ABROAD[id] : undefined
+    const bucket = (home ? CAT_BUCKET[id] ?? (abroad && `🌍 ${abroad}`) : undefined) ?? (auto(group) ? bucketForCategory(group) : group)
     const isEventSlot = EVENT_GROUP.test(group)
     const backup = BACKUP_GROUP.test(group) ? 1 : 0
     for (const s of byCat.get(id) ?? []) {
       const fix = PROVIDER_FIX[String(s.name ?? '').trim()]
-      const name = fix?.name ?? String(s.name ?? '').trim()
+      // "CA EN: SPORTSNET ONE 4K" is "CA: SPORTSN ET ONE ᴿᴬᵂ"'s channel: one prefix, one spelling
+      const raw = fix?.name ?? String(s.name ?? '').trim()
+      const name = abroad ? raw.replace(/^(\w\w) (?:EN|FR):/, '$1:').replace(/\bSPORTSN ET\b/, 'SPORTSNET') : raw
       if (!name || SEPARATOR.test(name)) continue
       if (home && CAT_ONLY[id] && !CAT_ONLY[id].test(name)) continue
       if (isEventSlot && DEAD_SLOT.test(name)) continue
       const q = qualityScore(name, group)
       if (q === 0) continue // explicit SD/LQ feeds
+      // abroad: HD or better, steady feeds, football's channels
+      if (abroad && (q < 3 || MOBILE.test(name) || ABROAD_NOT.test(name) || (ABROAD_ONLY[id] && !ABROAD_ONLY[id].test(name)))) continue
       // Russian kids channels ride in the general RU category — route them to the kids group.
       const chBucket = home && id === 6 && RU_KIDS.test(name) ? B.kids : bucket
       // Feeds that only light up during a match (PPV slots, beIN's "(EVENT ONLY)"
@@ -931,7 +970,7 @@ export function withCompetitionGroups(channels: Channel[], upcoming = new Map<st
   const byComp = new Map<string, Row[]>()
   channels.forEach((c, idx) => {
     // Provider-B feeds stay in their home group: the app reaches them through the family.
-    if (c.vodExt || c.backup || !COMP_SOURCE.has(c.group)) return
+    if (c.vodExt || c.backup || !(COMP_SOURCE.has(c.group) || isAbroad(c.group))) return
     const keys = new Set(c.comps)
     // Guide memberships apply to 24/7 channels only — never to event slots (their name IS
     // the event) nor to news/highlights channels whose guide merely mentions a match
@@ -945,6 +984,9 @@ export function withCompetitionGroups(channels: Channel[], upcoming = new Map<st
     const row: Row = { c, rh, rf, lang: languageRank(c.name), region: regionPref(c.name), idx }
     for (const k of keys) (byComp.get(k) ?? byComp.set(k, []).get(k)!).push(row)
   })
+  // Better picture first: height, fps, bitrate detail, audio, marker tier.
+  const picture = (a: Row, b: Row) =>
+    b.rh - a.rh || b.rf - a.rf || detail(b.c.streamId) - detail(a.c.streamId) || audio(b.c.streamId) - audio(a.c.streamId) || (b.c.q ?? 0) - (a.c.q ?? 0)
   const groups: Channel[] = []
   for (const comp of COMPS) {
     const rows = byComp.get(comp.key)
@@ -952,20 +994,26 @@ export function withCompetitionGroups(channels: Channel[], upcoming = new Map<st
     rows.sort(
       (a, b) =>
         Number(a.c.isEventSlot) - Number(b.c.isEventSlot) || flakyRank(a.c.streamId) - flakyRank(b.c.streamId) ||
-        b.rh - a.rh || b.rf - a.rf || detail(b.c.streamId) - detail(a.c.streamId) || audio(b.c.streamId) - audio(a.c.streamId) || (b.c.q ?? 0) - (a.c.q ?? 0) ||
-        a.lang - b.lang || a.region - b.region || a.idx - b.idx,
+        picture(a, b) || a.lang - b.lang || a.region - b.region || a.idx - b.idx,
     )
     const seen = new Map<string, number>()
-    for (const r of rows) {
-      // An abroad channel is another broadcaster's even when named alike (NZ Sky Sport PL ≠ UK's).
-      const k = (r.c.group === B.plAbroad ? 'abroad ' : '') + chanKey(r.c.name)
+    const listed = rows.filter((r) => {
+      // An abroad channel is another broadcaster's even when named alike (NZ Sky Sport PL ≠ UK's, PL Canal+ Sport ≠ CZ's).
+      const k = (isAbroad(r.c.group) ? `${r.c.group} ` : '') + chanKey(r.c.name)
       const n = seen.get(k) ?? 0
-      if (n >= 2) continue // best feed + one spare
+      if (n >= 2) return false // best feed + one spare
       seen.set(k, n + 1)
-      groups.push({ ...r.c, group: comp.group })
+      return true
+    })
+    // An abroad channel is listed when it is 1080p+ and its picture is at least the worst in-region
+    // channel's, or when the group has no in-region channel (TiviMate can't tell matches apart, so the group is the unit).
+    const worst = listed.filter((r) => !isAbroad(r.c.group)).reduce<Row | undefined>((w, r) => (!w || picture(w, r) < 0 ? r : w), undefined)
+    for (const r of listed) {
+      if (worst && isAbroad(r.c.group) && (r.rh < 1080 || picture(r, worst) > 0)) continue
+      groups.push({ ...r.c, group: comp.group, home: r.c.group })
     }
   }
-  return [...groups, ...channels.filter((c) => c.group !== B.plAbroad)]
+  return [...groups, ...channels.filter((c) => !isAbroad(c.group))]
 }
 
 const q = (v: string) => v.replace(/"/g, "'")

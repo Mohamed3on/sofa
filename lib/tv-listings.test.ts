@@ -17,6 +17,15 @@ describe('TV listings', () => {
     expect(parseListings(page('08.11.2026', '23:00', 'LaLiga', 'Atl. Madrid - Barcelona', ['beIN SPORTS 1 EN']), 'Asia/Riyadh')[0].start).toBe(Date.UTC(2026, 10, 8, 20))
   })
 
+  test('month-first and year-first days; a site names only its own country\'s channels', () => {
+    expect(parseListings(page('11/8/2026', '15:00', 'MLS', 'Inter Miami - Chicago Fire', ['FOX Sports 1']), 'America/New_York', true)[0].start).toBe(Date.UTC(2026, 10, 8, 20))
+    expect(parseListings(page('2026-11-08', '20:00', 'Allsvenskan', 'Malmö - Hammarby', ['V Sport 1']), 'Europe/Stockholm')[0].start).toBe(Date.UTC(2026, 10, 8, 19))
+    const ch = (streamId: number, name: string, tvgId: string, group: string): Channel => ({ streamId, name, logo: '', tvgId, group, isEventSlot: false, q: 4 })
+    const placed = placeListings([ch(1, 'PLAY+: CANAL+ SPORT ᴿᴬᵂ', 'pl.c', '🌍 PL'), ch(2, 'SKY: CANAL+ SPORT ᴿᴬᵂ', 'cz.c', '🌍 CZ')],
+      [{ home: '🌍 PL', listings: parseListings(page('08.11.2026', '20:45', 'Ekstraklasa', 'Legia - Lech', ['CANAL+ Sport']), 'Europe/Warsaw') }])
+    expect([...placed[0].ids]).toEqual(['pl.c'])
+  })
+
   test('a listed match goes into its channels\' guides; one the site gives other channels comes out', () => {
     const ch = (streamId: number, name: string, tvgId: string, group: string): Channel => ({ streamId, name, logo: '', tvgId, group, isEventSlot: false, q: 4 })
     const channels = [ch(1, 'ES: MOVISTAR LALIGA ʰᵉᵛᶜ', 'mlaliga.es', '🇪🇸 Spanish Sports'), ch(2, 'VIP: LALIGA TV ᴿᴬᵂ', 'laligatv', '🏴 Sky Sports & UK Sports'),

@@ -1,18 +1,35 @@
 // Which channels show a match, from per-country TV listings sites (one family of sites, one page layout,
-// no bot wall): Spain, Germany, the UK and the Arab world. The guides often lie about a match: Movistar
+// no bot wall): Spain, Germany, the UK, the Arab world, and the countries whose channels are kept abroad
+// (curation.ts ABROAD, each country's hidden "🌍 XX" bucket). The guides often lie about a match: Movistar
 // LaLiga lists "Movistar LaLiga UHD" all evening while it shows Atlético vs Barcelona, DAZN 2 a bare
 // "LaLiga 26/27", and the provider's LaLiga TV lists a match that is on Premier Sports. So a match a
 // country's site gives a channel is put in that channel's guide, and a match the guide gives a channel
 // the site knows, but not for that match, is taken out.
 import { chanKey, teamWords, unxml, type Channel } from './curation.js'
 
-interface Site { url: string; home: string; tz: string }
+/** [home]: the group(s) of the site's country, whose channels its names map to; [mdy]: month-first dates. */
+interface Site { url: string; home: string | string[]; tz: string; mdy?: true }
+// Timezones checked against futbolenlatv.es's kick-offs (2026-11-08).
 const SITES: Site[] = [
   { url: 'https://www.futbolenlatv.es/', home: '🇪🇸 Spanish Sports', tz: 'Europe/Madrid' },
   { url: 'https://www.fussball-im-tv.com/', home: '🇩🇪 German Sports', tz: 'Europe/Berlin' },
   { url: 'https://www.ukfootballontv.co.uk/', home: '🏴 Sky Sports & UK Sports', tz: 'Europe/London' },
   // its kick-offs are on Saudi time (Atlético vs Barcelona, 20:00 UTC, shows 23:00)
   { url: 'https://www.livefootballtv.info/', home: '🇸🇦 beIN & Arabic Sports', tz: 'Asia/Riyadh' },
+  { url: 'https://www.calcio-tv.com/', home: '🇮🇹 Italian Sports', tz: 'Europe/Rome' },
+  { url: 'https://www.foottv.fr/', home: ['🇫🇷 French Sports', '🌍 FR'], tz: 'Europe/Paris' },
+  { url: 'https://www.futebolnatv.pt/', home: '🌍 PT', tz: 'Europe/Lisbon' },
+  { url: 'https://www.voetbalvandaag-tv.nl/', home: '🌍 NL', tz: 'Europe/Amsterdam' },
+  { url: 'https://www.fussball-im-tv.at/', home: '🌍 AT', tz: 'Europe/Vienna' },
+  { url: 'https://www.fussball-im-tv.ch/', home: '🌍 CH', tz: 'Europe/Zurich' },
+  { url: 'https://www.footballtv.pl/', home: '🌍 PL', tz: 'Europe/Warsaw' },
+  { url: 'https://www.fotbaldnestv.cz/', home: '🌍 CZ', tz: 'Europe/Prague' },
+  { url: 'https://www.fodboldidag.dk/', home: '🌍 DK', tz: 'Europe/Copenhagen' },
+  { url: 'https://www.fotbollpatvidag.se/', home: '🌍 SE', tz: 'Europe/Stockholm' },
+  { url: 'https://www.sportsontvusa.com/', home: '🌍 US', tz: 'America/New_York', mdy: true },
+  { url: 'https://www.futbolenvivousa.com/', home: '🌍 US', tz: 'America/New_York', mdy: true },
+  { url: 'https://www.sportsguidetv.com/', home: '🌍 CA', tz: 'America/Toronto' },
+  { url: 'https://www.futebolaovivobrasil.com/', home: '🌍 BR', tz: 'America/Sao_Paulo' },
 ]
 
 /** A match as one site lists it: its teams, competition, kick-off (ms) and channel names. */
@@ -31,15 +48,16 @@ function zoned(y: number, mo: number, d: number, h: number, mi: number, tz: stri
 
 const unescape = (s: string) => unxml(s).trim()
 
-/** A listings page's matches: day headers ("dd/mm/yyyy", the German site's "dd.mm.yyyy"), competition headers, then a row per match. */
-export function parseListings(html: string, tz: string): Listing[] {
+/** A listings page's matches: day headers (day first, "08/11/2026", "08.11.2026", "8-11-2026"; year first, "2026-11-08";
+ *  month first on the US sites, [mdy]), competition headers, then a row per match. */
+export function parseListings(html: string, tz: string, mdy = false): Listing[] {
   const out: Listing[] = []
   let day: number[] | null = null
   let comp = ''
   for (const tr of html.split(/<tr\b/).slice(1)) {
     if (/^[^>]*class="cabeceraTabla/.test(tr)) {
-      const m = tr.match(/(\d\d)[/.](\d\d)[/.](\d{4})/)
-      day = m ? [Number(m[3]), Number(m[2]), Number(m[1])] : null
+      const m = tr.match(/\b(\d{1,4})[/.-](\d{1,2})[/.-](\d{2,4})\b/)?.slice(1).map(Number)
+      day = !m ? null : m[0] > 999 ? m : mdy ? [m[2], m[0], m[1]] : [m[2], m[1], m[0]]
     } else if (/^[^>]*class="cabeceraCompericion/.test(tr)) {
       comp = unescape(tr.match(/title="([^"]*)"/)?.[1] ?? '')
     } else if (day) {
@@ -55,10 +73,15 @@ export function parseListings(html: string, tz: string): Listing[] {
 
 // A site's channel name as the family key it would have: no codes in brackets ("M+ LALIGA (M54 O110)"),
 // no "…: VER PARTIDO", Movistar's "M+" spelled out, "EN"/"FR" feeds by their language, words in any order.
-const sorted = (s: string) => chanKey(s).replace(/\bla liga\b/g, 'laliga').replace(/ ultra hd$/, '').split(' ').sort().join(' ')
+// Accents go ("CAZÉTV"); "Ligue 1+ 5" is the provider's "LIGUE1+ 5", Viaplay's renamed "V Sport" its "VIAPLAY SPORT", the provider's
+// "DISNEY+ ESPN" and "VIAPLAY TV3 SPORT" the sites' "ESPN" and "TV3 Sport".
+const sorted = (s: string) =>
+  chanKey(s.normalize('NFD').replace(/\p{M}/gu, '')).replace(/\bla liga\b/g, 'laliga').replace(/\bligue 1\b/g, 'ligue1').replace(/ ultra hd$/, '')
+    .replace(/^v sport football$/, 'viaplay fotboll').replace(/^v sport\b/, 'viaplay sport').replace(/^(?:disney|viaplay) (?=espn|tv\d)/, '')
+    .split(' ').sort().join(' ')
 const siteKeys = (name: string): string[] => {
   if (/\(turkey\)/i.test(name)) return [] // beIN Türkiye, not the Arab beIN
-  const s = name.replace(/\(.*?\)/g, '').replace(/:.*$/, '').replace(/\bEN$/, 'english').replace(/\bFR$/, 'france').trim()
+  const s = name.replace(/\(.*?\)/g, '').replace(/:.*$/, '').replace(/\bEN$/, 'english').replace(/\bFR$/, 'france').replace(/ Direct$/i, '').trim()
   return /^m\+/i.test(s) ? [sorted(s.replace(/^m\+\s*/i, 'movistar ')), sorted(s.replace(/^m\+\s*/i, ''))] : [sorted(s)]
 }
 
@@ -66,7 +89,7 @@ const siteKeys = (name: string): string[] => {
 export interface Placed { title: string; start: number; sides: [string[], string[]]; ids: Set<string>; known: Set<string> }
 
 /** [listings] by site, placed on [channels] (their home groups as the site's country). */
-export function placeListings(channels: Channel[], listings: { home: string; listings: Listing[] }[]): Placed[] {
+export function placeListings(channels: Channel[], listings: { home: string | string[]; listings: Listing[] }[]): Placed[] {
   const ids = new Map<string, Set<string>>() // home|sorted key -> tvg-ids
   for (const c of channels) {
     if (c.isEventSlot || !c.tvgId) continue
@@ -74,7 +97,7 @@ export function placeListings(channels: Channel[], listings: { home: string; lis
     ;(ids.get(k) ?? ids.set(k, new Set()).get(k)!).add(c.tvgId)
   }
   return listings.flatMap(({ home, listings }) => {
-    const idsOf = (name: string) => siteKeys(name).flatMap((k) => [...(ids.get(`${home}|${k}`) ?? [])])
+    const idsOf = (name: string) => [home].flat().flatMap((h) => siteKeys(name).flatMap((k) => [...(ids.get(`${h}|${k}`) ?? [])]))
     const known = new Set(listings.flatMap((l) => l.channels.flatMap(idsOf)))
     return listings.map((l) => ({
       title: `${l.home} vs ${l.away}${l.comp ? ` - ${l.comp}` : ''}`,
@@ -133,15 +156,15 @@ export function applyListings(
 }
 
 const LISTINGS_TTL = 2 * 3600_000
-let cache: { at: number; job: Promise<{ home: string; listings: Listing[] }[]> } | undefined
+let cache: { at: number; job: Promise<{ home: string | string[]; listings: Listing[] }[]> } | undefined
 
 /** Every site's matches, fetched at most every 2 h; a site that fails is left out until the next try. */
-export function fetchListings(): Promise<{ home: string; listings: Listing[] }[]> {
+export function fetchListings(): Promise<{ home: string | string[]; listings: Listing[] }[]> {
   if (!cache || Date.now() - cache.at > LISTINGS_TTL) {
     const job = Promise.all(SITES.map(async (s) => {
       try {
         const res = await fetch(s.url, { headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36' }, signal: AbortSignal.timeout(15_000) })
-        return { home: s.home, listings: res.ok ? parseListings(await res.text(), s.tz) : [] }
+        return { home: s.home, listings: res.ok ? parseListings(await res.text(), s.tz, s.mdy) : [] }
       } catch {
         return { home: s.home, listings: [] }
       }

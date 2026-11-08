@@ -1,7 +1,7 @@
 // Builders for the Fire TV app's own feeds (/api/app/*). They read the same curated
 // channels and guide as the TiviMate feeds, so both apps always show the same thing.
 import { Database } from 'bun:sqlite'
-import { chanKey, COMPS, couldBeLiveMatch, curatedGuide, learnedCompetitions, replayAirings, teamWords, saneFps, unxml, type Channel } from './curation.js'
+import { chanKey, COMPS, isAbroad, couldBeLiveMatch, curatedGuide, learnedCompetitions, replayAirings, teamWords, saneFps, unxml, type Channel } from './curation.js'
 import { VPN_HOST, type BackupConfig, type XtreamConfig } from './provider.js'
 import type { TitleMatch } from './crests.js'
 import { detailRank, medianMbps, qualityOf } from './quality.js'
@@ -33,6 +33,8 @@ export interface AppChannel {
   detail?: number
   /** The provider keeps letting this feed down (flakyRank); absent when it doesn't. */
   flaky?: true
+  /** From outside the preferred regions (a hidden 🌍 bucket): Live now lists it only when its picture holds up. */
+  abroad?: true
 }
 
 type ProviderRoute = { plain: string; vpn: string; user: string; pass: string }
@@ -72,7 +74,7 @@ export function buildAppFeed(cfg: XtreamConfig, channels: Channel[], backup?: Ba
   const live = channels.filter((c) => !c.vodExt)
   const home = new Map<number, string>()
   for (const c of live) if (!isComp(c.group) && !home.has(c.streamId)) home.set(c.streamId, c.group)
-  const familyOf = (c: Channel) => `${home.get(c.streamId) ?? c.group}|${chanKey(c.name)}`
+  const familyOf = (c: Channel) => `${home.get(c.streamId) ?? c.home ?? c.group}|${chanKey(c.name)}`
   // Members in server order: home groups first (they are quality-sorted), then 🏆-only channels.
   // A 🏆 copy shares its original's streamId, so it is never counted as a backup.
   const members = new Map<string, number[]>()
@@ -107,6 +109,7 @@ export function buildAppFeed(cfg: XtreamConfig, channels: Channel[], backup?: Ba
         mbps: medianMbps(qualityOf(c.streamId)),
         ...(detailRank(qualityOf(c.streamId)) !== 1 && { detail: detailRank(qualityOf(c.streamId)) }),
         ...(flakyRank(c.streamId) && { flaky: true as const }),
+        ...(isAbroad(c.home ?? c.group) && { abroad: true as const }),
       }
     }),
   }
