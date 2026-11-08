@@ -60,6 +60,8 @@ interface Store {
   showDubs?: Record<string, number>
   showsCrawled?: number
   packs?: Record<string, Pack | { none: true }>
+  /** The Arabic dubs a file's audio tracks carry ("arz": one named for Egypt), by hash (a film) or `hash:s<season>` (a pack's season, read off one episode). */
+  dialects?: Record<string, string[]>
 }
 const storeFile = () => process.env.ARABP2P_CACHE_FILE ?? fileURLToPath(new URL('../.cache/arabp2p.json', import.meta.url))
 // One copy in memory (only the server writes the file; the library build only reads it), saved whole after each change.
@@ -645,17 +647,98 @@ export async function arabp2pCopies(tmdb: string, t: TmdbTitle): Promise<{ copie
   })
   const held = await onTorBox([...new Set(known.map((k) => k.h.hash))], s)
   const copies = known.filter((k) => held.has(k.h.hash)).map(({ row, h }) => {
+    if (row.dub) probeDialects(s, h.hash, h.hash, h.filename)
     const a = parseRelease(`${row.title}\n${h.filename}`)
     return {
       src: 'rd' as const, hash: h.hash, file: h.file, filename: h.filename, name: row.title, size: h.size || row.size, seeds: row.seeds,
       ...(process.env.TORBOX_TOKEN && { cached: true as const }),
       ...a,
       // A dub's audio is Arabic ("arz" too for an Egyptian dub; often with the original too); an Arabic film's is the original, named or not.
-      langs: row.dub ? [...new Set(['ar', ...(row.egyptian ? ['arz'] : []), ...a.langs])] : a.langs,
+      langs: row.dub ? dubLangs(row, s.dialects?.[h.hash], a.langs) : a.langs,
     }
   })
   return { copies, pending: jobs.has(tmdb) }
 }
+
+// --- Which Arabic a file speaks ----------------------------------------------------------------------------
+
+/** The audio tracks an MKV file's first bytes list: each one's language (BCP 47 when given) and name. */
+export function mkvAudio(b: Uint8Array): { lang: string; name: string }[] {
+  const out: { lang: string; name: string }[] = []
+  const num = (i: number) => {
+    const n = Math.clz32(b[i] ?? 0) - 23
+    let v = 0
+    for (let k = 0; k < n; k++) v = v * 256 + (b[i + k] ?? 0)
+    return { n, v }
+  }
+  const text = (from: number, to: number) => new TextDecoder().decode(b.subarray(from, to)).replace(/\0+$/, '')
+  // Each element in [from, to): its id (marker kept), where its data starts and ends; false stops.
+  const each = (from: number, to: number, f: (id: number, at: number, end: number) => boolean | void) => {
+    for (let i = from; i < Math.min(to, b.length);) {
+      const id = num(i), size = num(i + id.n)
+      if (id.n > 4 || size.n > 8) return
+      const at = i + id.n + size.n, max = 2 ** (7 * size.n)
+      const end = size.v - max === max - 1 ? to : at + size.v - max
+      if (f(id.v, at, end) === false) return
+      i = end
+    }
+  }
+  each(0, b.length, (id, at, end) => {
+    if (id !== 0x18538067) return
+    each(at, end, (id, at, end) => {
+      if (id === 0x1f43b675) return false
+      if (id !== 0x1654ae6b) return
+      each(at, end, (id, at, end) => {
+        if (id !== 0xae) return
+        let type = 0, lang = 'eng', name = ''
+        each(at, end, (id, at, end) => {
+          if (id === 0x83) type = b[at]
+          else if (id === 0x22b59c && lang === 'eng') lang = text(at, end)
+          else if (id === 0x22b59d) lang = text(at, end)
+          else if (id === 0x536e) name = text(at, end)
+        })
+        if (type === 2) out.push({ lang, name })
+      })
+      return false
+    })
+    return false
+  })
+  return out
+}
+
+/** The Arabic dubs among [tracks]: "arz" for one named or tagged for Egypt, "ar" for any other. */
+export const dialects = (tracks: { lang: string; name: string }[]) =>
+  [...new Set(tracks.filter((t) => /^(ara?|arz)\b/i.test(t.lang)).map((t) => (/egypt|مصر/i.test(t.name) || /^arz|-EG$/i.test(t.lang) ? 'arz' : 'ar')))]
+
+const probing = new Set<string>()
+let probes = Promise.resolve()
+/** Reads, in the background and one at a time, which Arabic dubs [hash]'s [filename] carries, off its header through TorBox, into the store under [key]. */
+function probeDialects(s: Store, key: string, hash: string, filename: string) {
+  const token = process.env.TORBOX_TOKEN
+  if (!token || s.dialects?.[key] || probing.has(key)) return
+  probing.add(key)
+  const tb = 'https://api.torbox.app/v1/api/torrents'
+  const auth = { Authorization: `Bearer ${token}` }
+  probes = probes.then(async () => {
+    const form = new FormData()
+    form.set('magnet', `magnet:?xt=urn:btih:${hash}`)
+    form.set('add_only_if_cached', 'true')
+    const added = (await (await fetch(`${tb}/createtorrent`, { method: 'POST', headers: auth, body: form, signal: AbortSignal.timeout(20_000) })).json()) as { data?: { torrent_id?: number } }
+    const id = added.data?.torrent_id
+    if (!id) return
+    const list = await getJson<{ data?: { files?: { id: number; name: string }[] } }>(`${tb}/mylist?id=${id}&bypass_cache=true`, { headers: auth })
+    const file = list.data?.files?.find((f) => f.name.endsWith(filename))
+    const link = file && (await getJson<{ data?: string }>(`${tb}/requestdl?token=${token}&torrent_id=${id}&file_id=${file.id}`)).data
+    if (!link) return
+    const head = await fetch(link, { headers: { Range: 'bytes=0-1048575' }, signal: AbortSignal.timeout(30_000) })
+    ;(s.dialects ??= {})[key] = dialects(mkvAudio(new Uint8Array(await head.arrayBuffer())))
+    await save()
+  }).catch((e) => console.warn(`arabp2p: dialects of ${key} failed (${e instanceof Error ? e.message : e})`))
+}
+
+/** A dub's audio: Arabic, Egyptian too when its name or its tracks say so, and what its name lists. */
+const dubLangs = (row: Row, heard: string[] | undefined, named: string[]) =>
+  [...new Set(['ar', ...(row.egyptian || heard?.includes('arz') ? ['arz'] : []), ...named])]
 
 // --- Dubbed shows ------------------------------------------------------------------------------------------
 
@@ -737,12 +820,13 @@ export async function arabp2pEpisodeCopies(tmdb: string, t: TmdbTitle, season: n
   })
   const held = await onTorBox([...new Set(known.map((k) => k.hash))], s)
   const copies = known.filter((k) => held.has(k.hash)).map(({ row, hash, ep: [file, filename, size] }) => {
+    probeDialects(s, `${hash}:s${season}`, hash, filename)
     const a = parseRelease(`${row.title}\n${filename}`)
     return {
       src: 'rd' as const, hash, file, filename, name: row.title, size, seeds: row.seeds,
       ...(process.env.TORBOX_TOKEN && { cached: true as const }),
       ...a,
-      langs: [...new Set(['ar', ...(row.egyptian ? ['arz'] : []), ...a.langs])],
+      langs: dubLangs(row, s.dialects?.[`${hash}:s${season}`], a.langs),
     }
   })
   return { copies, pending: showJobs.has(tmdb) }

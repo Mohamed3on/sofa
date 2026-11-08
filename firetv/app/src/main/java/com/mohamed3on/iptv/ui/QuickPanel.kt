@@ -43,12 +43,12 @@ import kotlinx.coroutines.launch
 import com.mohamed3on.iptv.data.RouteKind
 import com.mohamed3on.iptv.player.AudioOption
 import com.mohamed3on.iptv.player.AudioState
+import com.mohamed3on.iptv.player.audioName
 import com.mohamed3on.iptv.ui.theme.Motion
 import com.mohamed3on.iptv.ui.theme.Space
 import com.mohamed3on.iptv.ui.theme.Type
 import com.mohamed3on.iptv.ui.theme.material
 import com.mohamed3on.iptv.ui.theme.PanelRow
-import java.util.Locale
 
 private val PANEL_WIDTH = 420.dp
 
@@ -248,9 +248,7 @@ private fun routeValue(choice: RouteChoice, effective: RouteKind) =
     else routeName(choice)
 
 internal fun languageName(option: AudioOption): String =
-    option.language?.takeIf { it.isNotBlank() && it != "und" }
-        ?.let { Locale.forLanguageTag(it).getDisplayLanguage(Locale.ENGLISH).ifBlank { it } }
-        ?: "Unknown language"
+    option.language?.takeIf { it.isNotBlank() && it != "und" }?.let(::audioName) ?: "Unknown language"
 
 /** "English · AC3 · 5.1". */
 internal fun audioLabel(option: AudioOption): String =

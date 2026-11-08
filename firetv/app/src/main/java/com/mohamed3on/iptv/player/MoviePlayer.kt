@@ -148,7 +148,7 @@ class ExoFilmPlayer(private val exo: ExoPlayer) : FilmPlayer {
             val asked = wanted?.let(Util::normalizeLanguageCode)
             val inLanguage = audio.filter { asked != null && it.getTrackFormat(0).language?.let(Util::normalizeLanguageCode) == asked }
             // Arabic asked for, the Egyptian dub ("Arabic (Egyptian)", "مصري") plays over the file's Fusha one.
-            if (asked == "ar") inLanguage.firstOrNull { plays(it) && EGYPTIAN_LABEL.containsMatchIn(it.getTrackFormat(0).label.orEmpty()) }?.let {
+            if (asked == "ar") inLanguage.firstOrNull { plays(it) && trackLanguage(it.getTrackFormat(0)) == EGYPTIAN }?.let {
                 exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setOverrideForType(TrackSelectionOverride(it.mediaTrackGroup, 0)).build()
             }
             when {
@@ -281,7 +281,4 @@ private const val TOP_UP_BYTES = 8 * 1024 * 1024
 private const val TOP_UP_MS = 5_000
 
 /** A commentary track: flagged so by its container, or named so. */
-/** A track name for the Egyptian dub ("Arabic (Egyption)" as Bluey's pack spells it, "مصري"). */
-private val EGYPTIAN_LABEL = Regex("egypt|مصر", RegexOption.IGNORE_CASE)
-
 private fun isCommentary(f: Format) = f.roleFlags and C.ROLE_FLAG_COMMENTARY != 0 || f.label?.contains("comment", ignoreCase = true) == true

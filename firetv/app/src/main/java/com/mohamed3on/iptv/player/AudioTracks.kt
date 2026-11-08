@@ -50,14 +50,20 @@ private fun audioState(tracks: Tracks): AudioState {
         // "Supported" counts a decoder that exists but doubts the parameters: only a missing decoder hides a track.
         (0 until group.length).filter { group.isTrackSupported(it, true) }.map { i ->
             val format = group.getTrackFormat(i)
-            AudioOption(format.language, chipName(format.sampleMimeType), format.channelCount, group.mediaTrackGroup, i)
+            AudioOption(trackLanguage(format), chipName(format.sampleMimeType), format.channelCount, group.mediaTrackGroup, i)
                 .also { if (group.isTrackSelected(i)) selected = it }
         }
     }
     return AudioState(options, selected)
 }
 
-/** One subtitle track: [language] as an ISO 639-1 code where known, [label] the file's own name for it. */
+/** A track name for the Egyptian dub ("Arabic (Egyption)" as Bluey's pack spells it, "مصري"). */
+private val EGYPTIAN_LABEL = Regex("egypt|مصر", RegexOption.IGNORE_CASE)
+
+/** A track's language: [EGYPTIAN] for an Arabic one named for Egypt, so it reads apart from the Fusha one. */
+internal fun trackLanguage(f: Format): String? = if (f.language == "ar" && EGYPTIAN_LABEL.containsMatchIn(f.label.orEmpty())) EGYPTIAN else f.language
+
+/** One subtitle track:[language] as an ISO 639-1 code where known, [label] the file's own name for it. */
 data class SubtitleOption(val language: String?, val label: String?, val group: TrackGroup, val track: Int)
 
 /** [selected] is null when subtitles are off. */

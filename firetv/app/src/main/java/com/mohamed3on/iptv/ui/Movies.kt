@@ -1246,10 +1246,10 @@ private fun playTrailer(context: Context, key: String) {
 /**
  * The audio languages a film's copies have, as flagged chips (🇬🇧 English, 🇪🇬 Egyptian, 🇪🇬 Arabic; only with two or more): the
  * chosen one (else the default: "Arabic dub first" or the original) is outlined; OK on another makes Play open its best copy on that
- * track, for this film from then on.
+ * track, for this film (or [chooseFor], a show's every episode) from then on.
  */
 @Composable
-private fun AudioChips(title: TitleId, prepared: Prepared) {
+private fun AudioChips(title: TitleId, prepared: Prepared, chooseFor: TitleId = title) {
     val graph = LocalContext.current.graph
     val copies = prepared.answer?.copies ?: return
     val langs = audioChoices(copies.copies, copies.originalLanguage)
@@ -1257,7 +1257,7 @@ private fun AudioChips(title: TitleId, prepared: Prepared) {
     val chosen = prepared.ranking?.language ?: copies.originalLanguage
     Row(Modifier.appear(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
         for (l in langs) PageButton(listOfNotNull(FLAGS[l], audioName(l)).joinToString(" "), {
-            graph.copyChoices.language(title, l)
+            graph.copyChoices.language(chooseFor, l)
             graph.films.rerank(title)
         }, selected = l == chosen, small = true)
     }
@@ -2412,6 +2412,11 @@ private fun ShowPage(
                                 episodes == null -> Waiting("Loading episodes…", Modifier.focusRequester(primary).focusable())
                                 else -> Text("No episodes yet", style = Type.body, modifier = Modifier.focusRequester(primary).focusable().appear())
                             }
+                        }
+                        // The episode up next's audio languages; a choice holds for every episode.
+                        if (next != null) key(next.titleId) {
+                            val prepared by remember { graph.films.state(next.titleId) }.collectAsState()
+                            AudioChips(next.titleId, prepared, chooseFor = show.titleId)
                         }
                         if (failed) Text("Episodes didn’t load. Check that the Fire TV is online.", style = Type.caption, modifier = Modifier.appear())
                     }

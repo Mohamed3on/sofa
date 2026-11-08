@@ -254,6 +254,9 @@ private fun versus(a: Ranked, b: Ranked, fit: Boolean = true): Int = when {
     else -> 0
 }
 
+/** An episode's part of its title id ("tv:82728:s2e1" → "tv:82728"). */
+private val EPISODE = Regex(":s\\d+e\\d+$")
+
 /** The box's tag for an Egyptian Arabic dub (ISO 639-3), listed beside "ar". */
 const val EGYPTIAN = "arz"
 
@@ -370,8 +373,8 @@ class CopyChoices(private val store: KeyValueStore, private val now: () -> Long 
     fun rank(titleId: String, copies: List<Copy>, originalLanguage: String?, setup: SetupProfile, typicalMbps: (Source) -> Float?) =
         rankCopies(copies, originalLanguage, setup, typicalMbps, marks(setup), corrections(setup), pin(titleId), learnt(setup), prefer(titleId, copies), lacking())
 
-    /** The audio language for [titleId]: chosen on its page, else with "Arabic dub first" an Egyptian dub when it has one, else Arabic. */
-    @Synchronized fun prefer(titleId: String, copies: List<Copy>): String? = languages[titleId]
+    /** The audio language for [titleId]: chosen on its page (an episode's, else its show's), else with "Arabic dub first" an Egyptian dub when it has one, else Arabic. */
+    @Synchronized fun prefer(titleId: String, copies: List<Copy>): String? = languages[titleId] ?: languages[titleId.replace(EPISODE, "")]
         ?: if (dubFirst) EGYPTIAN.takeIf { copies.any { EGYPTIAN in it.languages } } ?: "ar" else null
 
     /** Copy ids with the audio languages their files were found to lack. */

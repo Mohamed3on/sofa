@@ -96,6 +96,7 @@ import com.mohamed3on.iptv.ui.theme.reveal
 import com.mohamed3on.iptv.ui.theme.slideFade
 import com.mohamed3on.iptv.ui.theme.KeyCap
 import com.mohamed3on.iptv.player.Copy
+import com.mohamed3on.iptv.player.EGYPTIAN
 import com.mohamed3on.iptv.player.FilmPhase
 import com.mohamed3on.iptv.player.FilmState
 import com.mohamed3on.iptv.player.IdleWatch
@@ -385,7 +386,7 @@ internal fun MoviePlayback(
                     graph.copyChoices.dubFirst = dubFirst
                     opened.plan.rerank()
                     // On: the Arabic track now, when this file has one.
-                    if (dubFirst) audioState.options.firstOrNull { it.language == "ar" }?.let(audio::select)
+                    if (dubFirst) audioState.options.let { o -> o.firstOrNull { it.language == EGYPTIAN } ?: o.firstOrNull { it.language == "ar" } }?.let(audio::select)
                 },
                 onFromStart = {
                     panel = false
