@@ -1019,7 +1019,7 @@ private fun UpNextPage(
         ) { (m, r, i) ->
             Column(Modifier.padding(start = EDGE).widthIn(max = PAGE_WIDTH), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                 FitText(m.title.title, style = Type.pageTitle, active = true)
-                MetaLine(m, i)
+                MetaLine(m, i, hero = true)
                 Row(Modifier.padding(top = Space.xs), horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
                     Text(listOfNotNull(r.label, r.takeIf { it.dur > 0 && it.pos > 0 }?.let { leftLabel(it.dur - it.pos) }).joinToString(" · "), style = Type.headline, maxLines = 1)
                     if (r.dur > 0) ProgressLine({ r.pos.toFloat() / r.dur }, Modifier.width(PROGRESS_WIDTH))
@@ -1120,10 +1120,11 @@ private val NEW_STYLE = Type.caption.copy(color = Palette.accent, fontWeight = F
 
 /**
  * IMDb's and Letterboxd's averages (or TrueScore's) and the owner's rating ([scoresLine]), then year, running time and genres (the provider's rating when
- * no average is known); the group when nothing names genres.
+ * no average is known); the group when nothing names genres. A [hero] (Up next, the rows' focused title) says the scores as one number,
+ * the card's ([heroScores]); the title page carries the whole breakdown.
  */
 @Composable
-private fun MetaLine(movie: Movie, info: MovieInfo?, extra: String? = null, modifier: Modifier = Modifier) {
+private fun MetaLine(movie: Movie, info: MovieInfo?, extra: String? = null, modifier: Modifier = Modifier, hero: Boolean = false) {
     val genre = info?.genre?.split(',', '/')?.map(String::trim)?.filter(String::isNotEmpty)?.take(2)?.joinToString(", ")?.ifEmpty { null }
     val runtime = (info?.secs?.takeIf { it > 0 }?.let { it * 1000L } ?: movie.lib?.rt?.takeIf { it > 0 }?.let { it * 60_000L })?.let(::runtimeLabel)
     val scored: Scored? = movie.lib?.takeIf { it.known } ?: info
@@ -1131,7 +1132,7 @@ private fun MetaLine(movie: Movie, info: MovieInfo?, extra: String? = null, modi
     val yours = LocalContext.current.graph.marks.ratings.collectAsState().value[movie.titleId]
     // Without TrueScore's own ratio, the title page's histogram share stands in (TrueScore's line, no recent trend).
     val net = info?.takeIf { it.hn != null && scored?.tr == null }?.let { it.copy(tr = it.hn, s = it.s ?: scored?.s, ir = it.ir ?: scored?.ir, iv = it.iv ?: scored?.iv, lb = it.lb ?: scored?.lb, lv = it.lv ?: scored?.lv) }
-    val scores = remember(scored, yours, net) { scoresLine(net ?: scored, yours, onImdb = net?.hs == "i") }
+    val scores = remember(scored, yours, net, hero) { if (hero) heroScores(scored, yours) else scoresLine(net ?: scored, yours, onImdb = net?.hs == "i") }
     // The facts go under the scores when both don't fit on one line (beside a show's episodes); only then does a line scroll.
     FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(Space.m), itemVerticalAlignment = Alignment.CenterVertically) {
         if (scores != null) Text(scores, style = SCORE_STYLE, maxLines = 1, inlineContent = SCORE_LOGOS)
@@ -1174,6 +1175,28 @@ private fun scoresLine(scored: Scored?, yours: Int?, onImdb: Boolean = false): A
             }
             if (yours != null) {
                 part()
+                append("You ")
+                withStyle(SpanStyle(color = Palette.outOf10(yours.toDouble()))) { append("$yours/10") }
+            }
+        }
+    }
+}
+
+/**
+ * A hero's scores in one number: the card's chip ([cardChip], a net-loved share behind a heart, else the score out of 10, in its colour),
+ * then the owner's rating; null when neither is known.
+ */
+private fun heroScores(scored: Scored?, yours: Int?): AnnotatedString? {
+    val chip = scored?.let(::cardChip)
+    if (chip == null && yours == null) return null
+    return buildAnnotatedString {
+        withStyle(SpanStyle(color = Palette.textSecondary)) {
+            if (chip != null) {
+                if (scored?.let { it.tq ?: it.tr } != null) append("♥ ")
+                append(chip)
+            }
+            if (yours != null) {
+                if (chip != null) append(" · ")
                 append("You ")
                 withStyle(SpanStyle(color = Palette.outOf10(yours.toDouble()))) { append("$yours/10") }
             }
@@ -1359,7 +1382,7 @@ private fun Hero(movie: Movie?, info: MovieInfo?, resume: List<Resume>, placehol
                     listOfNotNull(r.label, r.takeIf { it.dur > 0 && it.pos > 0 }?.let { leftLabel(it.dur - it.pos) }).joinToString(" · ").ifEmpty { null }
                 }
             }
-            MetaLine(m, i, extra = left)
+            MetaLine(m, i, extra = left, hero = true)
             i?.plot?.ifBlank { null }?.let { ScrollText(it, style = Type.prose, lines = 2, modifier = Modifier.widthIn(max = PROSE_WIDTH)) }
         }
     }
