@@ -111,17 +111,22 @@ describe('sibling feeds', () => {
   })
 
   test('EPG: the provider continues a channel where its myepg schedule runs out', () => {
-    const prog = (start: string, stop: string, title: string) =>
-      `<programme start="${start} +0000" stop="${stop} +0000" channel="b1.qa"><title>${title}</title></programme>`
-    const provider = prog('20261108170000', '20261108190000', 'Man Utd vs Villa (provider)') + prog('20261108190000', '20261108220000', 'Atletico vs Barcelona')
-    const xml = buildEventEpg([{ streamId: 1, name: 'beIN 1', logo: '', tvgId: 'b1.qa', group: 'ar', isEventSlot: false, q: 4 }], provider, {
-      programmes: [prog('20261108170000', '20261108190000', 'Man Utd vs Villa')],
-      covered: new Set(['b1.qa']),
+    const prog = (start: string, stop: string, title: string, off = '+0000') =>
+      `<programme start="${start} ${off}" stop="${stop} ${off}" channel="B1.qa"><title>${title}</title></programme>`
+    // myepg on the right clock; the provider's mixed-case id 3h late, listing the channel twice
+    const provider = prog('20261108200000', '20261108220000', 'Man Utd vs Villa (provider)') +
+      prog('20261108220000', '20261109010000', 'Atletico vs Barcelona') + prog('20261108221500', '20261109011500', 'Atletico vs Barcelona (2nd listing)') +
+      prog('20261109010000', '20261109020000', 'Highlights')
+    const xml = buildEventEpg([{ streamId: 1, name: 'beIN 1', logo: '', tvgId: 'B1.qa', group: 'ar', isEventSlot: false, q: 4 }], provider, {
+      programmes: [prog('20261108160000', '20261108170000', 'Palace vs Liverpool'), prog('20261108170000', '20261108190000', 'Man Utd vs Villa')],
+      covered: new Set(['B1.qa']),
       icons: new Map(),
     })
-    expect(xml).toContain('<title>Man Utd vs Villa</title>')
+    expect(xml).toContain('start="20261108170000 +0000" stop="20261108190000 +0000" channel="B1.qa"><title>Man Utd vs Villa</title>')
     expect(xml).not.toContain('(provider)')
-    expect(xml).toContain('<title>Atletico vs Barcelona</title>')
+    expect(xml).toContain('start="20261108220000 +0300" stop="20261109010000 +0300" channel="B1.qa"><title>Atletico vs Barcelona</title>')
+    expect(xml).not.toContain('(2nd listing)')
+    expect(xml).toContain('<title>Highlights</title>')
   })
 
   test('EPG: guide ids match in any case, and Jev matches feed further channels', async () => {

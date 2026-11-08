@@ -1316,15 +1316,21 @@ export function buildEventEpg(
     })
   // myepg real programmes (channel attr already rewritten to our tvg-ids)
   const blocks: [string, string][] = (myepg?.programmes ?? []).map((p) => [programmeChannel(p), p])
-  // provider programmes for channels myepg lacks, and for the ones whose myepg schedule runs out
-  // first (its beIN 1 stopped one match short of the provider's)
-  const myepgEnd = new Map<string, number>()
-  for (const [id, p] of blocks) myepgEnd.set(id, Math.max(myepgEnd.get(id) ?? 0, at(p, 'stop') || 0))
+  // provider programmes for channels myepg lacks; for the ones it covers, kept aside to carry on
+  // where myepg's schedule runs out (its beIN 1 stopped one match short of the provider's)
   const seenProg = new Set<string>()
+  const tails = new Map<string, string[]>()
   if (providerXml) {
     for (const m of providerXml.matchAll(/<programme\b[^>]*\bchannel="([^"]*)"[^>]*>[\s\S]*?<\/programme>/g)) {
-      if (m[1].endsWith('.qa')) (/[A-Z]/.test(m[1]) ? lateKeys : okKeys).add(progKey(m[0]))
-      if (!wantIds.has(m[1]) && !(at(m[0], 'start') >= (myepgEnd.get(m[1]) ?? Infinity))) continue
+      const late = m[1].endsWith('.qa') && /[A-Z]/.test(m[1])
+      if (m[1].endsWith('.qa')) (late ? lateKeys : okKeys).add(progKey(m[0]))
+      if (covered.has(m[1])) {
+        // on the right clock already: the provider's clock goes by the id's case, not by the
+        // channel's myepg programmes, which may be on either
+        ;(tails.get(m[1]) ?? tails.set(m[1], []).get(m[1])!).push(late ? lessThree(m[0]) : m[0])
+        continue
+      }
+      if (!wantIds.has(m[1])) continue
       const startM = m[0].match(/\bstart="([^"]*)"/)
       const k = m[1] + '|' + (startM ? startM[1] : out.length)
       if (seenProg.has(k)) continue // skip duplicate programme declarations
@@ -1339,6 +1345,16 @@ export function buildEventEpg(
     if (d) lateness.set(id, (lateness.get(id) ?? 0) + d)
   }
   for (const [id, p] of blocks) real(id, (lateness.get(id) ?? 0) > 0 ? lessThree(p) : p)
+  // The tail starts where myepg's last programme ends and never overlaps itself: the provider often
+  // lists a channel twice, on schedules a few minutes apart.
+  for (const [id, tail] of tails) {
+    let end = Math.max(...(realByCh.get(id) ?? []).map((p) => at(p, 'stop') || 0))
+    for (const p of tail.sort((a, b) => at(a, 'start') - at(b, 'start'))) {
+      if (!(at(p, 'start') >= end)) continue
+      real(id, p)
+      end = at(p, 'stop')
+    }
+  }
   // Parallel feeds of one channel can carry DIFFERENT provider tvg-ids — TNT Sports 1
   // is "TNTSport1.uk" on the UK/VIP feeds but "tntsports1.uk" on NOW, and only the
   // latter exists in the guides — so an id with no programmes borrows its name-
