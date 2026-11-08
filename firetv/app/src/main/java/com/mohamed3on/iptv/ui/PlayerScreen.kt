@@ -309,18 +309,20 @@ private fun PlayerChrome(
                 val g = guide
                 val now = System.currentTimeMillis() / 1000
                 // The guide can be swapped (and the old file closed) mid-read after a download.
-                val matches = withContext(Dispatchers.IO) {
-                    runCatching { feed.liveNow(g?.airingMatches(now).orEmpty()).context }.getOrNull()
+                val live = withContext(Dispatchers.IO) {
+                    runCatching { feed.liveNow(g?.airingMatches(now).orEmpty()) }.getOrNull()
                 } ?: return@launch
+                val matches = live.context
                 val from = session.state.value.requested
-                val to = stepThrough(matches, from, action.down)
+                // From another channel showing a match, the step is from that match's row.
+                val to = stepThrough(matches, from?.let { live.matchOf(it)?.tune } ?: from, action.down)
                 if (matches.isEmpty()) note = from?.identity to "No matches on right now"
                 if (to == null) {
                     bannerKick++
                     return@launch
                 }
                 down = action.down
-                zapContext = matches
+                zapContext = live.contextFor(to)
                 session.zap(to, feed)
             }
             KeyAction.Close -> {

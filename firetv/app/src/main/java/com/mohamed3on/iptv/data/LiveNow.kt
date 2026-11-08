@@ -14,6 +14,12 @@ data class LiveNow(val matches: List<LiveEntry>, val slots: List<LiveEntry>) {
     val entries get() = matches + slots
     /** The zap context a Live now tune carries: Up/Down walk these, one stop per channel. */
     val context get() = entries.map { it.tune }.distinctBy { it.family }
+
+    /** The match [channel] shows, as its row's channel or one listed under it. */
+    fun matchOf(channel: Channel) = entries.firstOrNull { e -> e.tune.family == channel.family || e.alsoOn.any { it.family == channel.family } }
+
+    /** What Up/Down walk after tuning [channel]: the channels showing its match when there are several, else [context]. */
+    fun contextFor(channel: Channel) = matchOf(channel)?.takeIf { it.alsoOn.isNotEmpty() }?.let { listOf(it.tune) + it.alsoOn } ?: context
 }
 
 /**

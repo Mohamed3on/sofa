@@ -182,7 +182,7 @@ private sealed interface Item {
 }
 /**
  * [under]: the key of the Live now match it is listed under, so the row is that match's own. A [compact] row is a feed
- * under a known match's header (logo, name, flag, badges); a [zap] one tunes with Live now as its zap context.
+ * under a known match's header (logo, name, flag, badges); a [zap] one (a Live now match's) tunes with Live now's zap context for it.
  */
 private class ChannelItem(val channel: Channel, under: String = "", val compact: Boolean = false, val zap: Boolean = false) : Item {
     override val key = "$under${channel.id}|${channel.group}"
@@ -238,12 +238,12 @@ private fun MutableList<Item>.addMatch(match: LiveEntry, known: Set<String>) {
         val head = MatchItem(match)
         add(head)
         add(ChannelItem(match.tune, under = "${head.key}>", compact = true, zap = true))
-        match.alsoOn.mapTo(this) { c -> ChannelItem(c, under = "${head.key}>", compact = true) }
+        match.alsoOn.mapTo(this) { c -> ChannelItem(c, under = "${head.key}>", compact = true, zap = true) }
         return
     }
     val row = LiveItem(match)
     add(row)
-    match.alsoOn.mapTo(this) { c -> ChannelItem(c, under = "${row.key}>") }
+    match.alsoOn.mapTo(this) { c -> ChannelItem(c, under = "${row.key}>", zap = true) }
 }
 
 /**
@@ -326,8 +326,8 @@ private const val FOCUS_FRAMES = 30
  * [startInGroups]. When Search was on screen at the last close, it opens there instead, on the result
  * last focused ([memory] keeps the search for the app session). Moving through the groups shows each one.
  *
- * Choosing a row hands [onPreview] the channel and the zap context it carries (Live now's tune list,
- * else null: its group): the player tunes it behind the still-open list, which keeps its place.
+ * Choosing a row hands [onPreview] the channel and the zap context it carries (from Live now: the
+ * match's channels, or one per match; else null: its group): the player tunes it behind the still-open list, which keeps its place.
  * Choosing the row playing, or any row when there is no [onPreview] (U11's pick mode), goes to
  * [onPick], which closes the list. [open] is false while the overlay leaves and while it is hidden,
  * so focus may go back to the player.
@@ -967,14 +967,14 @@ fun ChannelOverlay(
                                     val on = item.channel.family == current?.family
                                     FeedRow(
                                         item.channel, playing = on, watchHint = watchHint && on, focus = focus, onFocused = onFocused,
-                                        onClick = { choose(item.channel, if (item.zap) live?.context else null) },
+                                        onClick = { choose(item.channel, if (item.zap) live?.contextFor(item.channel) else null) },
                                     )
                                 } else {
                                     val on = item.channel.family == current?.family
                                     ChannelRow(
                                         item.channel, nowNext[item.channel.tvgId], clock,
                                         playing = on, watchHint = watchHint && on, focus = focus, onFocused = onFocused,
-                                        onClick = { choose(item.channel, null) },
+                                        onClick = { choose(item.channel, if (item.zap) live?.contextFor(item.channel) else null) },
                                         moving = item.key == moving,
                                     )
                                 }
@@ -982,7 +982,7 @@ fun ChannelOverlay(
                                     val on = item.entry.tune.family == current?.family
                                     LiveRow(
                                         item.entry, clock, playing = on, watchHint = watchHint && on, focus = focus, onFocused = onFocused,
-                                        onClick = { choose(item.entry.tune, live?.context) },
+                                        onClick = { choose(item.entry.tune, live?.contextFor(item.entry.tune)) },
                                     )
                                 }
                                 NoMatches -> Text("No matches on right now", style = Type.body, modifier = Modifier.padding(horizontal = Space.m, vertical = Space.m))
