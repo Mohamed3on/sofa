@@ -117,7 +117,7 @@ describe('sibling feeds', () => {
     // myepg on the right clock; the provider's mixed-case id 3h late, listing the channel twice
     const provider = prog('20261108200000', '20261108220000', 'Man Utd vs Villa (provider)') +
       prog('20261108220000', '20261109010000', 'Atletico vs Barcelona') + prog('20261108221500', '20261109011500', 'Atletico vs Barcelona (2nd listing)') +
-      prog('20261109010000', '20261109020000', 'Highlights') + prog('20261109020000', '20261110000000', 'Real Madrid vs Getafe')
+      prog('20261109010000', '20261109020000', 'Highlights') + prog('20261109020000', '20261110000000', 'Real Madrid vs Getafe - LaLiga')
     const xml = buildEventEpg([{ streamId: 1, name: 'beIN 1', logo: '', tvgId: 'B1.qa', group: 'ar', isEventSlot: false, q: 4 }], provider, {
       programmes: [prog('20261108160000', '20261108170000', 'Palace vs Liverpool'), prog('20261108170000', '20261108190000', 'Man Utd vs Villa')],
       covered: new Set(['B1.qa']),
@@ -128,8 +128,20 @@ describe('sibling feeds', () => {
     expect(xml).toContain('start="20261108220000 +0300" stop="20261109010000 +0300" channel="B1.qa"><title>Atletico vs Barcelona</title>')
     expect(xml).not.toContain('(2nd listing)')
     expect(xml).toContain('<title>Highlights</title>')
-    // the last listing runs to the end of the provider's guide: a match is cut to 3 h
-    expect(xml).toContain('start="20261109020000 +0300" stop="20261109020000 +0000" channel="B1.qa"><title>Real Madrid vs Getafe</title>')
+    // the last listing runs to the end of the provider's guide: a 🏆 match is cut to 3 h
+    expect(xml).toContain('start="20261109020000 +0300" stop="20261109020000 +0000" channel="B1.qa"><title>Real Madrid vs Getafe - LaLiga</title>')
+  })
+
+  test("EPG: a 🏆 match's listing runs at most 3 h, wherever it comes from; other sports keep theirs", () => {
+    const prog = (title: string) => `<programme start="20261108193000 +0000" stop="20261109180000 +0000" channel="B1.qa"><title>${title}</title></programme>`
+    const xml = buildEventEpg([{ streamId: 1, name: 'beIN 1', logo: '', tvgId: 'B1.qa', group: 'ar', isEventSlot: false, q: 4 }], prog('Detroit Lions @ Miami Dolphins - NFL'), {
+      programmes: [prog('Atletico Madrid vs Barcelona - Spanish LaLiga 2026/2027 - Week 12')],
+      covered: new Set(['B1.qa']),
+      icons: new Map(),
+    })
+    expect(xml).toContain('stop="20261108223000 +0000" channel="B1.qa"><title>Atletico Madrid vs Barcelona')
+    expect(buildEventEpg([{ streamId: 1, name: 'x', logo: '', tvgId: 'B1.qa', group: 'ar', isEventSlot: false, q: 4 }], prog('Detroit Lions @ Miami Dolphins - NFL')))
+      .toContain('stop="20261109180000 +0300" channel="B1.qa"><title>Detroit Lions')
   })
 
   test('EPG: each channel keeps one schedule', () => {

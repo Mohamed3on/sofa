@@ -1048,6 +1048,15 @@ const epgCountry = (id: string) => id.match(/\.([a-z]{2,3})$/i)?.[1].toLowerCase
 const isRegular = (c: Channel) => !c.isEventSlot && !!c.tvgId
 // Channel id of a <programme> block (what TiviMate maps EPG by).
 const programmeChannel = (block: string) => block.match(/\bchannel="([^"]*)"/)?.[1] ?? ''
+/** A live match's listing cut to [MATCH_MAX_MS]: a guide's last listing can run to the end of the guide
+ *  (beIN 1's Atletico vs Barcelona, 20:30 until 19:00 the next day). Only titles naming a 🏆 competition,
+ *  so an NFL game or a tennis final keeps its length. */
+const cutMatch = (block: string) => {
+  const start = xmltvAt(block, 'start')
+  if (!(xmltvAt(block, 'stop') - start > MATCH_MAX_MS)) return block
+  if (!learnedCompetitions(unxml(block.match(/<title[^>]*>([^<]*)/)?.[1] ?? '')).length) return block
+  return block.replace(/\bstop="[^"]*"/, `stop="${xmltvTime(new Date(start + MATCH_MAX_MS))}"`)
+}
 /** A <programme> block's start or stop in epoch ms; NaN when it has none. */
 const xmltvAt = (block: string, attr: 'start' | 'stop') => {
   const s = block.match(attr === 'start' ? /\bstart="(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d) ([+-]\d\d)(\d\d)"/ : /\bstop="(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d) ([+-]\d\d)(\d\d)"/)
@@ -1335,7 +1344,8 @@ export function buildEventEpg(
   for (const c of slots) nameAsTitle(c)
   const gotProg = new Set<string>() // channels that actually received real programmes
   const realByCh = new Map<string, string[]>() // their programme blocks, for sibling feeds to borrow
-  const real = (id: string, block: string) => {
+  const real = (id: string, raw: string) => {
+    const block = cutMatch(raw)
     out.push(block)
     gotProg.add(id)
     ;(realByCh.get(id) ?? realByCh.set(id, []).get(id)!).push(block)
@@ -1390,18 +1400,13 @@ export function buildEventEpg(
   }
   for (const [id, p] of blocks) real(id, (lateness.get(id) ?? 0) > 0 ? lessThree(p) : p)
   // The tail starts where myepg's last programme ends and never overlaps itself: the provider often
-  // lists a channel twice, on schedules a few minutes apart. Its last listing can run to the end of
-  // its guide (beIN 1's Atletico vs Barcelona, 22 h): a match is cut to [MATCH_MAX_MS].
+  // lists a channel twice, on schedules a few minutes apart.
   for (const [id, tail] of tails) {
     let end = Math.max(...(realByCh.get(id) ?? []).map((p) => at(p, 'stop') || 0))
-    for (let p of tail.sort((a, b) => at(a, 'start') - at(b, 'start'))) {
-      const start = at(p, 'start')
-      if (!(start >= end)) continue
-      const title = unxml(p.match(/<title[^>]*>([^<]*)/)?.[1] ?? '')
-      if (at(p, 'stop') - start > MATCH_MAX_MS && couldBeLiveMatch(title))
-        p = p.replace(/\bstop="[^"]*"/, `stop="${xmltvTime(new Date(start + MATCH_MAX_MS))}"`)
+    for (const p of tail.sort((a, b) => at(a, 'start') - at(b, 'start'))) {
+      if (!(at(p, 'start') >= end)) continue
       real(id, p)
-      end = at(p, 'stop')
+      end = at(realByCh.get(id)!.at(-1)!, 'stop')
     }
   }
   // Parallel feeds of one channel can carry DIFFERENT provider tvg-ids — TNT Sports 1
