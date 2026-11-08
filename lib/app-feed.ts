@@ -166,8 +166,9 @@ export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now
   const comps = rows.map((r, i) => (r.synthetic || replays.has(i) ? undefined : learnedCompetitions(r.title)[0]))
   // A match titled without its competition ("AEK Atene - Real Madrid") takes the one other channels
   // name for it: of the tagged airings starting within 90 min, those sharing the most team words, at
-  // least two ("aek", "madrid"; a LaLiga re-run's lone "madrid" is not enough), if they agree.
-  const words = rows.map((r) => [...new Set(teamWords(r.title.replace(SUPERSCRIPT, '')))])
+  // least two ("aek", "madrid"; a LaLiga re-run's lone "madrid" is not enough), if they agree. Words
+  // compare by their first 6 letters, so another language's spelling counts (beIN France's "Barcelonne").
+  const words = rows.map((r) => [...new Set(teamWords(r.title.replace(SUPERSCRIPT, '')).map((w) => w.slice(0, 6)))])
   const taggedByWord = new Map<string, number[]>()
   comps.forEach((c, j) => c && words[j].forEach((w) => (taggedByWord.get(w) ?? taggedByWord.set(w, []).get(w)!).push(j)))
   rows.forEach((r, i) => {

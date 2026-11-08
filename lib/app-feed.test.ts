@@ -160,8 +160,13 @@ describe('guide', () => {
     // …and a fixture titled without one takes it from another channel's airing of the same match
     const appGuide = Database.deserialize(Bun.gunzipSync(buildAppGuide([], `<programme start="${stamp(0)}" stop="${stamp(2)}" channel="x"><title>Live Serie A: Juventus v Napoli</title></programme>` +
       `<programme start="${stamp(0)}" stop="${stamp(2)}" channel="y"><title>Juventus - SSC Napoli</title></programme>` +
-      `<programme start="${stamp(0)}" stop="${stamp(2)}" channel="z"><title>Ajax - Feyenoord</title></programme>` + PROVIDER_XML)))
+      `<programme start="${stamp(0)}" stop="${stamp(2)}" channel="z"><title>Ajax - Feyenoord</title></programme>` +
+      `<programme start="${stamp(0)}" stop="${stamp(2)}" channel="v"><title>Atletico Madrid vs Barcelona - Spanish LaLiga</title></programme>` +
+      `<programme start="${stamp(0)}" stop="${stamp(2)}" channel="w"><title>Atlético Madrid vs Barcelonne - Liga - FOOTBALL</title></programme>` + PROVIDER_XML)))
     expect(appGuide.query("SELECT title, comp FROM programmes WHERE comp IS NOT NULL ORDER BY tvg_id").all()).toEqual([
+      { title: "Atletico Madrid vs Barcelona - Spanish LaLiga", comp: "🏆 La Liga" },
+      // …in another language too
+      { title: "Atlético Madrid vs Barcelonne - Liga - FOOTBALL", comp: "🏆 La Liga" },
       { title: "Live Serie A: Juventus v Napoli", comp: "🏆 Serie A" },
       { title: "Juventus - SSC Napoli", comp: "🏆 Serie A" },
     ])

@@ -488,6 +488,8 @@ export const COMPS: Competition[] = [
 const UEFA_ALL = ['ucl', 'uel', 'uecl']
 // Shared vetoes: other sports and women's competitions that reuse league names, and
 // non-match programming (a channel airing "Premier League Review" isn't showing it).
+// The longest a live match's listing runs, build-up and extra time included.
+const MATCH_MAX_MS = 3 * 3600_000
 const OTHER_SPORT = /basket|handball|pallamano|volley|superlega|hockey|rugby|darts|netball|cricket|snooker|golf|tennis|boxing|drone|horse|esport|virtual|vela\b/i
 const WOMEN = /women|femen|frauen|femminile|f[ée]minin|\bwsl\b|uwcl|سيدات|نساء/i
 const SHOW = /highlight|hoogtepunten|review|\bshow\b|magazin|stories|\bbest\b|top goals|top \d+|goals? of|legend|classic|rewind|preview|previa|pre-?match|vorbericht|anteprima|analys|resumen|resúmen|zusammenfassung|replay|re-live|wiederholung|special|especial|feature|weekly|daily|\bnews\b|press conference|conferenza|rueda de prensa|pressekonferenz|weigh|goal rush|greatest|documentar|\bfilm\b|pel[ií]cula|countdown|build-?up|warm-?up|inside|kompakt|\bpur\b|retro|netbusters|full impact|\bicons?\b|league 100\b|\bep\.? ?\d|episode|folge/i
@@ -1388,11 +1390,16 @@ export function buildEventEpg(
   }
   for (const [id, p] of blocks) real(id, (lateness.get(id) ?? 0) > 0 ? lessThree(p) : p)
   // The tail starts where myepg's last programme ends and never overlaps itself: the provider often
-  // lists a channel twice, on schedules a few minutes apart.
+  // lists a channel twice, on schedules a few minutes apart. Its last listing can run to the end of
+  // its guide (beIN 1's Atletico vs Barcelona, 22 h): a match is cut to [MATCH_MAX_MS].
   for (const [id, tail] of tails) {
     let end = Math.max(...(realByCh.get(id) ?? []).map((p) => at(p, 'stop') || 0))
-    for (const p of tail.sort((a, b) => at(a, 'start') - at(b, 'start'))) {
-      if (!(at(p, 'start') >= end)) continue
+    for (let p of tail.sort((a, b) => at(a, 'start') - at(b, 'start'))) {
+      const start = at(p, 'start')
+      if (!(start >= end)) continue
+      const title = unxml(p.match(/<title[^>]*>([^<]*)/)?.[1] ?? '')
+      if (at(p, 'stop') - start > MATCH_MAX_MS && couldBeLiveMatch(title))
+        p = p.replace(/\bstop="[^"]*"/, `stop="${xmltvTime(new Date(start + MATCH_MAX_MS))}"`)
       real(id, p)
       end = at(p, 'stop')
     }
