@@ -63,10 +63,15 @@ fun Feed.liveNow(airing: List<Airing>): LiveNow {
     return LiveNow(confirmed, slots)
 }
 
-/** A match's channels: picture quality first (marker tier, then height, then fps); language only between equals. */
-private val BEST_FIRST = compareByDescending<Channel> { it.q }
+/**
+ * A match's channels: steady before ones the provider keeps letting down, then picture quality (marker tier,
+ * height, fps, then the detail its bitrate leaves room for); language only between equals.
+ */
+private val BEST_FIRST = compareBy<Channel> { it.flaky }
+    .thenByDescending { it.q }
     .thenByDescending { it.h ?: NOMINAL_HEIGHT[it.q] ?: 0 }
     .thenByDescending { c -> c.badges.firstNotNullOfOrNull { FPS.matchEntire(it)?.groupValues?.get(1)?.toInt() } ?: 0 }
+    .thenByDescending { it.detail }
     .thenBy { languageRank(it) }
 private val NOMINAL_HEIGHT = mapOf(5 to 2160, 4 to 1080, 3 to 720)
 private val FPS = Regex("""(\d+)fps""")

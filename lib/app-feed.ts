@@ -4,7 +4,8 @@ import { Database } from 'bun:sqlite'
 import { chanKey, COMPS, couldBeLiveMatch, learnedCompetitions, replayAirings, teamWords, saneFps, unxml, type Channel } from './curation.js'
 import { VPN_HOST, type BackupConfig, type XtreamConfig } from './provider.js'
 import type { TitleMatch } from './crests.js'
-import { medianMbps, qualityOf } from './quality.js'
+import { detailRank, medianMbps, qualityOf } from './quality.js'
+import { flakyRank } from './flaky.js'
 
 export interface AppChannel {
   id: number
@@ -28,6 +29,10 @@ export interface AppChannel {
   badges: string[]
   /** The feed's bitrate in Mbps, measured while the app played it; absent when never measured. */
   mbps?: number
+  /** The picture detail its bitrate leaves room for (detailRank): 0 thin, 2 rich; absent for 1 (in between or never measured). */
+  detail?: number
+  /** The provider keeps letting this feed down (flakyRank); absent when it doesn't. */
+  flaky?: true
 }
 
 type ProviderRoute = { plain: string; vpn: string; user: string; pass: string }
@@ -100,6 +105,8 @@ export function buildAppFeed(cfg: XtreamConfig, channels: Channel[], backup?: Ba
         ...(c.isEventSlot && couldBeLiveMatch(c.name) ? { fixture: true as const } : {}),
         badges: badges(c.streamId),
         mbps: medianMbps(qualityOf(c.streamId)),
+        ...(detailRank(qualityOf(c.streamId)) !== 1 && { detail: detailRank(qualityOf(c.streamId)) }),
+        ...(flakyRank(c.streamId) && { flaky: true as const }),
       }
     }),
   }
@@ -144,14 +151,15 @@ export function guideDescr(title: string, raw: string): string {
 const SUPERSCRIPT = /[ᴬ-ᶿ⁰-₟]+/g
 const compGroup = new Map(COMPS.map((c) => [c.key, c.group]))
 
-export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now(), crests?: (title: string, onNow: boolean) => TitleMatch | null): Uint8Array {
+/**
+ * Every programme of [xmltv] with the competition key of the live 🏆 match it is (comps, aligned with
+ * rows; undefined for anything else), by the rules the 🏆 groups and the app's guide share. Programmes
+ * that ended over 2h before [now] are tagged only from their own title (they still tell re-runs apart).
+ */
+export function guideCompetitions(channels: Channel[], xmltv: string, now = Date.now()) {
   // Name-as-title filler: ours (slots, uncovered channels) and the provider's own 2-hour blocks
   // named for the channel ("IT: DAZN DIRETTA GOL EUROPA LEAGUE" all day), never a programme.
   const filler = new Set(channels.map((c) => `${c.tvgId}\n${c.name.toLowerCase()}`))
-  const db = new Database(':memory:')
-  db.run(`CREATE TABLE programmes (tvg_id TEXT NOT NULL, start INTEGER NOT NULL, stop INTEGER NOT NULL,
-    title TEXT NOT NULL, norm TEXT NOT NULL, descr TEXT NOT NULL, synthetic INTEGER NOT NULL, match INTEGER NOT NULL, comp TEXT)`)
-  const insert = db.prepare('INSERT INTO programmes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
   const cutoff = now / 1000 - 2 * 3600
   // Every programme first, the ones already over too: a re-run is told by the airings before it.
   const rows = [...xmltv.matchAll(/<programme\b([^>]*)>([\s\S]*?)<\/programme>/g)].map((m) => {
@@ -179,6 +187,28 @@ export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now
     const found = new Set([...shared].filter(([, n]) => n === most).map(([j]) => comps[j]))
     if (most >= 2 && found.size === 1) comps[i] = [...found][0]
   })
+  return { rows, replays, comps, cutoff }
+}
+
+/** Each channel's 🏆 competitions from [now] on (tvg-id -> competition key -> soonest start, s), from the guide. */
+export function upcomingCompetitions(channels: Channel[], xmltv: string, now = Date.now()): Map<string, Map<string, number>> {
+  const { rows, comps } = guideCompetitions(channels, xmltv, now)
+  const out = new Map<string, Map<string, number>>()
+  rows.forEach((r, i) => {
+    const k = comps[i]
+    if (!k || !(r.stop > now / 1000)) return
+    const m = out.get(r.tvgId) ?? out.set(r.tvgId, new Map()).get(r.tvgId)!
+    m.set(k, Math.min(m.get(k) ?? Infinity, r.start))
+  })
+  return out
+}
+
+export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now(), crests?: (title: string, onNow: boolean) => TitleMatch | null): Uint8Array {
+  const db = new Database(':memory:')
+  db.run(`CREATE TABLE programmes (tvg_id TEXT NOT NULL, start INTEGER NOT NULL, stop INTEGER NOT NULL,
+    title TEXT NOT NULL, norm TEXT NOT NULL, descr TEXT NOT NULL, synthetic INTEGER NOT NULL, match INTEGER NOT NULL, comp TEXT)`)
+  const insert = db.prepare('INSERT INTO programmes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+  const { rows, replays, comps, cutoff } = guideCompetitions(channels, xmltv, now)
   db.run('CREATE TABLE crests (title TEXT PRIMARY KEY, home TEXT, away TEXT, home_key TEXT, away_key TEXT, home_name TEXT, away_name TEXT)')
   const crest = db.prepare('INSERT OR IGNORE INTO crests VALUES (?, ?, ?, ?, ?, ?, ?)')
   db.transaction(() => {

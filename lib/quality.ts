@@ -48,10 +48,13 @@ export function mergeAppReading(old: Meta | null | undefined, reading: Meta, tod
  * A probe result merged into the box's entry, or undefined to keep the entry. The probe works on
  * a copy taken when it started, so the entry may have changed since: a reading the app took
  * today stands unless the probe's is strictly better, and bitrates measured meanwhile are kept.
+ * The probe's [Meta.mbps] holds only the bitrate it measured, added to the feed's own.
  */
 export function mergeProbed(now: Meta | null | undefined, probed: Meta | null, today: string): Meta | null | undefined {
-  if (now?.at === today && !better(probed, now)) return undefined
-  return probed && { ...probed, ...keepMbps(now) }
+  const mbps = [...(now?.mbps ?? []), ...(probed?.mbps ?? [])].slice(-BITRATE_READINGS)
+  const keep = mbps.length ? { mbps } : {}
+  if (now?.at === today && !better(probed, now)) return now && probed?.mbps ? { ...now, ...keep } : undefined
+  return probed && { ...probed, ...keep }
 }
 
 /**
@@ -68,11 +71,33 @@ export function addBitrate(old: Meta | null | undefined, mbps: number): Meta | n
 /** Spread into a new reading for a feed, so it keeps the bitrates measured on it. */
 export const keepMbps = (old: Meta | null | undefined) => (old?.mbps ? { mbps: old.mbps } : {})
 
+/** Bits per pixel of each frame at [mbps]. */
+const bpp = (m: Meta, mbps: number) => (mbps * 1e6) / (m.w * m.h * (m.fps > 0 ? m.fps : 25))
+
+/**
+ * Under 0.01 bits a pixel (1 Mbps at 1080p50) the stream was a slate or starving while measured
+ * (0.2 Mbps on a 2160p50 feed that had just gone offline), not showing its picture: such a reading is ignored.
+ */
+const MIN_BPP = 0.01
+
 export function medianMbps(m: Meta | null | undefined): number | undefined {
-  const s = m?.mbps?.toSorted((a, b) => a - b)
+  const s = m?.mbps?.filter((r) => bpp(m, r) >= MIN_BPP).toSorted((a, b) => a - b)
   if (!s?.length) return undefined
   const mid = s.length >> 1
   return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) * 5) / 10
+}
+
+/**
+ * How much picture detail a feed's bitrate leaves room for, to order feeds of one height and fps:
+ * 0 thin (under 0.03 bits a pixel, about 3 Mbps at 1080p50 in H.264), 2 rich (0.055 and up, about
+ * 5.7 Mbps), 1 in between or never measured. HEVC and AV1 carry the same picture in about half the
+ * bits, so theirs count double. Three steps, so readings a little apart don't reorder feeds.
+ */
+export function detailRank(m: Meta | null | undefined): number {
+  const mbps = medianMbps(m)
+  if (!m || mbps === undefined) return 1
+  const b = bpp(m, mbps) * (/hevc|h265|av1/i.test(m.codec) ? 2 : 1)
+  return b < 0.03 ? 0 : b >= 0.055 ? 2 : 1
 }
 
 const store = jsonFile<Readings>(() => process.env.QUALITY_FILE ?? fileURLToPath(new URL('../.cache/quality.json', import.meta.url)), () => ({}))

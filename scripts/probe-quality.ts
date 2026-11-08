@@ -3,8 +3,8 @@
 // truth instead of the provider's lying "UHD"/"RAW" tags. We skip the ~880 feeds
 // whose markers already say <1080p (HD/SD/unmarked) — no point probing those.
 //
-// Fast + low-overhead: ffprobe reads only stream headers (SPS/VPS) with a tiny
-// -probesize and exits (no decode → CPU near-idle). Concurrency is capped to the
+// Fast + low-overhead: ffprobe reads stream headers (SPS/VPS) with a tiny -probesize
+// and six seconds of packets, and exits (no decode → CPU near-idle). Concurrency is capped to the
 // subscription's currently-free slots; exceeding that limit makes every stream
 // return HTTP 458 and can interrupt normal viewing.
 //
@@ -42,12 +42,17 @@
 // blows GitHub's 6h job limit or holds the only connection slot all day. Bounded, each
 // run takes a predictable bite and the monotonic cache keeps the progress.
 //
+// BITRATE: the same read counts six seconds of the stream's packets, so each reading with a picture
+// carries the feed's bitrate (Mbps, video and audio), added to the ones the app measured while watching
+// (lib/quality.ts mergeProbed). Refresh also visits fresh feeds with a picture but no bitrate yet, after
+// the stale and below-marker ones, in playlist order, so the 🏆 groups' feeds get theirs first.
+//
 // Usage: bun scripts/probe-quality.ts [concurrency] [refresh] [mins=N]  (creds from env/.env.local)
 import { EVENT_ONLY, fetchCuratedChannels, saneFps, withCompetitionGroups } from '../lib/curation.js'
 import { configFromEnv, connectionSlots as slotsOf, streamUrl } from '../lib/provider.js'
 import { writeAtomic } from '../lib/fs.ts'
 // better() keeps the cache monotonic in refresh mode; the app's readings (/api/app/quality) share these rules.
-import { allReadings, better, keepMbps, STALE_DAYS, type Meta, type Readings } from '../lib/quality.ts'
+import { allReadings, better, STALE_DAYS, type Meta, type Readings } from '../lib/quality.ts'
 
 const cfg = configFromEnv()
 const requestedConcurrency = Number(Bun.argv[2]) || 1
@@ -105,7 +110,8 @@ const gaps = live.filter((c) => {
   // is just a 1080p feed (0 of 339 were 4K on 2026-11-01); only a 3840p/2160p tag pays off.
   return (c.q ?? 0) >= 4 && m.h < nominalH(c.q ?? 0) && (c.q! < 5 || /³⁸⁴⁰|3840|2160/.test(c.name))
 })
-const targets = [...stale, ...gaps]
+const noBitrate = REFRESH ? live.filter((c) => { const m = cache[c.streamId]; return m && !isStale(m) && !m.mbps }) : []
+const targets = [...stale, ...gaps, ...noBitrate]
 const byId = new Map(targets.map((c) => [c.streamId, c.name]))
 const ids = [...byId.keys()]
 
@@ -124,11 +130,11 @@ async function probe(id: number): Promise<Meta | null> {
     ['ffprobe', '-v', 'error', '-user_agent', 'VLC/3.0.18',
      // rw_timeout fails a stalled/dead stream at the network layer fast (the old
      // run's slowness was idle feeds sitting until a long timeout); 2M probesize
-     // grabs ~1 keyframe for resolution+fps without streaming the feed.
-     '-rw_timeout', '8000000', '-probesize', '2M', '-analyzeduration', '2M',
-     '-show_entries', 'stream=codec_type,width,height,codec_name,r_frame_rate,avg_frame_rate,field_order,profile,channels',
+     // grabs ~1 keyframe for resolution+fps, then 6 s of packets give the bitrate.
+     '-rw_timeout', '8000000', '-probesize', '2M', '-analyzeduration', '2M', '-read_intervals', '%+6',
+     '-show_entries', 'stream=index,codec_type,width,height,codec_name,r_frame_rate,avg_frame_rate,field_order,profile,channels:packet=stream_index,pts_time,size',
      '-of', 'json', url],
-    { stdout: 'pipe', stderr: 'ignore', timeout: 10000 },
+    { stdout: 'pipe', stderr: 'ignore', timeout: 16000 },
   )
   const out = await new Response(p.stdout).text()
   await p.exited
@@ -146,7 +152,12 @@ async function probe(id: number): Promise<Meta | null> {
       // Atmos = E-AC-3 with JOC; the same 2M read already carries the audio header.
       const atmos = streams.some((s) => s.codec_type === 'audio' && /atmos/i.test(s.profile ?? ''))
       const surround = streams.some((s) => s.codec_type === 'audio' && s.channels >= 6)
-    return { w: v.width, h: v.height, fps, codec: v.codec_name, name: byId.get(id)!, ...(atmos && { atmos: true as const }), ...(surround && { surround: true as const }) }
+      // Every packet's bytes over the span of the video's timestamps; under 3 s of picture is too little to tell.
+      const packets: any[] = JSON.parse(out)?.packets ?? []
+      const times = packets.filter((p) => p.stream_index === v.index).map((p) => Number(p.pts_time)).filter(Number.isFinite)
+      const span = times.length ? Math.max(...times) - Math.min(...times) : 0
+      const mbps = span >= 3 ? Math.round(packets.reduce((n, p) => n + (Number(p.size) || 0), 0) * 8 / span / 1e5) / 10 : 0
+      return { w: v.width, h: v.height, fps, codec: v.codec_name, name: byId.get(id)!, ...(atmos && { atmos: true as const }), ...(surround && { surround: true as const }), ...(mbps >= 0.1 && { mbps: [mbps] }) }
     }
   } catch { /* unparseable / no video */ }
   return null
@@ -204,8 +215,10 @@ const worker = async () => {
     // stale one; no signal keeps it due, just tried (see RE-VERIFICATION).
     // Gaps: only upgrade, never downgrade a fresh peak; a missing/dead one records null again.
     if (!REFRESH || !old) cache[id] = m && { ...m, at: today }
-    else if (reverify) cache[id] = m ? { ...m, at: today, ...keepMbps(old) } : { ...old!, tried: today }
-    else if (better(m, old)) cache[id] = { ...m!, at: today, ...keepMbps(old) }
+    else if (reverify) cache[id] = m ? { ...m, at: today } : { ...old!, tried: today }
+    else if (better(m, old)) cache[id] = { ...m!, at: today }
+    // Not better, but a bitrate: the reading stays as it was, with this bitrate for the box to add.
+    else if (m?.mbps && old) cache[id] = { ...old, mbps: m.mbps }
     else continue
     probed[id] = cache[id]
     dirty = true

@@ -24,9 +24,10 @@ export function writeAtomic(file: string, data: unknown, mode?: number): Promise
 /**
  * A JSON data file kept in memory and read again when it changes on disk (looked at once a second
  * at most, or at once with `read(true)`), so another process's write takes effect without a
- * restart. A missing file reads as [empty]. [path] is a function so tests can point it elsewhere.
+ * restart. A missing file reads as [empty]. [path] is a function so tests can point it elsewhere;
+ * [parse] turns the file's text into the data held (JSON by default).
  */
-export function jsonFile<T>(path: () => string, empty: () => T) {
+export function jsonFile<T>(path: () => string, empty: () => T, parse: (text: string) => T = JSON.parse) {
   let held: { file: string; version: string; checked: number; data: T } | null = null
   // An atomic write is a rename, so a new inode, whatever the clock says.
   const versionOf = (file: string) => {
@@ -40,7 +41,7 @@ export function jsonFile<T>(path: () => string, empty: () => T) {
       if (held?.file === file && !now && t - held.checked < 1000) return held.data
       const version = versionOf(file)
       if (held?.file !== file || held.version !== version) {
-        held = { file, version, checked: t, data: version ? JSON.parse(readFileSync(file, 'utf8')) : empty() }
+        held = { file, version, checked: t, data: version ? parse(readFileSync(file, 'utf8')) : empty() }
       } else held.checked = t
       return held.data
     },

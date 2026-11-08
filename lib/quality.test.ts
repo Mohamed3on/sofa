@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { rm } from 'node:fs/promises'
-import { addBitrate, allReadings, medianMbps, mergeAppReading, qualityOf, recordBitrate, recordProbed, recordReading } from './quality.js'
+import { addBitrate, allReadings, detailRank, medianMbps, mergeAppReading, qualityOf, recordBitrate, recordProbed, recordReading } from './quality.js'
 import { handle } from '../server.js'
 
 const post = (route: string, body: unknown) =>
@@ -55,6 +55,16 @@ describe('feed bitrates are the median of recent viewing', () => {
     expect(medianMbps(m)).toBe(6.1)
     expect(medianMbps(fresh)).toBeUndefined()
   })
+  test('a reading too thin to be the picture (a slate, a starving stream) is ignored', () => {
+    expect(medianMbps({ ...fresh, w: 3840, h: 2160, fps: 50, mbps: [0.2, 11.8] })).toBe(11.8)
+    expect(medianMbps({ ...fresh, w: 3840, h: 2160, fps: 50, mbps: [0.2] })).toBeUndefined()
+  })
+  test('detail splits equal pictures by bitrate, HEVC counting double', () => {
+    const p50 = { ...fresh, fps: 50 }
+    expect([2, 4.4, 6.8].map((r) => detailRank({ ...p50, mbps: [r] }))).toEqual([0, 1, 2])
+    expect(detailRank({ ...p50, codec: 'hevc', mbps: [2.2] })).toBe(1)
+    expect(detailRank(p50)).toBe(1)
+  })
 })
 
 describe('the store', () => {
@@ -75,10 +85,11 @@ describe('the store', () => {
     const copy = allReadings() // the probe starts on a copy
     await recordReading(1, reading({ w: 3840, h: 2160 }), today) // the stick, mid-run
     await recordBitrate(2, 6.2)
-    const probed = { 1: { ...copy[1]!, fps: 50, at: today }, 2: { ...reading({ fps: 25 }), at: today }, 3: { ...reading(), at: today } }
-    expect(await recordProbed(probed, today)).toBe(2)
-    expect(qualityOf(1)).toMatchObject({ h: 2160, at: today })
-    expect(qualityOf(2)).toMatchObject({ fps: 25, mbps: [6.2] })
+    // The probe's bitrate joins the feed's own, even where the app's reading of today stands.
+    const probed = { 1: { ...copy[1]!, fps: 50, at: today, mbps: [5] }, 2: { ...reading({ fps: 25 }), at: today, mbps: [5.8] }, 3: { ...reading(), at: today } }
+    expect(await recordProbed(probed, today)).toBe(3)
+    expect(qualityOf(1)).toMatchObject({ h: 2160, at: today, mbps: [5] })
+    expect(qualityOf(2)).toMatchObject({ fps: 25, mbps: [6.2, 5.8] })
     expect(qualityOf(3)).toMatchObject({ h: 1080 })
   })
   test('picks up a write by another process without a restart', async () => {

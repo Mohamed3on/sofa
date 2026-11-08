@@ -14,7 +14,8 @@
 // ACTUAL resolution×fps instead of the provider's unreliable "UHD"/"RAW" markers
 // (many "UHD 3840P" feeds are really 1080p30 or 720p). Refreshed offline by
 // scripts/probe-quality.ts; a missing entry just falls back to the name marker.
-import { audioRank, qualityOf } from './quality.js'
+import { audioRank, detailRank, qualityOf } from './quality.js'
+import { flakyRank } from './flaky.js'
 import { jsonFile } from './fs.js'
 import { applyListings, fetchListings, placeListings, type Placed } from './tv-listings.js'
 import { askJev, type JevQuestion } from './jev.js'
@@ -344,6 +345,8 @@ function realRes(streamId: number, markerQ: number, trustMarker: boolean, name: 
 // Atmos over 5.1 over stereo — breaks ties between equal-res/fps feeds (a centre channel
 // carries the commentary, so a soundbar can lift it over the crowd).
 const audio = (streamId: number): number => audioRank(qualityOf(streamId))
+// The picture detail the feed's measured bitrate leaves room for (detailRank) — between feeds of one height and fps, ahead of audio.
+const detail = (streamId: number): number => detailRank(qualityOf(streamId))
 
 interface Category {
   category_id: string
@@ -830,15 +833,16 @@ export async function fetchCuratedChannels(cfg: XtreamConfig, vod = true): Promi
     // value where we have one, else the marker's nominal tier (realRes already makes
     // that substitution), so an unprobed or idle "4K" feed still ranks as 4K while a
     // feed MEASURED at 720p stops outranking a measured 1080p50 one just because the
-    // provider stamped "4K" on its name. Marker tier only breaks ties from there, then
-    // language, US demoted below UK, primaries before backups, and finally sibling
+    // provider stamped "4K" on its name. A feed the provider keeps letting down (flakyRank) goes
+    // below the steady ones, whatever its picture; a measured bitrate splits equal pictures
+    // (detail), then audio. Marker tier only breaks ties from there, then language, US demoted below UK, primaries before backups, and finally sibling
     // feeds grouped + numbered (FOX 1/2, 4K 1/2/3) so equal feeds don't scatter.
     const isArabic = bucket === B.ar
     const isKids = bucket === B.kids
     items.sort(
       (a, b) =>
-        (isArabic ? a.bein - b.bein : 0) || (isKids ? a.lang - b.lang : 0) ||
-        b.rh - a.rh || b.rf - a.rf || audio(b.c.streamId) - audio(a.c.streamId) || b.q - a.q ||
+        (isArabic ? a.bein - b.bein : 0) || (isKids ? a.lang - b.lang : 0) || flakyRank(a.c.streamId) - flakyRank(b.c.streamId) ||
+        b.rh - a.rh || b.rf - a.rf || detail(b.c.streamId) - detail(a.c.streamId) || audio(b.c.streamId) - audio(a.c.streamId) || b.q - a.q ||
         a.lang - b.lang || a.region - b.region || a.backup - b.backup ||
         a.nkey.localeCompare(b.nkey, 'en', { numeric: true }) || a.idx - b.idx,
     )
@@ -981,8 +985,8 @@ export function withCompetitionGroups(channels: Channel[], now = Date.now()): Ch
     if (!rows) continue
     rows.sort(
       (a, b) =>
-        Number(a.c.isEventSlot) - Number(b.c.isEventSlot) ||
-        b.rh - a.rh || b.rf - a.rf || audio(b.c.streamId) - audio(a.c.streamId) || (b.c.q ?? 0) - (a.c.q ?? 0) ||
+        Number(a.c.isEventSlot) - Number(b.c.isEventSlot) || flakyRank(a.c.streamId) - flakyRank(b.c.streamId) ||
+        b.rh - a.rh || b.rf - a.rf || detail(b.c.streamId) - detail(a.c.streamId) || audio(b.c.streamId) - audio(a.c.streamId) || (b.c.q ?? 0) - (a.c.q ?? 0) ||
         a.lang - b.lang || a.region - b.region || a.idx - b.idx,
     )
     const seen = new Map<string, number>()

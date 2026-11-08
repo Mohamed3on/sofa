@@ -29,6 +29,10 @@ data class Channel(
     val badges: List<String> = emptyList(),
     /** The feed's bitrate in Mbps, measured while watching it; null when never measured. */
     val mbps: Float? = null,
+    /** The picture detail its bitrate leaves room for: 0 thin, 1 in between or never measured, 2 rich. */
+    val detail: Int = 1,
+    /** The provider keeps letting this feed down (the server learns it from the watch log). */
+    val flaky: Boolean = false,
 ) {
     val identity get() = ChannelIdentity(id, group)
 }

@@ -34,6 +34,7 @@ import { backupConfigFromEnv, configFromEnv } from '../lib/provider.js'
 import { currentHistory, historyAnswer, loadHistory, saveHistory, watchedOf, watchlistOf, withMark } from '../lib/history.js'
 import { currentLibrary, knownTitles } from '../lib/library.js'
 import { recordBitrate, recordReading, type Meta } from '../lib/quality.js'
+import { eventsFile } from '../lib/flaky.js'
 import { movieInfo, saveMeasuredFilm, showEpisodes, showList, titleIds as mapTitleIds } from '../lib/shows.js'
 import { subtitleFile, subtitlesFor } from '../lib/subtitles.js'
 import { personTitles, searchTitles, titleDetails } from '../lib/browse.js'
@@ -135,7 +136,7 @@ export async function events(req: Request) {
   const ok = Array.isArray(batch) && batch.length <= 200 && batch.every((e) =>
     e && typeof e === 'object' && EVENT_TYPES.has(e.type) && JSON.stringify(e).length <= 500)
   if (!ok) return new Response('Bad events', { status: 400 })
-  const file = process.env.APP_EVENTS_FILE ?? `${import.meta.dir}/../.cache/app-events.jsonl`
+  const file = eventsFile()
   const at = new Date().toISOString()
   await mkdir(dirname(file), { recursive: true })
   // Keep one previous file; the log never grows past twice the cap.
