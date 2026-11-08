@@ -90,6 +90,7 @@ internal class MoviesNavigator(
     /** Whether an episode follows the one playing. */
     val hasNext get() = playing?.show?.let { it.index < it.episodes.lastIndex } == true
     private var warming: Job? = null
+    private var resuming: Job? = null
 
     /** A title's page; a person search found ("person:<id>") opens theirs. */
     fun open(movie: Movie) {
@@ -118,8 +119,12 @@ internal class MoviesNavigator(
     /** Up next's buttons: a film at its place; a show's episode up next (its episodes are kept a while, so this is quick), else its page. */
     fun resume(movie: Movie, fromStart: Boolean) {
         if (!movie.titleId.isShow) return playFilm(movie, fromStart)
-        scope.launch {
+        resuming?.cancel() // a second press replaces the first
+        val from = stack.toList()
+        resuming = scope.launch {
             val eps = episodesOf(movie)?.takeIf { it.isNotEmpty() }
+            // Back, another title or a play while the episodes were read: the owner moved on, so nothing opens.
+            if (stack.toList() != from || playing != null) return@launch
             val place = shows.find(movie.titleId) ?: nextUp().firstOrNull { it.show.titleId == movie.titleId }?.place()
             if (eps == null) push(LibraryPage.Title(movie)) else playEpisode(movie, eps, upNextIndex(eps, place, watched()), fromStart)
         }

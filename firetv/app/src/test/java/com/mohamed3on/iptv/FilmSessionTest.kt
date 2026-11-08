@@ -191,6 +191,29 @@ class FilmSessionTest {
         assertTrue(r.choices.marks(tv).isEmpty())
     }
 
+    @Test fun aBusyProviderIsWaitedForWhenOnlyIptvIsLeft() = runTest {
+        val r = rig()
+        var busy = true
+        r.player.respond = { if (busy && "iptv.test" in it) StreamFailure.Http(458) else null }
+        play(r, iptv1080)
+        assertEquals(FilmPhase.Starting, r.state.phase)
+        busy = false // the live stream's connection is let go
+        advance(5_000)
+        assertEquals(iptv1080, r.state.copy)
+        assertEquals(FilmPhase.Playing, r.state.phase)
+    }
+
+    @Test fun aProviderStillBusyAfterThreeTriesEndsUnavailable() = runTest {
+        val r = rig()
+        r.player.respond = { if ("iptv.test" in it) StreamFailure.Http(458) else null }
+        play(r, iptv1080)
+        advance(14_999)
+        assertEquals(FilmPhase.Starting, r.state.phase)
+        advance(1)
+        assertEquals(FilmPhase.Unavailable, r.state.phase)
+        assertEquals(4, r.player.opens.size)
+    }
+
     // AE5
     @Test fun stallsStepDownAndRecoveryOffersTheBetterCopyOnce() = runTest {
         val r = rig()

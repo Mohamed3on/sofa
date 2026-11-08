@@ -146,6 +146,7 @@ class FilmSession(
     private val tried = mutableSetOf<String>()
     private val retried = mutableSetOf<String>()
     private var iptvBusy = false
+    private var busyRetries = 0
     /** Where a switch that fails returns: the copy before an accepted offer, a trial or a pick in Versions. */
     private var back: Copy? = null
     private var trial = false
@@ -299,10 +300,21 @@ class FilmSession(
         publish()
     }
 
-    /** Opens the best copy not yet tried at [place]; Unavailable when none is left. */
+    /**
+     * Opens the best copy not yet tried at [place]; Unavailable when none is left. When only IPTV copies are left and
+     * the provider's one connection was taken (often the live stream just closed), they are tried again 5 s on, 3 times.
+     */
     private suspend fun next(place: Place) {
         while (true) {
-            val r = candidate() ?: return unavailable()
+            val r = candidate()
+            if (r == null) {
+                if (!iptvBusy || busyRetries >= BUSY_RETRIES) return unavailable()
+                busyRetries++
+                delay(BUSY_RETRY_MS)
+                iptvBusy = false
+                tried.removeAll { it.startsWith("iptv:") }
+                continue
+            }
             tried += r.copy.id
             val url = url(r.copy) ?: continue
             // R28: every original is untested, so the best of them plays as a trial with the working dub to go back to.
@@ -384,6 +396,7 @@ class FilmSession(
         tried += copy.id
         retried.clear()
         iptvBusy = false
+        busyRetries = 0
         if (!trial) back = null
         if (better == null) usable().takeIf { it.pick?.copy?.id == copy.id }?.heavier?.let { better = it.copy }
         publish()
@@ -604,6 +617,8 @@ class FilmSession(
         private const val TICK_MS = 1_000L
         /** First frame of a film, over a connect and the 1.5 s start buffer. */
         private const val START_MS = 15_000L
+        private const val BUSY_RETRY_MS = 5_000L
+        private const val BUSY_RETRIES = 3
         private const val STALLS = 3
         private const val STALL_WINDOW_MS = 10 * 60_000L
         private const val MARGIN = 1.3f

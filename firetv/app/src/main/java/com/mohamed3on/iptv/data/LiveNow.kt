@@ -163,8 +163,9 @@ private val NOT_TEAM = setOf(
     "bundesliga", "ligue", "champions", "europa", "conference", "football", "sports", "sport", "primera", "primeira",
     "matchday", "round", "final", "copa", "coppa", "cup", "pokal", "championship",
 )
+private val WORD = Regex("\\p{L}{4,}")
 private fun teamWords(title: String): Set<String> =
-    Regex("\\p{L}{4,}").findAll(searchNorm(title))
+    WORD.findAll(searchNorm(title))
         .map { it.value }.filterNot { it in NOT_TEAM }.toSet()
 
 private fun Feed.bestOf(channel: Channel) = familyMembers(channel.family).firstOrNull() ?: channel
