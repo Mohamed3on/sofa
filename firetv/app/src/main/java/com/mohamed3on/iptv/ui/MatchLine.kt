@@ -117,7 +117,7 @@ fun Matchup(match: Match, comp: String?) {
             FitText(match.crests.awayName.orEmpty(), Type.title, centre)
             Crest(match.crests.away, MATCHUP_CREST, centre)
         }
-        if (comp != null) FitText(comp, Type.caption)
+        if (comp != null) CompName(comp, Type.caption)
     }
 }
 

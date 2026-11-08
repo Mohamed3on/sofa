@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -29,6 +30,9 @@ import coil3.request.ImageRequest
 import com.mohamed3on.iptv.data.Channel
 import com.mohamed3on.iptv.data.Crests
 import com.mohamed3on.iptv.data.displayName
+import com.mohamed3on.iptv.data.groupName
+import com.mohamed3on.iptv.ui.theme.FitText
+import com.mohamed3on.iptv.ui.theme.LocalFocused
 import com.mohamed3on.iptv.ui.theme.Palette
 import com.mohamed3on.iptv.ui.theme.Radius
 import com.mohamed3on.iptv.ui.theme.Space
@@ -103,5 +107,27 @@ internal fun Crest(url: String?, size: Dp = CREST, modifier: Modifier = Modifier
     }
 }
 
+/** Each 🏆 group's logo for dark grounds (Feed.compLogos); empty outside the live screen. */
+val LocalCompLogos = staticCompositionLocalOf<Map<String, String>> { emptyMap() }
+
+/**
+ * A competition's [group] ("🏆 Premier League") as its logo, then its name: the logo straight on the ground (ESPN draws
+ * these for dark ones), on a square [COMP_LOGO] slot held from the start, so the name never moves when it loads. With no
+ * logo known, [fallback] reads as it always did.
+ */
+@Composable
+fun CompName(group: String, style: TextStyle, modifier: Modifier = Modifier, fallback: String = group, active: Boolean = LocalFocused.current) {
+    val logo = LocalCompLogos.current[group] ?: return FitText(fallback, style, modifier, active = active)
+    val context = LocalPlatformContext.current
+    val density = LocalDensity.current
+    val request = remember(logo) { with(density) { ImageRequest.Builder(context).data(logo).size(COMP_LOGO.roundToPx()).build() } }
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
+        AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(COMP_LOGO))
+        FitText(remember(group) { groupName(group) }, style, active = active)
+    }
+}
+
+/** ESPN's logos sit inside a square canvas, so the mark itself is about 20 dp tall. */
+private val COMP_LOGO = 24.dp
 private val CREST = 18.dp
 private val CREST_GAP = 2.dp

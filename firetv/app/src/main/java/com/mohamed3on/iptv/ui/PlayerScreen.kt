@@ -184,7 +184,7 @@ fun PlayerScreen(feed: Feed, session: StreamSession?, audio: AudioTracks?, surfa
             LaunchedEffect(lifecycle, movie, anyMatch) {
                 if (!movie && anyMatch) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { graph.scores.poll() }
             }
-            CompositionLocalProvider(LocalCrests provides crests, LocalScores provides scores) {
+            CompositionLocalProvider(LocalCrests provides crests, LocalScores provides scores, LocalCompLogos provides feed.compLogos) {
                 PlayerChrome(feed, session, audio, tiles, grid, live, health, onMovie = { movie = it })
             }
         }

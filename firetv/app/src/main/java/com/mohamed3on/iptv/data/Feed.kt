@@ -44,6 +44,8 @@ data class Feed(
     val realDebrid: String? = null,
     /** The TorBox API token, when the server has one: [TorBox] then stands in for Real-Debrid, every call from the stick. */
     val torbox: String? = null,
+    /** Each 🏆 group with a known logo → its small logo for dark grounds ([com.mohamed3on.iptv.ui.CompName]); none from an older server. */
+    val compLogos: Map<String, String> = emptyMap(),
     /** Families whose rows sit out of their groups for now (Favourites keeps them; Search and zap context don't use groups). */
     @kotlinx.serialization.Transient val hidden: Set<String> = emptySet(),
 ) {

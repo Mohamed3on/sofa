@@ -1120,7 +1120,7 @@ fun GroupRow(label: String, marked: Boolean, focus: FocusRequester?, onFocused: 
         contentAlignment = Alignment.CenterStart,
     ) {
         if (marked) Box(Modifier.size(MARKER).clip(RoundedCornerShape(MARKER.width)).background(Palette.accent))
-        FitText(name, style = if (focused || marked) Type.headline else groupIdle, active = focused, modifier = Modifier.padding(horizontal = Space.l))
+        CompName(label, if (focused || marked) Type.headline else groupIdle, Modifier.padding(horizontal = Space.l), fallback = name, active = focused)
     }
 }
 
@@ -1247,7 +1247,7 @@ private fun MatchHeader(entry: LiveEntry, listState: LazyListState, index: Int) 
         verticalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
         if (match != null) MatchLine(match, Type.headline) else FitText(entry.title, style = Type.headline)
-        FitText(entry.comp ?: groupName(entry.via.group), style = Type.caption)
+        LiveComp(entry)
     }
 }
 
@@ -1285,8 +1285,14 @@ private fun LiveRow(entry: LiveEntry, clock: State<Long>, playing: Boolean, watc
             FitText(if (programme == null) "Not confirmed" else if (entry.alsoOn.isNotEmpty()) "$channel · +${entry.alsoOn.size} more" else channel, style = Type.body, modifier = Modifier.weight(1f))
             if (programme != null) Progress(programme, clock)
         }
-        LastLine(watchHint) { FitText(entry.comp ?: groupName(entry.via.group), style = Type.caption) }
+        LastLine(watchHint) { LiveComp(entry) }
     }
+}
+
+/** A Live now match's 🏆 competition, by its logo where one is known; else the group of the channel it came from. */
+@Composable
+private fun LiveComp(entry: LiveEntry) {
+    if (entry.comp != null) CompName(entry.comp, Type.caption) else FitText(groupName(entry.via.group), style = Type.caption)
 }
 
 /** Repaints from the shared minute clock in the draw phase; the row never recomposes for it. */
