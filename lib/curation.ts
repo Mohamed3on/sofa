@@ -16,6 +16,7 @@
 // scripts/probe-quality.ts; a missing entry just falls back to the name marker.
 import { audioRank, qualityOf } from './quality.js'
 import { jsonFile } from './fs.js'
+import { applyListings, fetchListings, placeListings, type Placed } from './tv-listings.js'
 import { askJev, type JevQuestion } from './jev.js'
 import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
@@ -1306,6 +1307,7 @@ export function buildEventEpg(
   channels: Channel[],
   providerXml = '',
   myepg?: MyepgGuide,
+  placed: Placed[] = [],
 ): string {
   const slots = channels.filter((c) => c.isEventSlot)
   const covered = myepg?.covered ?? new Set<string>()
@@ -1447,7 +1449,16 @@ export function buildEventEpg(
     const id = programmeChannel(l)
     ;(byChannel.get(id) ?? byChannel.set(id, []).get(id)!).push(l)
   }
-  for (const ps of byChannel.values()) for (const p of oneSchedule(ps)) head.push(p)
+  // then the TV listings sites' word on which channels show a match (lib/tv-listings.ts)
+  const titleOf = (b: string) => unxml(b.match(/<title[^>]*>([^<]*)/)?.[1] ?? '')
+  const stamp = (b: string, k: 'start' | 'stop', ms: number) => b.replace(new RegExp(`\\b${k}="[^"]*"`), `${k}="${xmltvTime(new Date(ms))}"`)
+  for (const [id, ps] of byChannel) {
+    const one = oneSchedule(ps)
+    const listed = applyListings(id, one, placed, xmltvAt, titleOf,
+      (start, stop, title) => `<programme start="${xmltvTime(new Date(start))}" stop="${xmltvTime(new Date(stop))}" channel="${xml(id)}"><title>${xml(title)}</title></programme>`,
+      (b, start, stop) => stamp(stamp(b, 'start', start), 'stop', stop))
+    for (const p of listed === one ? one : listed.sort((x, y) => (xmltvAt(x, 'start') || 0) - (xmltvAt(y, 'start') || 0))) head.push(p)
+  }
   head.push('</tv>')
   return head.join('\n')
 }
@@ -1485,6 +1496,6 @@ export async function curatedGuide(): Promise<{ channels: Channel[]; xml: string
     guides = { at: Date.now(), job }
     job.catch(() => { if (guides?.job === job) guides = undefined })
   }
-  const [channels, [providerXml, myepg]] = await Promise.all([channelsPromise, guides.job])
-  return { channels, xml: buildEventEpg(channels, providerXml, myepg) }
+  const [channels, [providerXml, myepg], listings] = await Promise.all([channelsPromise, guides.job, fetchListings()])
+  return { channels, xml: buildEventEpg(channels, providerXml, myepg, placeListings(channels, listings)) }
 }
