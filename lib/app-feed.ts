@@ -136,7 +136,7 @@ export function guideDescr(title: string, raw: string): string {
 const SUPERSCRIPT = /[ᴬ-ᶿ⁰-₟]+/g
 const compGroup = new Map(COMPS.map((c) => [c.key, c.group]))
 
-export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now(), crests?: (title: string) => [string | null, string | null] | null): Uint8Array {
+export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now(), crests?: (title: string, onNow: boolean) => [string | null, string | null] | null): Uint8Array {
   // Name-as-title filler: ours (slots, uncovered channels) and the provider's own 2-hour blocks
   // named for the channel ("IT: DAZN DIRETTA GOL EUROPA LEAGUE" all day), never a programme.
   const filler = new Set(channels.map((c) => `${c.tvgId}\n${c.name.toLowerCase()}`))
@@ -180,7 +180,7 @@ export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now
       const match = !rerun && couldBeLiveMatch(r.title)
       insert.run(r.tvgId, r.start, r.stop, r.title, searchNorm(r.title), r.descr,
         r.synthetic ? 1 : 0, match ? 1 : 0, comp ? compGroup.get(comp)! : null)
-      const found = comp && match ? crests?.(r.title) : null
+      const found = comp && match ? crests?.(r.title, r.start <= now && r.stop > now) : null
       if (found) crest.run(r.title, found[0], found[1])
     })
   })()
