@@ -147,13 +147,6 @@ fun QuickPanel(
                         Column(verticalArrangement = Arrangement.spacedBy(Space.xs), content = views)
                         PanelRow("Refresh guide", refreshStatus, onClick = onRefresh)
                         PanelRow("Trakt", traktValue(traktStatus), focus = traktRow) { page = Page.Trakt }
-                        // TMDB's terms ask for this credit wherever its data shows.
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            "Movies & Shows uses the TMDB API but is not endorsed or certified by TMDB.",
-                            style = Type.caption,
-                            modifier = Modifier.padding(start = Space.l, end = Space.l),
-                        )
                     }
                     Page.Audio -> {
                         val selected = remember { FocusRequester() }
