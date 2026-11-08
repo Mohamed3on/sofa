@@ -467,22 +467,23 @@ const nameKey = (s: string): string =>
 // the secondary UEFA cups, then domestic cups. Groups that exist only while the EPG
 // has seen a round recently (FA Cup, EFL Cup, Coppa, Pokal) trail the block, so their
 // coming and going never shifts the groups everyone uses.
-interface Competition { key: string; group: string; re: RegExp; not?: RegExp }
+/** [logo]: ESPN's league logo id, drawn from its dark-ground set (leaguelogos/soccer/500-dark/<id>.png); none where ESPN has no dark one. */
+interface Competition { key: string; group: string; logo?: number; re: RegExp; not?: RegExp }
 export const COMPS: Competition[] = [
-  { key: 'pl', group: '🏆 Premier League', re: /premier league|\bEPL\b|\bsky sports? pl\b|hub premier|now premier sports|الدوري الإنجليزي الممتاز/i, not: /scottish|welsh|irish|premier league 2\b|\bpl2\b|premier league\s*[-–—]\s*(?![^|]*\s(?:v|vs\.?)\s)[^|\d]+(?:\||$)/i },
-  { key: 'ucl', group: '🏆 Champions League', re: /champions league|liga de campeones|ligue des champions|دوري أبطال أوروبا|دوري الأبطال|\bUCL\b/i, not: /afc champions|caf champions|concacaf|asian champions|global champions|gulf club champions/i },
-  { key: 'laliga', group: '🏆 La Liga', re: /\bla ?liga\b|الدوري الإسباني/i, not: /hypermotion|smartbank|segunda|liga portugal|liga mx|liga f\b/i },
-  { key: 'bundes', group: '🏆 Bundesliga', re: /bundesliga|الدوري الألماني/i, not: /2\.\s*bundesliga|zweite|regionalliga|3\. liga|austria|österreich|admiral/i },
-  { key: 'seriea', group: '🏆 Serie A', re: /\bserie a\b|الدوري الإيطالي/i, not: /brasileir|betano|serie a2|serie [bc]\b|girone|lega pro|primavera/i },
-  { key: 'ligue1', group: '🏆 Ligue 1', re: /ligue ?1\b|الدوري الفرنسي/i },
-  { key: 'uel', group: '🏆 Europa League', re: /europa league|liga europa|ligue europa|الدوري الأوروبي|\bUEL\b/i },
-  { key: 'uecl', group: '🏆 Conference League', re: /conference league|دوري المؤتمر|\bUECL\b/i },
-  { key: 'champ', group: '🏆 Championship', re: /^champ:|(?:efl|sky bet|english)\s+championship|championship ppv/i },
-  { key: 'cdr', group: '🏆 Copa del Rey', re: /copa del rey|كأس ملك إسبانيا|كأس الملك الإسباني/i, not: /barcos|baloncesto/i },
-  { key: 'facup', group: '🏆 FA Cup', re: /\bFA Cup\b|كأس الاتحاد الإنجليزي/i, not: /youth|trophy|vase|scottish|welsh|irish/i },
-  { key: 'eflcup', group: '🏆 EFL Cup', re: /carabao|\bEFL Cup\b|\bleague cup\b|كأس الرابطة الإنجليزية|كأس كاراباو/i, not: /adib|\buae\b|scottish|welsh|irish|premier sports cup/i },
+  { key: 'pl', group: '🏆 Premier League', logo: 23, re: /premier league|\bEPL\b|\bsky sports? pl\b|hub premier|now premier sports|الدوري الإنجليزي الممتاز/i, not: /scottish|welsh|irish|premier league 2\b|\bpl2\b|premier league\s*[-–—]\s*(?![^|]*\s(?:v|vs\.?)\s)[^|\d]+(?:\||$)/i },
+  { key: 'ucl', group: '🏆 Champions League', logo: 2, re: /champions league|liga de campeones|ligue des champions|دوري أبطال أوروبا|دوري الأبطال|\bUCL\b/i, not: /afc champions|caf champions|concacaf|asian champions|global champions|gulf club champions/i },
+  { key: 'laliga', group: '🏆 La Liga', logo: 15, re: /\bla ?liga\b|الدوري الإسباني/i, not: /hypermotion|smartbank|segunda|liga portugal|liga mx|liga f\b/i },
+  { key: 'bundes', group: '🏆 Bundesliga', logo: 10, re: /bundesliga|الدوري الألماني/i, not: /2\.\s*bundesliga|zweite|regionalliga|3\. liga|austria|österreich|admiral/i },
+  { key: 'seriea', group: '🏆 Serie A', logo: 12, re: /\bserie a\b|الدوري الإيطالي/i, not: /brasileir|betano|serie a2|serie [bc]\b|girone|lega pro|primavera/i },
+  { key: 'ligue1', group: '🏆 Ligue 1', logo: 9, re: /ligue ?1\b|الدوري الفرنسي/i },
+  { key: 'uel', group: '🏆 Europa League', logo: 2310, re: /europa league|liga europa|ligue europa|الدوري الأوروبي|\bUEL\b/i },
+  { key: 'uecl', group: '🏆 Conference League', logo: 20296, re: /conference league|دوري المؤتمر|\bUECL\b/i },
+  { key: 'champ', group: '🏆 Championship', logo: 24, re: /^champ:|(?:efl|sky bet|english)\s+championship|championship ppv/i },
+  { key: 'cdr', group: '🏆 Copa del Rey', logo: 80, re: /copa del rey|كأس ملك إسبانيا|كأس الملك الإسباني/i, not: /barcos|baloncesto/i },
+  { key: 'facup', group: '🏆 FA Cup', logo: 40, re: /\bFA Cup\b|كأس الاتحاد الإنجليزي/i, not: /youth|trophy|vase|scottish|welsh|irish/i },
+  { key: 'eflcup', group: '🏆 EFL Cup', logo: 41, re: /carabao|\bEFL Cup\b|\bleague cup\b|كأس الرابطة الإنجليزية|كأس كاراباو/i, not: /adib|\buae\b|scottish|welsh|irish|premier sports cup/i },
   { key: 'coppa', group: '🏆 Coppa Italia', re: /coppa italia|كأس إيطاليا/i, not: /serie c|primavera/i },
-  { key: 'pokal', group: '🏆 DFB-Pokal', re: /dfb[- ]?pokal|كأس ألمانيا/i },
+  { key: 'pokal', group: '🏆 DFB-Pokal', logo: 2061, re: /dfb[- ]?pokal|كأس ألمانيا/i },
 ]
 const UEFA_ALL = ['ucl', 'uel', 'uecl']
 // Shared vetoes: other sports and women's competitions that reuse league names, and

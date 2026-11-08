@@ -34,6 +34,8 @@ type ProviderRoute = { plain: string; vpn: string; user: string; pass: string }
 
 export interface AppFeed {
   groups: string[]
+  /** Each 🏆 group with a known logo ("🏆 Premier League") → its small logo for dark grounds; apps before it ignore it. */
+  compLogos: Record<string, string>
   route: ProviderRoute
   /** Provider B's fronts and account, when configured; its feeds are the ids from BACKUP_ID up. */
   backup?: ProviderRoute
@@ -45,6 +47,7 @@ export interface AppFeed {
 }
 
 const isComp = (group: string) => group.startsWith('🏆')
+const compLogos = Object.fromEntries(COMPS.filter((c) => c.logo).map((c) => [c.group, `https://a.espncdn.com/combiner/i?img=/i/leaguelogos/soccer/500-dark/${c.logo}.png&w=64&h=64`]))
 
 function badges(streamId: number): string[] {
   const m = qualityOf(streamId)
@@ -74,6 +77,7 @@ export function buildAppFeed(cfg: XtreamConfig, channels: Channel[], backup?: Ba
   }
   return {
     groups: [...new Set(live.map((c) => c.group))],
+    compLogos,
     route: { plain: cfg.host, vpn: VPN_HOST, user: cfg.user, pass: cfg.pass },
     ...(backup && { backup: { plain: backup.host, vpn: backup.vpnHost, user: backup.user, pass: backup.pass } }),
     ...(realDebrid && { realDebrid }),
