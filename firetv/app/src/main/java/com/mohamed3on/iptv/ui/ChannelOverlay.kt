@@ -42,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -72,6 +73,7 @@ import com.mohamed3on.iptv.graph
 import com.mohamed3on.iptv.ui.theme.material
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Text
 import com.mohamed3on.iptv.data.Channel
@@ -148,6 +150,8 @@ private val GROUPS_WIDTH = 260.dp
 private val CHANNELS_WIDTH = 540.dp
 private val GROUP_ROW_HEIGHT = 44.dp
 private val ROW_HEIGHT = 72.dp
+/** A feed under a known match's header: one line beside the logo. */
+private val FEED_ROW_HEIGHT = 64.dp
 // 2:1, so a wide logo (most real-shape ones are 2.5–3.5:1) reads; a square one keeps the full height.
 private val TILE = DpSize(112.dp, 56.dp)
 private val MARKER = DpSize(3.dp, 24.dp)
@@ -176,9 +180,16 @@ private data class GroupSource(val name: String) : Source {
 private sealed interface Item {
     val key: String
 }
-/** [under]: the key of the Live now match it is listed under, so the row is that match's own. */
-private class ChannelItem(val channel: Channel, under: String = "") : Item {
+/**
+ * [under]: the key of the Live now match it is listed under, so the row is that match's own. A [compact] row is a feed
+ * under a known match's header (logo, name, flag, badges); a [zap] one tunes with Live now as its zap context.
+ */
+private class ChannelItem(val channel: Channel, under: String = "", val compact: Boolean = false, val zap: Boolean = false) : Item {
     override val key = "$under${channel.id}|${channel.group}"
+}
+/** A Live now match the scoreboards know, as the header of the channels showing it; never focused, pinned while they are. */
+private class MatchItem(val entry: LiveEntry) : Item {
+    override val key = "mh|${entry.programme!!.start}|${entry.title}"
 }
 private class LiveItem(val entry: LiveEntry) : Item {
     override val key = entry.programme?.let { "m|${it.start}|${entry.title}" } ?: "s|${entry.via.name}"
@@ -209,6 +220,7 @@ private data class Note(val title: String, val hint: String? = null) : Item {
     override val key get() = "note"
 }
 
+private val Item.height get() = if (this is ChannelItem && compact) FEED_ROW_HEIGHT else ROW_HEIGHT
 private val Item.focusable get() = this is ChannelItem || this is LiveItem || this is HitItem
 private val Item.target get() = when (this) {
     is ChannelItem -> channel
@@ -217,8 +229,18 @@ private val Item.target get() = when (this) {
     else -> null
 }
 
-/** A Live now match, then every other channel showing it: pick by language or feed. */
-private fun MutableList<Item>.addMatch(match: LiveEntry) {
+/**
+ * A Live now match, then every other channel showing it: pick by language or feed. A match the scoreboards know ([known]
+ * names its programme title) is a header over all of its channels, the one it tunes first.
+ */
+private fun MutableList<Item>.addMatch(match: LiveEntry, known: Set<String>) {
+    if (match.programme?.title in known) {
+        val head = MatchItem(match)
+        add(head)
+        add(ChannelItem(match.tune, under = "${head.key}>", compact = true, zap = true))
+        match.alsoOn.mapTo(this) { c -> ChannelItem(c, under = "${head.key}>", compact = true) }
+        return
+    }
     val row = LiveItem(match)
     add(row)
     match.alsoOn.mapTo(this) { c -> ChannelItem(c, under = "${row.key}>") }
@@ -229,7 +251,7 @@ private fun MutableList<Item>.addMatch(match: LiveEntry) {
  * what was [found] (nothing more while the first search runs): channels by name, then programmes,
  * each under its title only when it has rows.
  */
-private fun itemsOf(source: Source, feed: Feed, live: LiveNow?, typed: Boolean, found: SearchResults?): List<Item>? = when (source) {
+private fun itemsOf(source: Source, feed: Feed, live: LiveNow?, typed: Boolean, found: SearchResults?, known: Set<String>): List<Item>? = when (source) {
     SearchSource -> buildList {
         add(SearchBoxItem)
         when {
@@ -245,7 +267,7 @@ private fun itemsOf(source: Source, feed: Feed, live: LiveNow?, typed: Boolean, 
                 }
                 if (onNow.isNotEmpty()) {
                     add(LiveHeading)
-                    onNow.forEach { addMatch(it) }
+                    onNow.forEach { addMatch(it, known) }
                 }
                 val airing = onNow.flatMap { m -> (listOf(m.tune) + m.alsoOn).map { it.family to m.programme!! } }.toMap()
                 val hits = found.hits.filterNot { h -> airing[h.tune.family]?.let { p -> h.programme.start < p.stop && p.start < h.programme.stop } == true }
@@ -264,7 +286,7 @@ private fun itemsOf(source: Source, feed: Feed, live: LiveNow?, typed: Boolean, 
     MoviesSource -> listOf(Note("Films and shows, best rated first, from IPTV and Debrid", "Press OK to browse"))
     LiveSource -> live?.let {
         buildList {
-            for (match in it.matches) addMatch(match)
+            for (match in it.matches) addMatch(match, known)
             if (it.slots.isNotEmpty()) {
                 if (it.matches.isEmpty()) add(NoMatches)
                 add(SlotsHeading)
@@ -438,8 +460,16 @@ fun ChannelOverlay(
         }
     }
     val found = memory.found
-    val items = remember(source, feed, live.takeIf { source == LiveSource || source == SearchSource }, typed, found.takeIf { source == SearchSource }) {
-        itemsOf(source, feed, live, typed, found)
+    // Live now's matches the scoreboards know (by programme title): each heads its channels. Changes only when that set does.
+    val crests = LocalCrests.current
+    val scores = LocalScores.current
+    val known by remember(live, crests) {
+        derivedStateOf(structuralEqualityPolicy()) {
+            live?.matches.orEmpty().mapNotNullTo(HashSet()) { m -> m.programme?.title?.takeIf { crests[it].stateIn(scores.value) != null } }
+        }
+    }
+    val items = remember(source, feed, live.takeIf { source == LiveSource || source == SearchSource }, typed, found.takeIf { source == SearchSource }, known) {
+        itemsOf(source, feed, live, typed, found, known)
     }
 
     // Now/next for the whole shown group in one query, off the main thread, again each minute; then
@@ -914,9 +944,9 @@ fun ChannelOverlay(
                         contentPadding = PaddingValues(vertical = Space.safeY + Space.xl),
                         verticalArrangement = Arrangement.spacedBy(Space.xs),
                     ) {
-                        itemsIndexed(list, key = { _, it -> it.key }, contentType = { _, it -> it::class }) { index, item ->
+                        rowsOf(list, header = { index, item -> MatchHeader(item.entry, listState, index) }) { index, item ->
                             val ready by remember(index) { derivedStateOf { built.ready(index) } }
-                            if (item.focusable && !ready) return@itemsIndexed Box(Modifier.fillMaxWidth().height(ROW_HEIGHT))
+                            if (item.focusable && !ready) return@rowsOf Box(Modifier.fillMaxWidth().height(item.height))
                             val focus = if (item.key == entryKey) rowFocus else null
                             val onFocused = {
                                 focusedKey = item.key
@@ -933,7 +963,13 @@ fun ChannelOverlay(
                                 LocalRowHint provides (if (focusedHere) item.target?.let { pickHint?.invoke(it) } else null),
                             ) {
                             when (item) {
-                                is ChannelItem -> {
+                                is ChannelItem -> if (item.compact) {
+                                    val on = item.channel.family == current?.family
+                                    FeedRow(
+                                        item.channel, playing = on, watchHint = watchHint && on, focus = focus, onFocused = onFocused,
+                                        onClick = { choose(item.channel, if (item.zap) live?.context else null) },
+                                    )
+                                } else {
                                     val on = item.channel.family == current?.family
                                     ChannelRow(
                                         item.channel, nowNext[item.channel.tvgId], clock,
@@ -950,6 +986,7 @@ fun ChannelOverlay(
                                     )
                                 }
                                 NoMatches -> Text("No matches on right now", style = Type.body, modifier = Modifier.padding(horizontal = Space.m, vertical = Space.m))
+                                is MatchItem -> {}
                                 SlotsHeading -> SectionTitle("Event channels · not confirmed")
                                 LiveHeading -> SectionTitle("Live now")
                                 ChannelsHeading -> SectionTitle("Channels")
@@ -1096,13 +1133,14 @@ internal fun RowFrame(
     focus: FocusRequester?,
     onFocused: () -> Unit,
     onClick: () -> Unit,
+    height: Dp = ROW_HEIGHT,
     lines: @Composable ColumnScope.() -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
     Row(
         Modifier
             .fillMaxWidth()
-            .height(ROW_HEIGHT)
+            .height(height)
             .then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocused() }
             .then(if (LocalHeld.current) Modifier.drawBehind { drawRoundRect(Palette.raised, cornerRadius = CornerRadius(Radius.row.toPx())) } else Modifier)
@@ -1163,6 +1201,67 @@ internal fun ChannelRow(
         if (moving) Hint(MOVE_HINT) else LastLine(watchHint) {
             FitText(remember(next) { next?.let { "Next · ${clockTime(it.start)} ${shownTitle(it)}" } ?: "" }, style = Type.caption)
         }
+    }
+}
+
+/**
+ * [list]'s rows, each Live now match's header pinned at the top while its channels scroll under it (stickyHeader); one
+ * run of rows, as before, for a list without any.
+ */
+private fun LazyListScope.rowsOf(list: List<Item>, header: @Composable LazyItemScope.(Int, MatchItem) -> Unit, row: @Composable LazyItemScope.(Int, Item) -> Unit) {
+    var from = 0
+    fun run(to: Int) {
+        val start = from
+        if (to > start) items(to - start, key = { list[start + it].key }, contentType = { list[start + it]::class }) { row(start + it, list[start + it]) }
+    }
+    list.forEachIndexed { i, item ->
+        if (item !is MatchItem) return@forEachIndexed
+        run(i)
+        stickyHeader(key = item.key, contentType = MatchItem::class) { header(i, item) }
+        from = i + 1
+    }
+    run(list.size)
+}
+
+/**
+ * A known match over the channels showing it: its match line, then its 🏆 competition. While its channels scroll under
+ * it, it sits on solid ground inside the safe area, so no row reads through it.
+ */
+@Composable
+private fun MatchHeader(entry: LiveEntry, listState: LazyListState, index: Int) {
+    val match = matchOf(entry.programme?.title)
+    // Pinned: a later row has scrolled up under it. Read while scrolling; the header changes only when that does.
+    val stuck by remember(index) {
+        derivedStateOf {
+            val visible = listState.layoutInfo.visibleItemsInfo
+            val self = visible.firstOrNull { it.index == index }
+            self != null && visible.any { it.index > index && it.offset < self.offset + self.size }
+        }
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .then(if (stuck) Modifier.background(Palette.ink) else Modifier)
+            .padding(top = if (stuck) Space.safeY else Space.m, bottom = Space.xs)
+            .padding(horizontal = Space.m),
+        verticalArrangement = Arrangement.spacedBy(Space.xs),
+    ) {
+        if (match != null) MatchLine(match, Type.headline) else FitText(entry.title, style = Type.headline)
+        FitText(entry.comp ?: groupName(entry.via.group), style = Type.caption)
+    }
+}
+
+/** A feed under a known match: logo, its language's flag and name, and badges; the match is the header's to say. */
+@Composable
+private fun FeedRow(channel: Channel, playing: Boolean, watchHint: Boolean, focus: FocusRequester?, onFocused: () -> Unit, onClick: () -> Unit) {
+    val name = remember(channel) { feedFlag(channel).let { flag -> if (flag.isEmpty()) displayName(channel.name) else "$flag  ${displayName(channel.name)}" } }
+    RowFrame(channel, focus, onFocused, onClick, height = FEED_ROW_HEIGHT) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            if (playing) PlayingDot()
+            FitText(name, style = Type.headline, modifier = Modifier.weight(1f, fill = false))
+            Badges(channel.badges)
+        }
+        if (watchHint || LocalRowHint.current != null) LastLine(watchHint) {}
     }
 }
 
