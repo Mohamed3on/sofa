@@ -20,7 +20,7 @@ import { jsonFile, writeAtomic } from './fs.js'
 import { applyListings, fetchListings, judgeSameMatches, placeListings, sameMatch, type Placed } from './tv-listings.js'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { apiGet, BACKUP_ID, backupConfigFromEnv, claims4K, configFromEnv, guideUrl, plainCategory, readName, streamUrl, vodCatalogue, type VodFilm, type XtreamConfig } from './provider.js'
+import { BACKUP_ID, backupConfigFromEnv, claims4K, configFromEnv, download, guideUrl, liveList, type LiveStream, plainCategory, readName, streamUrl, vodCatalogue, type VodFilm, type XtreamConfig } from './provider.js'
 
 const cachePath = (name: string) => fileURLToPath(new URL(`../.cache/${name}`, import.meta.url))
 /**
@@ -378,18 +378,7 @@ const audio = (streamId: number): number => audioRank(qualityOf(streamId))
 // The picture detail the feed's measured bitrate leaves room for (detailRank) — between feeds of one height and fps, ahead of audio.
 const detail = (streamId: number): number => detailRank(qualityOf(streamId))
 
-interface Category {
-  category_id: string
-  category_name: string
-}
-
-interface Stream {
-  stream_id: number
-  name: string
-  stream_icon?: string
-  epg_channel_id?: string | null
-  category_id: string
-}
+type Stream = LiveStream
 
 export interface Channel {
   streamId: number
@@ -761,9 +750,8 @@ export async function fetchCuratedChannels(cfg: XtreamConfig, vod = true): Promi
 }
 
 async function pullCuratedChannels(cfg: XtreamConfig): Promise<Channel[]> {
-  const [cats, streams, icons] = await Promise.all([
-    apiGet<Category[]>(cfg, 'get_live_categories'),
-    apiGet<Stream[]>(cfg, 'get_live_streams'),
+  const [{ cats, streams }, icons] = await Promise.all([
+    liveList(cfg),
     readFile(EPG_ICONS, 'utf8').then((j) => new Map<string, string>(Object.entries(JSON.parse(j)))).catch(() => new Map<string, string>()),
   ])
   const catName = new Map(cats.map((c) => [Number(c.category_id), c.category_name]))
@@ -923,10 +911,7 @@ async function pullCuratedChannels(cfg: XtreamConfig): Promise<Channel[]> {
  */
 export async function withBackupFeeds(channels: Channel[], b = backupConfigFromEnv()): Promise<Channel[]> {
   if (!b) return channels
-  const [cats, streams] = await Promise.all([
-    apiGet<Category[]>(b, 'get_live_categories'),
-    apiGet<Stream[]>(b, 'get_live_streams'),
-  ]).catch(() => [[], []] as [Category[], Stream[]]) // B down: serve A alone
+  const { cats, streams } = await liveList(b).catch(() => ({ cats: [], streams: [] })) // B down: serve A alone
   const catName = new Map(cats.map((c) => [c.category_id, c.category_name]))
   const familyKey = (group: string, name: string) => `${group}|${chanKey(name)}`
   const wanted = new Set(channels.filter((c) => !c.vodExt && !c.isEventSlot).map((c) => familyKey(c.group, c.name)))
@@ -1244,7 +1229,7 @@ export async function fetchMyepgGuide(
 
   for (const url of urls) {
     try {
-      const resp = await fetch(url, { headers: { 'User-Agent': 'VLC/3.0.18' } })
+      const resp = await download(url)
       if (!resp.ok || !resp.body) continue
       const reader = resp.body.pipeThrough(new DecompressionStream('gzip')).getReader()
       const decoder = new TextDecoder()
@@ -1498,7 +1483,7 @@ export function scopeProviderEpg(xml: string, channels: Channel[]): string {
 /** Fetch the provider's full XMLTV guide; '' on any failure (best-effort). */
 export async function fetchProviderEpg(cfg: XtreamConfig): Promise<string> {
   try {
-    const resp = await fetch(guideUrl(cfg), { headers: { 'User-Agent': 'VLC/3.0.18' } })
+    const resp = await download(guideUrl(cfg))
     if (!resp.ok) return ''
     return await resp.text()
   } catch {

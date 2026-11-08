@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import {
   KEEP,
   autoIncluded,
@@ -17,6 +17,7 @@ import {
   withCompetitionGroups,
   type Channel,
 } from './curation.js'
+import { useProviderFetch } from './provider.js'
 
 describe('sports playlist curation', () => {
   test('does not reintroduce expired 2026 tournament packages', () => {
@@ -171,7 +172,7 @@ describe('sibling feeds', () => {
       `<channel id="Sky.Sport.Bundesliga.10.de"><display-name>Sky Sport Bundesliga 10</display-name></channel>` +
       prog('beinsports3.fr', 'Ligue 1: Lens v Nice') + prog('alkassone.qa', 'QSL: Al Sadd v Al Duhail') +
       prog('Sky.Sport.Bundesliga.10.de', 'BL: FC Bayern München - VfB Stuttgart') + '</tv>'
-    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(Bun.gzipSync(guide)))
+    const restore = useProviderFetch(async () => new Response(Bun.gzipSync(guide)))
     const channels = [
       ch(1, '8K: beIN SP⚽RTS 3 FRANCE ᴿᴬᵂ', 'BeinSports3.fr'), ch(2, 'SPO: Al Kass 1 4K', 'AlKassOne.qa'),
       ch(3, 'F: ALKASS 1 ᴿᴬᵂ', 'sx.3'), ch(4, 'DE: SKY SPORT BUNDESLIGA 10 (MOBIL)', 'SkyBundesliga10.de'),
@@ -194,7 +195,7 @@ describe('sibling feeds', () => {
       guide = guide.replace('</tv>', prog('skysportbundesliga10.de', 'BL: Schalke 04 - Bayern') + '</tv>')
       expect(await guided(jev)).toEqual(['BeinSports3.fr', 'AlKassOne.qa', 'sx.3', 'SkyBundesliga10.de'])
     } finally {
-      fetchSpy.mockRestore()
+      restore()
     }
   })
 })

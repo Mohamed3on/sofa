@@ -37,12 +37,75 @@ export function backupConfigFromEnv(): BackupConfig | undefined {
 /** Provider B's stream ids are offset by this, so they never collide with A's (quality store, app ids). */
 export const BACKUP_ID = 1_000_000_000
 
+// Every provider call and guide download goes through download(): no answer, or no bytes, for
+// stallMs fails it, so a hung provider fails a build instead of leaving every build waiting on it.
+let fetchImpl: typeof fetch = (...a) => fetch(...a)
+let stallMs = 30_000
+
+/** Tests: answer provider calls with [f] (and a shorter stall limit); returns the undo. */
+export function useProviderFetch(f: (url: string, init?: RequestInit) => Promise<Response>, stall = stallMs): () => void {
+  const was = [fetchImpl, stallMs] as const
+  fetchImpl = f as typeof fetch
+  stallMs = stall
+  return () => { [fetchImpl, stallMs] = was }
+}
+
+/** A GET whose answer and body each must keep coming: a gap of stallMs aborts it and errors the body. */
+export async function download(url: string): Promise<Response> {
+  const ac = new AbortController()
+  let body: TransformStreamDefaultController | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const kick = () => {
+    clearTimeout(timer)
+    timer = setTimeout(() => {
+      const e = new Error(`provider stalled ${stallMs / 1000}s`)
+      ac.abort(e)
+      body?.error(e)
+    }, stallMs)
+  }
+  kick()
+  const resp = await fetchImpl(url, { headers: { 'User-Agent': 'VLC/3.0.18' }, signal: ac.signal }).catch((e) => {
+    clearTimeout(timer)
+    throw ac.signal.aborted ? ac.signal.reason : e
+  })
+  if (!resp.body) return clearTimeout(timer), resp
+  const guarded = resp.body.pipeThrough(new TransformStream({
+    start: (c) => { body = c },
+    transform: (chunk, c) => { kick(); c.enqueue(chunk) },
+    flush: () => clearTimeout(timer),
+  }))
+  return new Response(guarded, { status: resp.status, headers: resp.headers })
+}
+
 /** A player_api.php call ("get_live_streams", "get_vod_info&vod_id=1"); no action answers the account's status. */
 export async function apiGet<T>(cfg: XtreamConfig, action: string): Promise<T> {
   const url = `${cfg.host}/player_api.php?username=${cfg.user}&password=${cfg.pass}${action ? `&action=${action}` : ''}`
-  const resp = await fetch(url, { headers: { 'User-Agent': 'VLC/3.0.18' } })
-  if (!resp.ok) throw new Error(`${action} -> HTTP ${resp.status}`)
+  const resp = await download(url)
+  if (!resp.ok) {
+    void resp.body?.cancel().catch(() => {})
+    throw new Error(`${action} -> HTTP ${resp.status}`)
+  }
   return resp.json() as Promise<T>
+}
+
+export interface LiveCategory { category_id: string; category_name: string }
+export interface LiveStream { stream_id: number; name: string; stream_icon?: string; epg_channel_id?: string | null; category_id: string }
+
+// An account's live list (~56k streams on B) is asked for by the playlist, the app's channels and the
+// guide at once: one download per account is in flight, and nothing is kept once it ends.
+const liveLists = new Map<string, Promise<{ cats: LiveCategory[]; streams: LiveStream[] }>>()
+
+/** The account's live categories and streams, shared with every caller asking while it downloads. */
+export function liveList(cfg: XtreamConfig): Promise<{ cats: LiveCategory[]; streams: LiveStream[] }> {
+  const k = `${cfg.host}|${cfg.user}`
+  let job = liveLists.get(k)
+  if (!job) {
+    job = Promise.all([apiGet<LiveCategory[]>(cfg, 'get_live_categories'), apiGet<LiveStream[]>(cfg, 'get_live_streams')])
+      .then(([cats, streams]) => ({ cats, streams }))
+      .finally(() => liveLists.delete(k))
+    liveLists.set(k, job)
+  }
+  return job
 }
 
 /** The account's connection slots: how many it may hold, and how many are in use. */

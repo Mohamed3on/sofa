@@ -1,6 +1,7 @@
 import { afterEach, expect, spyOn, test } from 'bun:test'
 import { rm } from 'node:fs/promises'
 import { forgetBuiltGuide } from './lib/curation.js'
+import { useProviderFetch } from './lib/provider.js'
 import { handle, routes } from './server.js'
 
 const env = { ...process.env }
@@ -23,12 +24,13 @@ test('every route refuses no token, an empty one or the other gate\'s', async ()
 test('a stored quality reading makes the kept channel list stale; an unchanged one keeps it', async () => {
   Object.assign(process.env, { XTREAM_HOST: 'http://plain.example', XTREAM_USER: 'u', XTREAM_PASS: 'p', APP_TOKENS: 'inv', QUALITY_FILE: `${dir}/quality.json` })
   let builds = 0
-  const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation((async (url: string) => {
+  const outside = spyOn(globalThis, 'fetch').mockImplementation((async () => new Response('', { status: 404 })) as unknown as typeof fetch) // no TV listings sites
+  const restore = useProviderFetch(async (url) => {
     const action = new URL(url).searchParams.get('action')
     if (action === 'get_live_categories') return Response.json([{ category_id: '9001', category_name: 'UK| PREMIER LEAGUE' }])
     if (action === 'get_live_streams') builds++
     return Response.json(action === 'get_live_streams' ? [{ stream_id: 1, name: 'UK: SKY SPORTS MAIN EVENT FHD', epg_channel_id: 'a.uk', category_id: '9001' }] : [])
-  }) as typeof fetch)
+  })
   const channels = () => handle(new Request('http://localhost/api/app/channels?t=inv'))
   const post = async (fps: number) => (await handle(new Request('http://localhost/api/app/quality?t=inv', {
     method: 'POST', body: JSON.stringify({ id: 990003, w: 1920, h: 1080, fps, codec: 'h264', name: 'A' }),
@@ -47,6 +49,7 @@ test('a stored quality reading makes the kept channel list stale; an unchanged o
     await channels()
     expect(builds).toBe(2)
   } finally {
-    fetchSpy.mockRestore()
+    restore()
+    outside.mockRestore()
   }
 })

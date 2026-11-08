@@ -1,8 +1,8 @@
-import { afterAll, beforeAll, describe, expect, mock, spyOn, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { vodChannels } from './curation.js'
-import { claims4K, readName, seriesCatalogue, vodCatalogue } from './provider.js'
+import { claims4K, liveList, readName, seriesCatalogue, useProviderFetch, vodCatalogue } from './provider.js'
 import { bestFilmCopies, searchVod } from './vod.js'
 
 describe('provider names', () => {
@@ -37,6 +37,7 @@ describe('catalogue snapshots', () => {
   const env = { ...process.env }
   const calls: string[] = []
   let answer: (action: string) => unknown = () => []
+  let restore = () => {}
   const vod = [
     { stream_id: 1, name: 'EN - Inception (2010)', category_id: '10', container_extension: 'mkv', added: '100', tmdb: '27205' },
     { stream_id: 2, name: '4K-EN - Inception (2010)', category_id: '20', container_extension: 'mkv', added: '200', tmdb: '27205' },
@@ -47,16 +48,16 @@ describe('catalogue snapshots', () => {
   const vodCats = [{ category_id: '10', category_name: 'EN - MOVIES' }, { category_id: '20', category_name: 'EN - MOVIES ⁴ᴷ ³⁸⁴⁰ᴾ' }, { category_id: '30', category_name: 'FR - FILMS' }]
   beforeAll(() => {
     process.env.SNAPSHOT_DIR = dir
-    spyOn(globalThis, 'fetch').mockImplementation((async (url: string) => {
+    restore = useProviderFetch(async (url) => {
       const action = new URL(url).searchParams.get('action') ?? ''
       calls.push(action)
       return Response.json(answer(action))
-    }) as typeof fetch)
+    })
   })
   afterAll(() => {
     process.env = { ...env }
     rmSync(dir, { recursive: true, force: true })
-    mock.restore() // the fetch stub, which would otherwise answer the test files after this one
+    restore()
   })
 
   test('the VOD catalogue is pulled once, then every reader and playlist build uses the snapshot', async () => {
@@ -84,5 +85,43 @@ describe('catalogue snapshots', () => {
     expect((await Bun.file(`${dir}/series.json`).json()).data).toEqual(saved)
     expect(await seriesCatalogue(cfg)).toEqual(saved)
     expect(calls.filter((a) => a === 'get_series')).toHaveLength(1)
+  })
+})
+
+describe('provider pulls', () => {
+  const a = { host: 'http://a.test', user: 'u', pass: 'p' }
+  const b = { host: 'http://b.test', user: 'u', pass: 'p' }
+
+  test('builds asking at once share one live-list download per account', async () => {
+    const pulls: string[] = []
+    const restore = useProviderFetch(async (url) => {
+      const u = new URL(String(url))
+      if (u.searchParams.get('action') === 'get_live_streams') pulls.push(u.host)
+      await Bun.sleep(5)
+      return Response.json(u.searchParams.get('action') === 'get_live_streams' ? [{ stream_id: 1, name: 'X', category_id: '1' }] : [])
+    })
+    try {
+      const lists = await Promise.all([liveList(a), liveList(a), liveList(b), liveList(b)])
+      expect(lists.map((l) => l.streams.length)).toEqual([1, 1, 1, 1])
+      expect(pulls.sort()).toEqual(['a.test', 'b.test'])
+    } finally {
+      restore()
+    }
+  })
+
+  test('a provider that stops sending fails the pull instead of hanging it', async () => {
+    const restore = useProviderFetch(async (_url, init) => {
+      // headers, one chunk, then nothing: a hung download
+      const body = new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode('[{"stream_id":')) })
+      init?.signal?.addEventListener('abort', () => body.cancel().catch(() => {}))
+      return new Response(body)
+    }, 50)
+    try {
+      const started = Date.now()
+      await expect(liveList(a)).rejects.toThrow(/stalled/)
+      expect(Date.now() - started).toBeLessThan(1000)
+    } finally {
+      restore()
+    }
   })
 })

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, setSystemTime, spyOn, test } from 'bun:test'
 import { buildAppFeed, buildAppGuide, guideDescr } from './app-feed.js'
 import { buildM3U, forgetBuiltGuide, withBackupFeeds, withCompetitionGroups, type Channel } from './curation.js'
-import { BACKUP_ID, VPN_HOST } from './provider.js'
+import { BACKUP_ID, useProviderFetch, VPN_HOST } from './provider.js'
 import { Database } from 'bun:sqlite'
 import { rm } from 'node:fs/promises'
 import { guide as guideRoute } from '../api/app.js'
@@ -60,7 +60,7 @@ describe('app channel feed', () => {
 
   test("the backup provider's copy joins its channel's family last, on its own front and account", async () => {
     const backup = { host: 'http://b.example', vpnHost: 'http://bvpn.example', user: 'bu', pass: 'bp' }
-    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation((async (url: string) => {
+    const restore = useProviderFetch(async (url) => {
       const action = new URL(url).searchParams.get('action')
       if (action === 'get_live_categories') return Response.json([{ category_id: '7', category_name: 'UK| SPORTS' }, { category_id: '8', category_name: 'UK| PPV EVENTS' }])
       return Response.json([
@@ -69,7 +69,7 @@ describe('app channel feed', () => {
         { stream_id: 52, name: 'UK: SKY SPORTS F1 HD', category_id: '7' }, // not in A's list
         { stream_id: 53, name: 'UK: TNT SPORTS 1', category_id: '8' }, // an event slot
       ])
-    }) as typeof fetch)
+    })
     try {
       const merged = await withBackupFeeds([ch(1, 'VIP: TNT SPORTS 1 RAW', 'TNTSport1.uk'), ch(2, 'NOW: TNT SPORT 1 HD', 'tntsports1.uk', { q: 3 }), ch(3, 'UK: SKY SPORTS NEWS HD', 'SkySportsNews.uk')], backup)
       expect(merged.map((c) => c.streamId)).toEqual([1, 2, BACKUP_ID + 50, 3])
@@ -79,7 +79,7 @@ describe('app channel feed', () => {
       expect(feed.backup).toEqual({ plain: 'http://b.example', vpn: 'http://bvpn.example', user: 'bu', pass: 'bp' })
       expect(buildM3U(cfg, merged, [], backup).split('\n')[6]).toBe('http://b.example/live/bu/bp/50.ts')
     } finally {
-      fetchSpy.mockRestore()
+      restore()
     }
   })
 
@@ -108,7 +108,9 @@ const PROVIDER_XML = `<tv>${[
 ].join('')}</tv>`
 function stubProvider() {
   Object.assign(process.env, { XTREAM_HOST: 'http://plain.example', XTREAM_USER: 'u', XTREAM_PASS: 'p', PLAYLIST_TOKEN: 'tv', EPG_URLS: '' })
-  spyOn(globalThis, 'fetch').mockImplementation((async (url: string) => {
+  // the TV listings sites have nothing to say
+  const outside = spyOn(globalThis, 'fetch').mockImplementation((async () => new Response('', { status: 404 })) as unknown as typeof fetch)
+  const restore = useProviderFetch(async (url) => {
     if (url.includes('xmltv.php')) return new Response(PROVIDER_XML)
     const action = new URL(url).searchParams.get('action')
     if (action === 'get_live_categories')
@@ -120,17 +122,20 @@ function stubProvider() {
         { stream_id: 3, name: 'UK PPV 1: Arsenal v Chelsea', epg_channel_id: null, category_id: '9002' },
       ])
     return Response.json([])
-  }) as typeof fetch)
+  })
+  return () => { restore(); outside.mockRestore() }
 }
 
 describe('guide', () => {
   const env = { ...process.env }
+  let unstub = () => {}
   beforeEach(() => {
     setSystemTime(NOW)
-    stubProvider()
+    unstub = stubProvider()
     forgetBuiltGuide()
   })
   afterEach(() => {
+    unstub()
     setSystemTime()
     process.env = { ...env }
   })
