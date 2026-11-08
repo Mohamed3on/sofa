@@ -258,6 +258,7 @@ internal fun MoviePlayback(
         delay(NOTE_MS)
         note = null
     }
+    val heading = remember(movie, of) { headingOf(movie, of) }
     val filmNotice by remember { session.state.map { it.notice }.distinctUntilChanged() }.collectAsState(null)
     // The controls' and the corner's heights (px), measured as they lay out; what sits above them moves by these.
     val controlsHeight = remember { mutableIntStateOf(0) }
@@ -439,7 +440,7 @@ internal fun MoviePlayback(
             val shown = reveal()
             Box(Modifier.fillMaxWidth().bottomScrim { shown.value }.padding(top = Space.xxxl * 2)) {
                 Controls(
-                    movie, ui.paused, note, quality,
+                    heading, ui.paused, note, quality,
                     position = { target ?: position.longValue },
                     duration = { duration.longValue },
                     buffered = { buffered.longValue },
@@ -528,10 +529,10 @@ internal fun MoviePlayback(
     }
 }
 
-/** Title (with its badge), what plays as format chips, a passing [note], then elapsed, the bar and what's left; the pause mark while paused. */
+/** The [heading] (a film's title and year, a show's name and episode), what plays as format chips, a passing [note], then elapsed, the bar and what's left; the pause mark while paused. */
 @Composable
 private fun Controls(
-    movie: Movie,
+    heading: Heading,
     paused: Boolean,
     note: String?,
     quality: List<String>,
@@ -545,9 +546,9 @@ private fun Controls(
     val left by remember { derivedStateOf { duration().takeIf { it > 0 }?.let { "−" + playTime((it - position()).coerceAtLeast(0)) } ?: "" } }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.m)) {
         Row(horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
-            movie.title.badge?.let { Badges(remember(it) { listOf(it) }) }
-            Text(movie.title.title, style = Type.title, maxLines = 2, modifier = Modifier.weight(1f, fill = false))
-            movie.title.year?.let { Text(it, style = Type.body) }
+            heading.badge?.let { Badges(remember(it) { listOf(it) }) }
+            Text(heading.name, style = Type.title, maxLines = 2, modifier = Modifier.weight(1f, fill = false))
+            heading.detail?.let { ScrollText(it, style = Type.body, lines = 1, modifier = Modifier.weight(1f, fill = false)) }
             Box(Modifier.weight(1f))
             AnimatedContent(
                 targetState = paused,
@@ -605,6 +606,15 @@ private fun SkipButton(label: String, modifier: Modifier = Modifier) {
             .drawBehind { drawRoundRect(Palette.textPrimary, cornerRadius = CornerRadius(Radius.row.toPx())) }
             .padding(horizontal = Space.xl, vertical = Space.m),
     )
+}
+
+/** What the controls (and the pause screen) name: a film's title and year, or a show's name and "S2 E3 · Title". */
+private class Heading(val name: String, val detail: String?, val badge: String?)
+
+private fun headingOf(movie: Movie, of: PlayOf): Heading {
+    val e = of.episode ?: return Heading(movie.title.title, movie.title.year, movie.title.badge)
+    val show = of.title.title
+    return Heading(show.title, listOfNotNull(e.code, e.title.takeUnless { it.isEmpty() || GENERIC_EPISODE.matches(it) }).joinToString(" · "), show.badge)
 }
 
 /** The next episode's card counts down this long before playing it. */
