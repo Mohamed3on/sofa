@@ -124,6 +124,9 @@ fun Matchup(match: Match, comp: String?) {
 private val flags = ConcurrentHashMap<String, String>()
 private val EGYPT = "🇪🇬"
 private val NAME_PREFIX = Regex("""^([A-Za-z]{2})[:|]""")
+/** A language word after the name's prefix: "beIN Sp⚽rts 1 ENGLISH 4K", "beIN Sp⚽rts 1 EN ʰᵉᵛᶜ", "… 1 FR ᴿᴬᵂ". */
+private val ENGLISH = Regex("""(?i:\bENGLISH\b)|\bEN\b(?!:)""")
+private val FRENCH = Regex("""(?i:\bFRANCE\b|\bFRENCH\b)|\bFR\b(?!:)""")
 /** Country prefixes a feed's name can carry ("UK: TNT Sports 1"); "AR" is Arabic, never Argentina. */
 private val COUNTRIES = setOf("US", "CA", "IE", "FR", "ES", "DE", "IT", "PT", "NL", "BE", "CH", "AT", "TR", "PL", "SG", "HK", "NZ", "AU")
 
@@ -135,6 +138,9 @@ internal fun feedFlag(c: Channel): String = flags.getOrPut(c.family + "\n" + c.n
     val home = c.home.orEmpty()
     val indicator = { i: Int -> i < home.length && Character.codePointAt(home, i) in 0x1F1E6..0x1F1FF }
     when {
+        // a language the name says beats its group's: beIN's English and French feeds sit under 🇸🇦
+        ENGLISH.containsMatchIn(c.name) -> "🇬🇧"
+        FRENCH.containsMatchIn(c.name) -> "🇫🇷"
         home.startsWith("🇸🇦") -> EGYPT
         home.startsWith("🏴") -> "🇬🇧"
         indicator(0) && indicator(2) -> home.substring(0, 4)
