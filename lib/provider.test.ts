@@ -111,14 +111,16 @@ describe('provider pulls', () => {
 
   test('a provider that stops sending fails the pull instead of hanging it', async () => {
     const restore = useProviderFetch(async (_url, init) => {
-      // headers, one chunk, then nothing: a hung download
-      const body = new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode('[{"stream_id":')) })
-      init?.signal?.addEventListener('abort', () => body.cancel().catch(() => {}))
+      // headers, one chunk, then nothing: a hung download (a real fetch errors its body on abort)
+      const body = new ReadableStream({ start: (c) => {
+        c.enqueue(new TextEncoder().encode('[{"stream_id":'))
+        init?.signal?.addEventListener('abort', () => c.error(init.signal!.reason))
+      } })
       return new Response(body)
     }, 50)
     try {
       const started = Date.now()
-      await expect(liveList(a)).rejects.toThrow(/stalled/)
+      await expect(liveList(a)).rejects.toThrow(/timed out/)
       expect(Date.now() - started).toBeLessThan(1000)
     } finally {
       restore()

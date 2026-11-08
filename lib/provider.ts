@@ -37,45 +37,24 @@ export function backupConfigFromEnv(): BackupConfig | undefined {
 /** Provider B's stream ids are offset by this, so they never collide with A's (quality store, app ids). */
 export const BACKUP_ID = 1_000_000_000
 
-// Every provider call and guide download goes through download(): no answer, or no bytes, for
-// stallMs fails it, so a hung provider fails a build instead of leaving every build waiting on it.
+// Every provider call and guide download goes through download(): one not done, body included, in
+// timeoutMs fails, so a hung provider fails a build instead of leaving every build waiting on it. A
+// whole-download limit, not a stall timer: piping the ~70 MB guide through a JS stream to watch its
+// bytes cost ~0.2 GB more peak on the box than Bun's own body read.
 let fetchImpl: typeof fetch = (...a) => fetch(...a)
-let stallMs = 30_000
+let timeoutMs = 120_000
 
-/** Tests: answer provider calls with [f] (and a shorter stall limit); returns the undo. */
-export function useProviderFetch(f: (url: string, init?: RequestInit) => Promise<Response>, stall = stallMs): () => void {
-  const was = [fetchImpl, stallMs] as const
+/** Tests: answer provider calls with [f] (and a shorter time limit); returns the undo. */
+export function useProviderFetch(f: (url: string, init?: RequestInit) => Promise<Response>, timeout = timeoutMs): () => void {
+  const was = [fetchImpl, timeoutMs] as const
   fetchImpl = f as typeof fetch
-  stallMs = stall
-  return () => { [fetchImpl, stallMs] = was }
+  timeoutMs = timeout
+  return () => { [fetchImpl, timeoutMs] = was }
 }
 
-/** A GET whose answer and body each must keep coming: a gap of stallMs aborts it and errors the body. */
-export async function download(url: string): Promise<Response> {
-  const ac = new AbortController()
-  let body: TransformStreamDefaultController | undefined
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const kick = () => {
-    clearTimeout(timer)
-    timer = setTimeout(() => {
-      const e = new Error(`provider stalled ${stallMs / 1000}s`)
-      ac.abort(e)
-      body?.error(e)
-    }, stallMs)
-  }
-  kick()
-  const resp = await fetchImpl(url, { headers: { 'User-Agent': 'VLC/3.0.18' }, signal: ac.signal }).catch((e) => {
-    clearTimeout(timer)
-    throw ac.signal.aborted ? ac.signal.reason : e
-  })
-  if (!resp.body) return clearTimeout(timer), resp
-  const guarded = resp.body.pipeThrough(new TransformStream({
-    start: (c) => { body = c },
-    transform: (chunk, c) => { kick(); c.enqueue(chunk) },
-    flush: () => clearTimeout(timer),
-  }))
-  return new Response(guarded, { status: resp.status, headers: resp.headers })
-}
+/** A GET of the provider or a guide, aborted with its body when not done in timeoutMs. */
+export const download = (url: string): Promise<Response> =>
+  fetchImpl(url, { headers: { 'User-Agent': 'VLC/3.0.18' }, signal: AbortSignal.timeout(timeoutMs) })
 
 /** A player_api.php call ("get_live_streams", "get_vod_info&vod_id=1"); no action answers the account's status. */
 export async function apiGet<T>(cfg: XtreamConfig, action: string): Promise<T> {
