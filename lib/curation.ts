@@ -200,26 +200,30 @@ const CAT_BUCKET: Record<number, string> = {
 // show, and only when their picture holds up against the in-region channels there
 // (withCompetitionGroups; the app's Live now does the same per match). Event/PPV slots are left out.
 const ABROAD: Record<number, string> = {
-  2122: 'PT', 1808: 'PT', 1457: 'PT', 1025: 'PT', // MEO, Desporto VIP, DAZN, Desporto
+  2122: 'PT', 1808: 'PT', 1457: 'PT', 1025: 'PT', 1809: 'PT', // MEO, Desporto VIP, DAZN, Desporto, Porto Canal
   124: 'NL', 1645: 'NL', 1647: 'NL', 1609: 'NL', // Ziggo/ESPN, Canal+ Online, Tele2
   530: 'BE', // Play Sports, DAZN Pro League, VOO
   1861: 'CH', 1714: 'CH', 1862: 'CH', // MySports, Blue Sport
-  1630: 'AT', // Canal+ Online (ORF Sport+, Sportdigital)
+  1630: 'AT', 1761: 'AT', 1762: 'AT', // Canal+ Online (ORF Sport+, Sportdigital), Sky Sport Austria
   1643: 'PL', 2324: 'PL', 1212: 'PL', // Canal+ Sport, Eleven, Polsat Sport
   492: 'US', 1094: 'CA', 585: 'CA', 580: 'CA', // US sport, TSN/Sportsnet, TVA/RDS
   1666: 'BR', // Disney+ ESPN, CazéTV
   1220: 'GR', 2414: 'GR', // ANT1+/ERT, Nova Sports
   1328: 'TR', 1466: 'TR', // beIN Türkiye, Tabii
-  2348: 'SE', 1848: 'DK', // Viaplay
+  2348: 'SE', 2146: 'SE', 48: 'SE', 72: 'SE', // Viaplay, TV4 Sport, V Sport
+  1848: 'DK', 622: 'DK', 2145: 'DK', 2338: 'DK', // Viaplay, TV 2 Sport, TV3 Max
+  49: 'NO', 2144: 'NO', 2337: 'NO', 1461: 'NO', // TV 2 Sport, V Sport
   2341: 'NZ', 2340: 'NZ', // Sky Sport NZ
-  1680: 'CZ', // Skylink (Canal+ Sport, Nova Sport)
+  1680: 'CZ', 26: 'CZ', // Skylink (Canal+ Sport, Nova Sport), Oneplay Sport
   2195: 'AL', 1668: 'AL', 1425: 'AL', // SuperSport, Tring, K-Sport
   1214: 'AFR', // Canal+ Afrique
-  557: 'FR', 1627: 'FR', 1491: 'FR', 2119: 'FR', // Canal+, beIN, RMC, Eurosport (Ligue 1+ is in-region)
+  557: 'FR', 1627: 'FR', 1491: 'FR', 2119: 'FR', 68: 'FR', // Canal+, beIN, RMC, Eurosport (Ligue 1+ is in-region)
 }
 // Mixed abroad categories: only their channels this matches.
 const ABROAD_ONLY: Record<number, RegExp> = {
-  1680: /sport/i, 1214: /sport/i, 1848: /sport/i, 2348: /sport|fotboll/i,
+  1680: /sport/i, 1214: /sport/i, 1848: /sport/i, 2348: /sport|fotboll/i, 2146: /sport|fotboll/i, 48: /sport|fotboll/i, 72: /sport|fotboll/i,
+  622: /sport|tv3 max/i, 2145: /sport|tv3 max/i, 2338: /sport|tv3 max/i, 49: /sport/i, 2144: /sport/i, 2337: /sport/i, 1461: /sport/i,
+  26: /oneplay sport/i, 1809: /porto canal/i, 68: /^FR: CANAL\+ (HD|4K)$/i,
   492: /premier league|tudn|bein|fox sports? [12]\b|fox soccer|eleven|espn (usa|hd|2)|fubo|gol tv|cbs sports|nbc sports network/i,
 }
 // Abroad channels for other sports, film or news; Ligue 1+ abroad is the in-region channel again.

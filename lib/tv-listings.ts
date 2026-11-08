@@ -29,6 +29,7 @@ const SITES: Site[] = [
   { url: 'https://www.fotbaldnestv.cz/', home: '🌍 CZ', tz: 'Europe/Prague' },
   { url: 'https://www.fodboldidag.dk/', home: '🌍 DK', tz: 'Europe/Copenhagen' },
   { url: 'https://www.fotbollpatvidag.se/', home: '🌍 SE', tz: 'Europe/Stockholm' },
+  { url: 'https://www.fotballtv.com/', home: '🌍 NO', tz: 'Europe/Oslo' },
   { url: 'https://www.sportsontvusa.com/', home: '🌍 US', tz: 'America/New_York', mdy: true },
   { url: 'https://www.futbolenvivousa.com/', home: '🌍 US', tz: 'America/New_York', mdy: true },
   { url: 'https://www.sportsguidetv.com/', home: '🌍 CA', tz: 'America/Toronto' },
@@ -76,10 +77,10 @@ export function parseListings(html: string, tz: string, mdy = false): Listing[] 
 
 // A site's channel name as the family key it would have: no codes in brackets ("M+ LALIGA (M54 O110)"),
 // no "…: VER PARTIDO", Movistar's "M+" spelled out, "EN"/"FR" feeds by their language, words in any order.
-// Accents go ("CAZÉTV"); "Ligue 1+ 5" is the provider's "LIGUE1+ 5", Viaplay's renamed "V Sport" its "VIAPLAY SPORT", the provider's
-// "DISNEY+ ESPN" and "VIAPLAY TV3 SPORT" the sites' "ESPN" and "TV3 Sport".
+// Accents go ("CAZÉTV"); "Ligue 1+ 5" is the provider's "LIGUE1+ 5", "TV 2" its "TV2", Viaplay's renamed "V Sport" (Norway's
+// "Viasport") its "VIAPLAY SPORT", the provider's "DISNEY+ ESPN" and "VIAPLAY TV3 SPORT" the sites' "ESPN" and "TV3 Sport".
 const sorted = (s: string) =>
-  chanKey(s.normalize('NFD').replace(/\p{M}/gu, '')).replace(/\bla liga\b/g, 'laliga').replace(/\bligue 1\b/g, 'ligue1').replace(/ ultra hd$/, '')
+  chanKey(s.normalize('NFD').replace(/\p{M}/gu, '')).replace(/\bla liga\b/g, 'laliga').replace(/\bligue 1\b/g, 'ligue1').replace(/\btv (\d)\b/g, 'tv$1').replace(/ ultra hd$/, '').replace(/^viasport\b/, 'v sport')
     .replace(/^v sport football$/, 'viaplay fotboll').replace(/^v sport\b/, 'viaplay sport').replace(/^(?:disney|viaplay) (?=espn|tv\d)/, '')
     .split(' ').sort().join(' ')
 const siteKeys = (name: string): string[] => {
