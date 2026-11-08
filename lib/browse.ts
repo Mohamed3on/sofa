@@ -7,7 +7,7 @@ import { knownTitles } from './library.js'
 import { letterboxdFilms, scoreNow } from './ratings.js'
 import { due, histogramShare, scoreOf, scoreTitles } from './scores.js'
 import { showList } from './shows.js'
-import { episodeTitle, parseTitleId, tmdbCollection, tmdbEpisodes, tmdbImage, tmdbTitle } from './tmdb.js'
+import { episodeTitle, parseTitleId, tmdbCollection, tmdbEpisodes, tmdbImage, tmdbLogo, tmdbTitle } from './tmdb.js'
 import { byScore, decorate, fromRecommendation, fromTmdb, fromVod, personCard, type Known, type LibTitle, type TmdbItem } from './titles.js'
 import type { VodItem } from './vod.js'
 
@@ -23,7 +23,7 @@ export async function titleDetails(cfg: XtreamConfig, id: string) {
   const p = parseTitleId(id)
   if (!p || p.season != null) return null
   const { kind, tmdb } = p
-  const [t, k] = await Promise.all([tmdbTitle(kind, tmdb), knownTitles()])
+  const [t, k, logo] = await Promise.all([tmdbTitle(kind, tmdb), knownTitles(), tmdbLogo(kind, tmdb)])
   if (!t) return null
   const cache = k.cache
   if (cache && Object.values(due(cache[id])).some(Boolean)) {
@@ -54,6 +54,7 @@ export async function titleDetails(cfg: XtreamConfig, id: string) {
     ...scoreOf(id, cache ?? {}, letterboxdFilms()),
     ...histogramShare(id, cache ?? {}, letterboxdFilms()),
     ...(t.trailer && { trailer: t.trailer }),
+    ...(logo && { logo }),
     ...(languageOf(t.originalLanguage) && { language: languageOf(t.originalLanguage) }),
     // Only when it says more than the name does ("Amélie" → "Le fabuleux destin d'Amélie Poulain", never "Léon" → "Leon").
     ...(t.originalTitle && letters(t.originalTitle) !== letters(t.name) && { originalTitle: t.originalTitle }),

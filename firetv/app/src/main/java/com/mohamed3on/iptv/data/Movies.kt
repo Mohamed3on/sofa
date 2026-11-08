@@ -234,6 +234,8 @@ data class MovieInfo(
     val language: String = "",
     /** The title in its own language, only when it differs from the name ("千と千尋の神隠し"). */
     val originalTitle: String = "",
+    /** TMDB's logo for the title (its title treatment, a w500 image URL); "" when it has none. */
+    val logo: String = "",
     /** A film's franchise ("The Lord of the Rings Collection") and its other films, oldest first. */
     val collection: String = "",
     val parts: List<LibTitle> = emptyList(),

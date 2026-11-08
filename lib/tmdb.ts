@@ -162,7 +162,7 @@ function trim(kind: Kind, r: Raw): TmdbTitle {
 
 const MAX_AGE_MS = 30 * 864e5
 const cacheFile = () => process.env.TMDB_CACHE_FILE ?? fileURLToPath(new URL('../.cache/tmdb-titles.json', import.meta.url))
-type Entry = { at: number; t?: TmdbTitle | null; e?: TmdbEpisode[]; c?: TmdbPart[] }
+type Entry = { at: number; t?: TmdbTitle | null; e?: TmdbEpisode[]; c?: TmdbPart[]; l?: string }
 let cache: Promise<Record<string, Entry>> | null = null
 const loaded = () => (cache ??= readFile(cacheFile(), 'utf8').then((s) => JSON.parse(s) as Record<string, Entry>).catch(() => ({} as Record<string, Entry>)))
 const pending = new Map<string, Promise<TmdbTitle | null>>()
@@ -231,6 +231,43 @@ export async function tmdbCollection(id: number): Promise<TmdbPart[]> {
     return c
   } catch {
     return all[k]?.c ?? []
+  }
+}
+
+/** A logo as TMDB lists it under a title's images. */
+export interface TmdbLogo { file_path: string; iso_639_1?: string | null; vote_average?: number; vote_count?: number }
+
+/** The title treatment drawn in place of the name: the best-voted English logo, else a language-free one; PNG before SVG. "" when none. */
+export function pickLogo(logos: TmdbLogo[]): string {
+  const rank = (l: TmdbLogo) => (l.file_path.endsWith('.png') ? 0 : 1)
+  for (const lang of ['en', null]) {
+    const best = logos
+      .filter((l) => l.file_path && (l.iso_639_1 ?? null) === lang)
+      .sort((a, b) => rank(a) - rank(b) || (b.vote_average ?? 0) - (a.vote_average ?? 0) || (b.vote_count ?? 0) - (a.vote_count ?? 0))[0]
+    if (best) return tmdbImage(best.file_path, 'w500')
+  }
+  return ''
+}
+
+/**
+ * A title's logo ([pickLogo]) as a w500 URL, kept 30 days in its own entry (so kept details aren't all fetched again); "" when it
+ * has none, or TMDB fails with nothing kept. Asked by title pages only.
+ */
+export async function tmdbLogo(kind: Kind, id: string | number): Promise<string> {
+  const key = process.env.TMDB_TOKEN
+  const tmdb = tmdbId(id)
+  if (!key || !tmdb) return ''
+  const k = `logo:${kind}:${tmdb}`
+  const all = await loaded()
+  if (all[k] && Date.now() - all[k].at < MAX_AGE_MS) return all[k].l ?? ''
+  try {
+    const r = await tmdbGet<{ logos?: TmdbLogo[] }>(`${kind}/${tmdb}/images?include_image_language=en,null`, key)
+    const l = pickLogo(r.logos ?? [])
+    all[k] = { at: Date.now(), l }
+    save(all)
+    return l
+  } catch {
+    return all[k]?.l ?? ''
   }
 }
 

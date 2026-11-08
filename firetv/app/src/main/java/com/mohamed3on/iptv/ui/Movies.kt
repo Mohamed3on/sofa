@@ -1018,7 +1018,7 @@ private fun UpNextPage(
             label = "upnext",
         ) { (m, r, i) ->
             Column(Modifier.padding(start = EDGE).widthIn(max = PAGE_WIDTH), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                FitText(m.title.title, style = Type.pageTitle, active = true)
+                TitleArt(m.title.title, i?.logo) { FitText(m.title.title, style = Type.pageTitle, active = true) }
                 MetaLine(m, i, hero = true)
                 Row(Modifier.padding(top = Space.xs), horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
                     Text(listOfNotNull(r.label, r.takeIf { it.dur > 0 && it.pos > 0 }?.let { leftLabel(it.dur - it.pos) }).joinToString(" · "), style = Type.headline, maxLines = 1)
@@ -2008,12 +2008,86 @@ private val PLAYS_HEIGHT = 24.dp
 @Composable
 private fun PageTitle(title: String, info: MovieInfo?, modifier: Modifier = Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-        ScrollText(title, style = Type.pageTitle, lines = 2)
+        TitleArt(title, info?.logo) { ScrollText(title, style = Type.pageTitle, lines = 2) }
         info?.originalTitle?.ifBlank { null }?.let { FitText(it, style = ORIGINAL_TITLE, active = true, modifier = Modifier.appear()) }
     }
 }
 
 private val ORIGINAL_TITLE = Type.headline.copy(color = Palette.textSecondary)
+
+/**
+ * A title's name as its own logo ([logo], TMDB's title treatment) once it has loaded and reads on the dark ground, else as
+ * [text]. The logo fits [LOGO_MAX] from the bottom-start corner, where the name sat, and cross-fades in over it; the page's
+ * lines below never move, as the slot only grows upward. A logo seen before shows on the first frame. The name stays the
+ * logo's description.
+ */
+@Composable
+private fun TitleArt(title: String, logo: String?, modifier: Modifier = Modifier, text: @Composable () -> Unit) {
+    val context = LocalPlatformContext.current
+    val url = logo?.ifEmpty { null }
+    val art by produceState(url?.let { logos.get(it) }?.bitmap, url) {
+        value = url?.let { titleLogo(context, it) }
+    }
+    val shown by animateFloatAsState(if (art != null) 1f else 0f, Motion.spring(0.3f), label = "logo")
+    Box(modifier, contentAlignment = Alignment.BottomStart) {
+        if (shown < 1f) Box(Modifier.graphicsLayer { alpha = 1f - shown; compositingStrategy = CompositingStrategy.ModulateAlpha }) { text() }
+        art?.let { a ->
+            val scale = minOf(LOGO_MAX.width.value / a.width, LOGO_MAX.height.value / a.height)
+            androidx.compose.foundation.Image(
+                a, contentDescription = title, contentScale = ContentScale.Fit, alignment = Alignment.BottomStart,
+                modifier = Modifier.size((a.width * scale).dp, (a.height * scale).dp).graphicsLayer { alpha = shown; compositingStrategy = CompositingStrategy.ModulateAlpha },
+            )
+        }
+    }
+}
+
+/** The box a title's logo fits in: wide wordmarks run to its width, stacked ones to its height. */
+private val LOGO_MAX = DpSize(380.dp, 120.dp)
+
+/** A logo's answer: its picture ready to draw, or null when it didn't load or is too dark to read on ink. */
+private class LogoArt(val bitmap: ImageBitmap?)
+
+/** The logos looked at this session, so a title page opened again shows its logo (or its name) at once. */
+private val logos = LruCache<String, LogoArt>(24)
+
+/**
+ * [url]'s logo, decoded and judged off the main thread: null when it fails or reads too dark on the ink ground (a black or
+ * navy wordmark), so the name shows instead. Judged on its opaque pixels' mean luminance, which must give at least 3:1 against ink.
+ */
+private suspend fun titleLogo(context: PlatformContext, url: String): ImageBitmap? {
+    logos.get(url)?.let { return it.bitmap }
+    val request = ImageRequest.Builder(context).data(url).allowHardware(false).build()
+    val src = (SingletonImageLoader.get(context).execute(request) as? SuccessResult)?.image?.toBitmap() ?: return null
+    val art = withContext(Dispatchers.Default) {
+        if (!readsOnInk(src)) return@withContext null
+        // A hardware copy uploads here, off the main and render threads.
+        (src.copy(Bitmap.Config.HARDWARE, false) ?: src.apply { prepareToDraw() }).asImageBitmap()
+    }
+    logos.put(url, LogoArt(art))
+    return art
+}
+
+/** True when [b]'s opaque pixels average a luminance that clears 3:1 against the ink ground (sampled every 3rd pixel each way). */
+private fun readsOnInk(b: Bitmap): Boolean {
+    fun lin(c: Int): Double = (c / 255.0).let { if (it <= 0.04045) it / 12.92 else Math.pow((it + 0.055) / 1.055, 2.4) }
+    val w = b.width
+    val h = b.height
+    val row = IntArray(w)
+    var sum = 0.0
+    var n = 0
+    for (y in 0 until h step 3) {
+        b.getPixels(row, 0, w, 0, y, w, 1)
+        for (x in 0 until w step 3) {
+            val p = row[x]
+            if ((p ushr 24) < 128) continue
+            sum += 0.2126 * lin((p shr 16) and 0xFF) + 0.7152 * lin((p shr 8) and 0xFF) + 0.0722 * lin(p and 0xFF)
+            n++
+        }
+    }
+    if (n == 0) return false
+    val ink = 0.0045 // #0B0E12's relative luminance
+    return (sum / n + 0.05) / (ink + 0.05) >= 3.0
+}
 
 /** TMDB's show status in the app's words. */
 private val SHOW_STATUS = mapOf(
