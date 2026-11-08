@@ -676,7 +676,7 @@ private fun MoviesBrowse(
                 true // the key-up too, so Back never reaches the player or leaves the app
             }
             .focusGroup(),
-    ) { CompositionLocalProvider(LocalStill provides hidden) {
+    ) { CompositionLocalProvider(LocalStill provides hidden, LocalNewShows provides newShows) {
         Backdrop(backdropOf(rested, heroInfo), solidFrom = if (shownPage == BrowsePage.UpNext) null else Space.safeY + HERO_HEIGHT, modifier = Modifier.graphicsLayer { alpha = shown().coerceIn(0f, 1f) })
         Box(Modifier.fillMaxSize().slideFade(shown, Edge.Bottom, reduced)) {
             when {
@@ -1192,7 +1192,7 @@ private fun heroScores(scored: Scored?, yours: Int?): AnnotatedString? {
     return buildAnnotatedString {
         withStyle(SpanStyle(color = Palette.textSecondary)) {
             if (chip != null) {
-                if (scored?.let { it.tq ?: it.tr } != null) append("♥ ")
+                if ((scored.tq ?: scored.tr) != null) append("♥ ")
                 append(chip)
             }
             if (yours != null) {
@@ -1707,21 +1707,20 @@ private fun PosterCard(movie: Movie, progress: Float?, watched: Boolean = false,
         if (progress != null) {
             ProgressLine({ progress }, Modifier.align(Alignment.BottomCenter).padding(horizontal = Space.s, vertical = Space.s))
         }
-        if (watched) WatchedMark(Modifier.align(Alignment.TopEnd).padding(Space.xs))
-        // How long it runs, where no progress line takes the bottom.
-        val rt = movie.lib?.rt ?: 0
-        if (rt > 0 && progress == null) Text(
-            remember(rt) { if (rt >= 60) "${rt / 60}h %02d".format(Locale.ROOT, rt % 60).removeSuffix(" 00") else "${rt}m" }, style = CHIP_TEXT, maxLines = 1,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(Space.xs).background(Palette.chipGround, CHIP_SHAPE).padding(horizontal = Space.xs + 2.dp, vertical = 1.dp),
-        )
+        // One mark in the corner, the first that applies: a new episode, watched, else the score.
+        val corner = Modifier.align(Alignment.TopStart).padding(Space.xs)
         val learnt = movie.lib?.takeIf { !it.known }?.let { LocalContext.current.graph.titles.scores.collectAsState().value[movie.titleId] }
         val chip = remember(movie.lib, learnt) { movie.lib?.let { cardChip(learnt ?: it) } }
-        if (chip != null) Text(
-            chip, style = CHIP_TEXT, maxLines = 1,
-            modifier = Modifier.align(Alignment.TopStart).padding(Space.xs).background(Palette.chipGround, CHIP_SHAPE).padding(horizontal = Space.xs + 2.dp, vertical = 1.dp),
-        )
+        when {
+            movie.titleId in LocalNewShows.current -> Text(NEW_EPISODE, style = NEW_STYLE, maxLines = 1, modifier = corner.background(Palette.chipGround, CHIP_SHAPE).padding(horizontal = Space.xs + 2.dp, vertical = 1.dp))
+            watched -> WatchedMark(corner)
+            chip != null -> Text(chip, style = CHIP_TEXT, maxLines = 1, modifier = corner.background(Palette.chipGround, CHIP_SHAPE).padding(horizontal = Space.xs + 2.dp, vertical = 1.dp))
+        }
     }
 }
+
+/** Shows whose up-next episode aired after they were last watched: their cards say "New episode". */
+private val LocalNewShows = compositionLocalOf<Set<TitleId>> { emptySet() }
 
 private fun monogram(title: String): String =
     title.split(' ').mapNotNull { w -> w.firstOrNull { it.isLetterOrDigit() } }.take(2).joinToString("") { it.uppercase() }
