@@ -4,9 +4,11 @@
 // whose markers already say <1080p (HD/SD/unmarked) — no point probing those.
 //
 // Fast + low-overhead: ffprobe reads stream headers (SPS/VPS) with a tiny -probesize
-// and six seconds of packets, and exits (no decode → CPU near-idle). Concurrency is capped to the
-// subscription's currently-free slots; exceeding that limit makes every stream
-// return HTTP 458 and can interrupt normal viewing.
+// and six seconds of packets, and exits (no decode → CPU near-idle). The account reports one
+// connection, but the provider gives one machine many streams at once (16 from one Mac: 15 pictures in
+// 9 s, 2026-11-08), and its VPN front two machines at once, so [concurrency] feeds are probed at a time.
+// A machine the normal fronts refuse (HTTP 511: a VPN, a datacenter, GitHub's runners) probes through
+// the VPN front.
 //
 // WORKS ON A COPY: it reads the readings from QUALITY_FILE (deploy/probe-quality.sh points
 // it at a copy of the box's store) and writes only the entries it changed to PROBED_FILE,
@@ -30,10 +32,10 @@
 // reading stays due, and `tried` only moves it to the back of the queue so dead feeds
 // don't eat every night's budget.
 //
-// BUSY SLOT: a probe that finds no signal waits for the run's own connection to drop off,
-// then checks the account (and retries the feed once if the slot is free); if the one slot
-// is taken, someone started watching, so the run stops at once instead of
-// recording their channel-switches as dead feeds.
+// BUSY SLOT: a run starts only when the account's slot is free (no one watching), and stops at once
+// when a probe is refused as busy (HTTP 458: someone started watching elsewhere) instead of recording
+// their channel-switches as dead feeds. Stopped by hand (Ctrl-C) or by a signal, it saves what it measured
+// for the wrapper to merge; the next run takes up the rest.
 //
 // TIME BUDGET (`mins=N`, default 30): stop starting new probes once the budget is spent.
 // Refresh targets are by definition the feeds that DIDN'T reach their marker — idle or
@@ -49,7 +51,7 @@
 //
 // Usage: bun scripts/probe-quality.ts [concurrency] [refresh] [mins=N]  (creds from env/.env.local)
 import { EVENT_ONLY, fetchCuratedChannels, isAbroad, saneFps, withCompetitionGroups } from '../lib/curation.js'
-import { configFromEnv, connectionSlots as slotsOf, streamUrl } from '../lib/provider.js'
+import { configFromEnv, connectionSlots as slotsOf, streamUrl, VPN_HOST } from '../lib/provider.js'
 import { writeAtomic } from '../lib/fs.ts'
 // better() keeps the cache monotonic in refresh mode; the app's readings (/api/app/quality) share these rules.
 import { allReadings, better, STALE_DAYS, type Meta, type Readings } from '../lib/quality.ts'
@@ -65,17 +67,15 @@ const isStale = (m: Meta | null | undefined): boolean => !!m && !(m.at && m.at >
 
 const connectionSlots = () => slotsOf(cfg)
 
-async function freeConnectionSlots(): Promise<number> {
+{
   const { max, active } = await connectionSlots()
   if (active >= max) {
     // Not an error: the nightly run just skips a night when someone's watching.
     console.log(`No free IPTV connection slots (${active}/${max}); someone's watching, so no probing this run`)
     process.exit(0)
   }
-  return max - active
 }
-
-const CONC = Math.max(1, Math.min(requestedConcurrency, await freeConnectionSlots()))
+const CONC = Math.max(1, requestedConcurrency)
 
 
 const cache = allReadings()
@@ -125,8 +125,19 @@ async function flush() {
 }
 const timer = setInterval(flush, 2000)
 
+// The normal fronts answer HTTP 511 to a VPN or datacenter address; the VPN front takes it.
+const front = await (async () => {
+  if (ids[0] === undefined) return cfg.host
+  const r = await fetch(streamUrl(cfg, 'live', ids[0]), { redirect: 'manual', headers: { 'User-Agent': 'VLC/3.0.18' }, signal: AbortSignal.timeout(8000) }).catch(() => null)
+  await r?.body?.cancel()
+  return r?.status === 511 ? VPN_HOST : cfg.host
+})()
+if (front !== cfg.host) console.log('The provider refuses this address on its normal fronts (HTTP 511), so probing through its VPN front')
+// ffprobe's words for an HTTP 4XX other than 400/401/403/404: the provider's 458, the slot taken by a viewer.
+const BUSY = /4XX Client Error, but not one of 40\{0,1,3,4\}/
+
 async function probe(id: number): Promise<Meta | null> {
-  const url = streamUrl(cfg, 'live', id)
+  const url = streamUrl({ ...cfg, host: front }, 'live', id)
   const p = Bun.spawn(
     ['ffprobe', '-v', 'error', '-user_agent', 'VLC/3.0.18',
      // rw_timeout fails a stalled/dead stream at the network layer fast (the old
@@ -135,10 +146,11 @@ async function probe(id: number): Promise<Meta | null> {
      '-rw_timeout', '8000000', '-probesize', '2M', '-analyzeduration', '2M', '-read_intervals', '%+6',
      '-show_entries', 'stream=index,codec_type,width,height,codec_name,r_frame_rate,avg_frame_rate,field_order,profile,channels:packet=stream_index,pts_time,size',
      '-of', 'json', url],
-    { stdout: 'pipe', stderr: 'ignore', timeout: 16000 },
+    { stdout: 'pipe', stderr: 'pipe', timeout: 16000 },
   )
-  const out = await new Response(p.stdout).text()
+  const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()])
   await p.exited
+  if (BUSY.test(err) && !busy) { busy = true; console.log(`Refused as busy on ${byId.get(id)}: ${err.trim().split("\n")[0]}`) }
   try {
     const streams: any[] = JSON.parse(out)?.streams ?? []
     const v = streams.find((s) => s.codec_type === 'video')
@@ -180,24 +192,16 @@ const deadline = t0 + BUDGET_MIN * 60_000
 let cursor = 0
 let busy = false
 let ok = 0 // probes that actually returned video this run
-// The panel counts this run's own connections in flickers, even back-to-back ~1s probes,
-// and keeps counting one for a while after it closes (seconds in tests, longer in runs).
-// While it does, the next stream is refused, so a quick "no picture" can be self-inflicted
-// and the slot reads busy. So wait for two free readings in a row; a slot still taken after
-// 30s is a viewer.
-async function slotFreed(): Promise<boolean> {
-  const t = Date.now()
-  let free = 0
-  while (Date.now() - t < 30_000) {
-    await Bun.sleep(2000)
-    const { max, active } = await connectionSlots()
-    free = active < max ? free + 1 : 0
-    if (free === 2) {
-      if (Date.now() - t > 5000) console.log(`Slot took ${((Date.now() - t) / 1000).toFixed(0)}s to free up`)
-      return true
-    }
-  }
-  return false
+// Stopped by hand or by a signal: what was measured is saved for the wrapper to merge (none of it if no
+// feed gave a picture, which says the provider refused this machine), and the next run takes up the rest.
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, async () => {
+    if (!ok) for (const k of Object.keys(probed)) delete probed[k]
+    dirty = true
+    await flush()
+    console.log(`Stopped after ${ok} pictures; the next run takes up the rest.`)
+    process.exit(130)
+  })
 }
 const worker = async () => {
   while (cursor < ids.length && Date.now() < deadline && !busy) {
@@ -206,11 +210,8 @@ const worker = async () => {
     const reverify = REFRESH && isStale(old)
     // Only event-only feeds earn retries: a 24/7 "4K" feed reading 1080p is usually just 1080p.
     const tries = REFRESH && !reverify && EVENT_ONLY.test(byId.get(id)!) ? 3 : 1
-    let m = await probeBest(id, tries)
-    if (!m) {
-      if (!(await slotFreed())) { busy = true; break } // someone's watching; this feed stays due
-      m = await probeBest(id, tries) // the first try may have been refused for our own connection
-    }
+    const m = await probeBest(id, tries)
+    if (busy) break // someone's watching; this feed stays due
     if (m) ok++
     // Initial: record result (null = probed). Re-verify: the current reading replaces the
     // stale one; no signal keeps it due, just tried (see RE-VERIFICATION).

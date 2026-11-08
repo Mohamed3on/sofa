@@ -22,7 +22,10 @@ if [ "$store" = yes ]; then
 else
   echo '{}' > "$work/quality.json"
 fi
-QUALITY_FILE="$work/quality.json" PROBED_FILE="$work/probed.json" bun scripts/probe-quality.ts 8 refresh "mins=${1:-30}"
+# Stopped by hand (Ctrl-C) the probe saves what it measured and exits 130: that is merged too.
+status=0
+QUALITY_FILE="$work/quality.json" PROBED_FILE="$work/probed.json" bun scripts/probe-quality.ts 8 refresh "mins=${1:-30}" || status=$?
+[ "$status" = 0 ] || [ "$status" = 130 ] || exit "$status"
 if [ ! -f "$work/probed.json" ] || [ "$(cat "$work/probed.json")" = "{}" ]; then
   echo "No changed readings."
 else
