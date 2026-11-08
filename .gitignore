@@ -22,7 +22,7 @@ node_modules
 *.sw?
 .vercel
 
-# Jev verdict caches (scripts/learn-competitions.ts, scripts/match-epg-channels.ts)
+# Box data and Jev verdict caches (scripts/match-epg-channels.ts)
 .cache
 
 # Fire TV app (firetv/): signing material and build output never enter the repo

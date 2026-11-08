@@ -1,7 +1,7 @@
 // Builders for the Fire TV app's own feeds (/api/app/*). They read the same curated
 // channels and guide as the TiviMate feeds, so both apps always show the same thing.
 import { Database } from 'bun:sqlite'
-import { chanKey, COMPS, couldBeLiveMatch, learnedCompetitions, replayAirings, teamWords, saneFps, unxml, type Channel } from './curation.js'
+import { chanKey, COMPS, couldBeLiveMatch, curatedGuide, learnedCompetitions, replayAirings, teamWords, saneFps, unxml, type Channel } from './curation.js'
 import { VPN_HOST, type BackupConfig, type XtreamConfig } from './provider.js'
 import type { TitleMatch } from './crests.js'
 import { detailRank, medianMbps, qualityOf } from './quality.js'
@@ -201,6 +201,16 @@ export function upcomingCompetitions(channels: Channel[], xmltv: string, now = D
     m.set(k, Math.min(m.get(k) ?? Infinity, r.start))
   })
   return out
+}
+
+/** [upcomingCompetitions] of the current guide, for withCompetitionGroups; none (groups by name only) if it fails. */
+export async function guideUpcoming(): Promise<Map<string, Map<string, number>>> {
+  try {
+    const { channels, xml } = await curatedGuide()
+    return upcomingCompetitions(channels, xml)
+  } catch {
+    return new Map()
+  }
 }
 
 export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now(), crests?: (title: string, onNow: boolean) => TitleMatch | null): Uint8Array {

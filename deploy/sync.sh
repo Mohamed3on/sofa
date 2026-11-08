@@ -12,4 +12,4 @@ APP_DIR=/opt/sofa
 
 rsync -az --delete server.ts api lib scripts "$SERVER:$APP_DIR/"
 rsync -a deploy/*.service deploy/*.timer "$SERVER:/etc/systemd/system/"
-ssh "$SERVER" "chown -R sofa:sofa $APP_DIR && systemctl daemon-reload && systemctl enable --now sofa-learn.timer sofa-library.timer && systemctl enable sofa && systemctl restart sofa"
+ssh "$SERVER" "chown -R sofa:sofa $APP_DIR && systemctl daemon-reload && systemctl enable --now sofa-library.timer && systemctl enable sofa && systemctl restart sofa"

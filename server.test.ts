@@ -1,5 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test'
 import { rm } from 'node:fs/promises'
+import { forgetBuiltGuide } from './lib/curation.js'
 import { handle, routes } from './server.js'
 
 const env = { ...process.env }
@@ -32,7 +33,9 @@ test('a stored quality reading makes the kept channel list stale; an unchanged o
   const post = async (fps: number) => (await handle(new Request('http://localhost/api/app/quality?t=inv', {
     method: 'POST', body: JSON.stringify({ id: 990003, w: 1920, h: 1080, fps, codec: 'h264', name: 'A' }),
   }))).json()
+  forgetBuiltGuide()
   try {
+    // the guide its 🏆 groups come from shares the list's pull
     const first = await channels()
     expect([first.status, first.headers.get('cache-control')]).toEqual([200, 'private, s-maxage=1800, stale-while-revalidate=3600'])
     await channels()

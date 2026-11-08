@@ -24,7 +24,7 @@
 // POST /api/app/mark?t=TOKEN — { title, watched?, rating? } a mark or rating made on the stick, for Trakt.
 import { appendFile, mkdir, rename, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { buildAppFeed, buildAppGuide } from '../lib/app-feed.js'
+import { buildAppFeed, buildAppGuide, guideUpcoming } from '../lib/app-feed.js'
 import { arabp2pSeasonDubs } from '../lib/arabp2p.js'
 import { crestsReady, titleMatch } from '../lib/crests.js'
 import { liveMatches } from '../lib/live-matches.js'
@@ -47,7 +47,8 @@ import { logged, noteMark, pendingLogs, type Done } from '../lib/letterboxd-log.
 export async function channels() {
   const cfg = configFromEnv()
   const backup = backupConfigFromEnv()
-  const feed = buildAppFeed(cfg, withCompetitionGroups(await withBackupFeeds(await fetchCuratedChannels(cfg, false), backup)), backup, process.env.REAL_DEBRID_TOKEN, process.env.TORBOX_TOKEN)
+  const [curated, upcoming] = await Promise.all([fetchCuratedChannels(cfg, false), guideUpcoming()])
+  const feed = buildAppFeed(cfg, withCompetitionGroups(await withBackupFeeds(curated, backup), upcoming), backup, process.env.REAL_DEBRID_TOKEN, process.env.TORBOX_TOKEN)
   return feed
 }
 

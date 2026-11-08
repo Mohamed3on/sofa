@@ -9,7 +9,6 @@ import {
   couldBeLiveMatch,
   fetchMyepgGuide,
   isHomeProvider,
-  jevCompetitions,
   learnedCompetitions,
   replayAirings,
   qualityScore,
@@ -18,9 +17,6 @@ import {
   withCompetitionGroups,
   type Channel,
 } from './curation.js'
-
-// Learned competitions come from a fixture, never the learner's live output.
-process.env.COMPETITIONS_FILE = `${import.meta.dir}/fixtures/competitions.json`
 
 describe('sports playlist curation', () => {
   test('does not reintroduce expired 2026 tournament packages', () => {
@@ -281,31 +277,6 @@ describe('competition groups', () => {
     expect(rerun([air('a', 'Everton vs Newcastle United - Carabao Cup', 10), air('b', 'Newcastle United vs Everton - English Premier League', 30)])).toEqual([])
   })
 
-  test('Jev verdicts count only confident live men\'s matches; no key means the regexes decide', async () => {
-    const pick = (choice: string, p: number) => ({ choice, probabilities: { [choice]: p } })
-    const answers = {
-      c0: pick('Serie A', 0.95), m0: { noul: 0.9 }, w0: { noul: 0.1 },
-      c1: pick('Premier League', 0.7), m1: { noul: 0.9 }, w1: { noul: 0.1 }, // competition unsure
-      c2: pick('Bundesliga', 0.99), m2: { noul: 0.9 }, w2: { noul: 0.9 }, // women's
-      c3: pick('Premier League', 0.99), m3: { noul: 0.2 }, w3: { noul: 0.1 }, // not a match
-      c4: pick('other football', 0.99), m4: { noul: 0.95 }, w4: { noul: 0.05 },
-    }
-    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async () =>
-      new Response(JSON.stringify({ answers, usage: { input_tokens: 1 } })))
-    process.env.TYPESAFE_API_KEY = 'test'
-    try {
-      const titles = ['Udinese - Cagliari', 'Ipswich v Hull', 'Bayern - Köln', 'PL: 90in30 - BRI - ARS', 'Al Hilal v Al Nassr']
-      expect([...(await jevCompetitions(titles)).values()]).toEqual([['seriea'], [], [], [], []])
-      // each title rides in its own questions, not in a shared state
-      expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)).questions.c0.instructions).toContain('Udinese - Cagliari')
-      delete process.env.TYPESAFE_API_KEY
-      await expect(jevCompetitions(titles)).rejects.toThrow('TYPESAFE_API_KEY')
-    } finally {
-      fetchSpy.mockRestore()
-      delete process.env.TYPESAFE_API_KEY
-    }
-  })
-
   test('groups lead the playlist; always-on channels first, then quality, then language', () => {
     const mk = (streamId: number, name: string, group: string, q: number, extra: Partial<Channel> = {}): Channel =>
       ({ streamId, name, logo: '', tvgId: 'x', group, isEventSlot: false, q, comps: staticCompetitions(name, ''), ...extra })
@@ -332,17 +303,17 @@ describe('competition groups', () => {
     expect(out.length).toBe(channels.length + 6)
   })
 
-  test('an overflow channel (Sky Sports Golf) joins a competition only around its match', () => {
-    const [tvgId, seen] = ['SkySportsGolf.uk', '2026-10-20']
-    const at = (days: number) => Date.parse(seen) + days * 864e5
+  test('a 24/7 channel joins a competition its guide shows from now on; an overflow channel (Sky Sports Golf) only near the match', () => {
+    const tvgId = 'SkySportsGolf.uk'
+    const kickOff = Date.parse('2026-10-20T15:00:00Z')
+    const upcoming = new Map([[tvgId, new Map([['pl', kickOff / 1000]])]])
     const plNames = (name: string, now: number) =>
-      withCompetitionGroups([{ streamId: 1, name, logo: '', tvgId, group: '🏴 Sky Sports & UK Sports', isEventSlot: false, q: 4 }], now)
+      withCompetitionGroups([{ streamId: 1, name, logo: '', tvgId, group: '🏴 Sky Sports & UK Sports', isEventSlot: false, q: 4 }], upcoming, now)
         .filter((c) => c.group === '🏆 Premier League').map((c) => c.name)
-    expect(plNames('NOW: SKY SPORTS GOLF ᴿᴬᵂ', at(0))).toEqual(['NOW: SKY SPORTS GOLF ᴿᴬᵂ'])
-    expect(plNames('NOW: SKY SPORTS GOLF ᴿᴬᵂ', at(1))).toEqual(['NOW: SKY SPORTS GOLF ᴿᴬᵂ'])
-    expect(plNames('NOW: SKY SPORTS GOLF ᴿᴬᵂ', at(3))).toEqual([])
-    expect(plNames('UK: SKY SPORTS MAIN EVENT', at(3))).toEqual(['UK: SKY SPORTS MAIN EVENT'])
-    expect(plNames('UK: SKY SPORTS NEWS', at(0))).toEqual([])
+    expect(plNames('NOW: SKY SPORTS GOLF ᴿᴬᵂ', kickOff - 3600e3)).toEqual(['NOW: SKY SPORTS GOLF ᴿᴬᵂ'])
+    expect(plNames('NOW: SKY SPORTS GOLF ᴿᴬᵂ', kickOff - 3 * 864e5)).toEqual([])
+    expect(plNames('UK: SKY SPORTS MAIN EVENT', kickOff - 3 * 864e5)).toEqual(['UK: SKY SPORTS MAIN EVENT'])
+    expect(plNames('UK: SKY SPORTS NEWS', kickOff - 3600e3)).toEqual([])
   })
 
   test('SG Hub Premier, HK Now Premier Sports and NZ Sky PL carry the Premier League', () => {

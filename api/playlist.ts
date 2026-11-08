@@ -4,12 +4,14 @@
 // a VPN on (the normal fronts block VPN IPs, and the VPN front blocks everyone else).
 // With a backup provider configured (XTREAM2_*), its feeds follow provider A's as spares.
 import { buildM3U, fetchCuratedChannels, withBackupFeeds, withCompetitionGroups } from '../lib/curation.js'
+import { guideUpcoming } from '../lib/app-feed.js'
 import { backupConfigFromEnv, configFromEnv, guideUrl, VPN_HOST } from '../lib/provider.js'
 
 export default async function handler(req: Request): Promise<Response> {
   const cfg = configFromEnv()
   const backup = backupConfigFromEnv()
-  const channels = withCompetitionGroups(await withBackupFeeds(await fetchCuratedChannels(cfg), backup))
+  const [curated, upcoming] = await Promise.all([fetchCuratedChannels(cfg), guideUpcoming()])
+  const channels = withCompetitionGroups(await withBackupFeeds(curated, backup), upcoming)
   const proto = req.headers.get('x-forwarded-proto') ?? 'https'
   // Host, not the client-supplied X-Forwarded-Host: the cached playlist is shared by URL.
   const host = req.headers.get('host')

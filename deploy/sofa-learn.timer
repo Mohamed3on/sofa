@@ -1,9 +1,0 @@
-[Unit]
-Description=Daily sofa-learn.service (the guides reach ~36h ahead, so one run a day sees every match)
-
-[Timer]
-OnCalendar=*-*-* 05:23:00 UTC
-Persistent=true
-
-[Install]
-WantedBy=timers.target

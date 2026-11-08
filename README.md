@@ -40,11 +40,10 @@ The app and its API — the trimmed playlist (`/api/playlist?t=…`) and EPG (`/
 
 The box owns its data in `/opt/sofa/.cache/` (JSON, written atomically); the server reads a file again when it changes, so nothing needs a restart:
 
-- `sofa-learn.timer` relearns `.cache/competitions.json` from the EPG daily at 05:23 UTC.
 - `scripts/match-epg-channels.ts`, run by hand on the box after the channel list changes, writes `.cache/epg-matches.json`.
 - Feed quality (`.cache/quality.json`) is probed nightly at 02:23 UTC by GitHub Actions (`.github/workflows/probe-quality.yml`, secrets `XTREAM_HOST/USER/PASS` + `HETZNER_SSH_KEY` + `SERVER_HOST`; run it by hand from the Actions tab), because the provider refuses streams from the box's IP. It runs `SERVER=root@<server-ip> ./deploy/probe-quality.sh 30`, which copies the box's readings, re-probes for 30 minutes and has the box merge what changed, keeping readings the Fire TV app recorded meanwhile (the same command works from a Mac with `.env.local`). Each run first re-checks readings older than 14 days, then chases feeds below their label. It holds the account's one connection slot, so it won't start while someone is watching and stops as soon as someone starts.
 
-A deploy never touches `.cache/`. Every push to `master` deploys (`.github/workflows/deploy.yml`, needs the `HETZNER_SSH_KEY` and `SERVER_HOST` secrets), except pushes that only touch Markdown or `firetv/**`; by hand: `SERVER=root@<server-ip> ./deploy/sync.sh`. Logs: `ssh root@<server-ip> 'journalctl -u sofa -f'` (or `-u sofa-learn`).
+A deploy never touches `.cache/`. Every push to `master` deploys (`.github/workflows/deploy.yml`, needs the `HETZNER_SSH_KEY` and `SERVER_HOST` secrets), except pushes that only touch Markdown or `firetv/**`; by hand: `SERVER=root@<server-ip> ./deploy/sync.sh`. Logs: `ssh root@<server-ip> 'journalctl -u sofa -f'`.
 
 ## Fire TV app
 

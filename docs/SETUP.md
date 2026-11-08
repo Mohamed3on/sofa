@@ -59,7 +59,7 @@ ssh root@<server-ip> 'curl -s "http://127.0.0.1:8790/api/playlist?t=<PLAYLIST_TO
 ssh root@<server-ip> 'journalctl -u sofa -f'
 ```
 
-Two nightly jobs come with it: `sofa-learn.timer` learns which channels show which competitions (the 🏆 groups), and `sofa-library.timer` builds the Movies & Shows library (only with `TMDB_TOKEN`).
+A nightly job comes with it: `sofa-library.timer` builds the Movies & Shows library (only with `TMDB_TOKEN`).
 
 ## 3. HTTPS
 

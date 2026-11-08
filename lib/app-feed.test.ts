@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, setSystemTime, spyOn, test } from 'bun:test'
 import { buildAppFeed, buildAppGuide, guideDescr } from './app-feed.js'
-import { buildM3U, withBackupFeeds, withCompetitionGroups, type Channel } from './curation.js'
+import { buildM3U, forgetBuiltGuide, withBackupFeeds, withCompetitionGroups, type Channel } from './curation.js'
 import { BACKUP_ID, VPN_HOST } from './provider.js'
 import { Database } from 'bun:sqlite'
 import { rm } from 'node:fs/promises'
@@ -117,6 +117,7 @@ describe('guide', () => {
   beforeEach(() => {
     setSystemTime(NOW)
     stubProvider()
+    forgetBuiltGuide()
   })
   afterEach(() => {
     setSystemTime()

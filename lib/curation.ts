@@ -18,17 +18,11 @@ import { audioRank, detailRank, qualityOf } from './quality.js'
 import { flakyRank } from './flaky.js'
 import { jsonFile } from './fs.js'
 import { applyListings, fetchListings, placeListings, type Placed } from './tv-listings.js'
-import { askJev, type JevQuestion } from './jev.js'
 import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { apiGet, BACKUP_ID, backupConfigFromEnv, claims4K, configFromEnv, guideUrl, plainCategory, readName, streamUrl, vodCatalogue, type VodFilm, type XtreamConfig } from './provider.js'
 
 const cachePath = (name: string) => fileURLToPath(new URL(`../.cache/${name}`, import.meta.url))
-/**
- * Channels seen airing live matches of each competition in the EPG (tvg-id -> competition ->
- * last-seen date), learned daily by scripts/learn-competitions.ts; read again when it changes.
- */
-export const learnedFile = jsonFile<Record<string, Record<string, string>>>(() => process.env.COMPETITIONS_FILE ?? cachePath('competitions.json'), () => ({}))
 /**
  * Guide channels Jev matched to ours where the name rules find nothing (myepg channel id -> our
  * tvg-ids), written by scripts/match-epg-channels.ts; read again when it changes.
@@ -461,15 +455,15 @@ const nameKey = (s: string): string =>
 // --- Competitions ------------------------------------------------------------
 // "🏆 <competition>" groups gather every channel carrying a competition across
 // regions. A channel qualifies by NAME ("SKY SPORT BUNDESLIGA 1"), by provider
-// CATEGORY (the per-league PPV packages), or — for 24/7 channels — by having aired
-// a live match of it recently per the EPG (learned into .cache/competitions.json by
-// scripts/learn-competitions.ts: the guides only reach ~36h ahead, far too short
-// to see a cup round or a UEFA week directly). Vetoes keep out other sports and
+// CATEGORY (the per-league PPV packages), or — for 24/7 channels — by a live match
+// of it in the guide from now on (the guides reach ~36h ahead; the TV listings sites,
+// lib/tv-listings.ts, ~5 days), so a group lists who shows its next matches.
+// Vetoes keep out other sports and
 // women's/second-tier competitions that reuse the names (volleyball "Serie A",
 // "Frauen-Bundesliga", "LaLiga Hypermotion", "Brasileiro Serie A").
 // Display order: the weekly competitions by region preference (UK, ES, DE, IT), then
-// the secondary UEFA cups, then domestic cups. Groups that exist only while the EPG
-// has seen a round recently (FA Cup, EFL Cup, Coppa, Pokal) trail the block, so their
+// the secondary UEFA cups, then domestic cups. Groups that exist only while a round
+// is near (FA Cup, EFL Cup, Coppa, Pokal) trail the block, so their
 // coming and going never shifts the groups everyone uses.
 /** [logo]: ESPN's league logo (a.espncdn.com/i/leaguelogos/soccer/<logo>.png), its dark-ground set's; Coppa Italia's has none, and its usual one is a white patch. */
 interface Competition { key: string; group: string; logo?: string; re: RegExp; not?: RegExp }
@@ -622,42 +616,6 @@ export function replayAirings(airings: Airing[], now = new Date()): Set<number> 
   return replays
 }
 
-// Jev's options: the group names, terse (every option is billed in every question), with a hint
-// only where a name is ambiguous, plus two catch-alls.
-const JEV_HINTS: Record<string, string> = {
-  laliga: "Spain's top division", bundes: "Germany's top division", seriea: "Italy's top division",
-  champ: "England's second tier", eflcup: 'Carabao Cup',
-}
-const jevLabel = (c: Competition) => c.group.replace('🏆 ', '')
-const JEV_COMPS: Record<string, string | null> = Object.fromEntries([
-  ...COMPS.map((c) => [jevLabel(c), JEV_HINTS[c.key] ?? null]),
-  ['other football', 'other leagues or divisions, national teams, friendlies'],
-  ['not football', null],
-])
-
-/**
- * Jev's verdict on match-like titles (couldBeLiveMatch), for the daily learner. The regexes
- * miss team-only fixtures and other languages, and match shows that look like fixtures. On 852
- * hand-labelled guide titles (EN/DE/ES/IT/FR/AR/RU) this scored precision 0.96 and recall 0.92;
- * the regexes scored 0.63 and 0.42. Throws if Jev is unavailable.
- */
-export async function jevCompetitions(titles: string[]): Promise<Map<string, string[]>> {
-  const questions: Record<string, JevQuestion> = {}
-  titles.forEach((title, i) => {
-    const t = JSON.stringify(title)
-    questions[`c${i}`] = { type: 'choice', instructions: `Competition of the TV programme ${t}?`, criteria: JEV_COMPS }
-    questions[`m${i}`] = { type: 'noul', instructions: `Is the TV programme ${t} one football match itself (live or in full), not highlights, a show, a preview or a past-season classic?` }
-    questions[`w${i}`] = { type: 'noul', instructions: `Is ${t} women's, youth or reserve football?` }
-  })
-  const a = await askJev('Sports TV guide (EPG) programme titles.', questions)
-  return new Map(titles.map((title, i) => {
-    const { choice = '', probabilities = {} } = a[`c${i}`]
-    const comp = COMPS.find((c) => jevLabel(c) === choice)
-    const yes = comp && probabilities[choice] >= 0.8 && a[`m${i}`].noul! >= 0.6 && a[`w${i}`].noul! < 0.5
-    return [title, yes ? [comp.key] : []]
-  }))
-}
-
 // UFC PPV / Fight-Night replays live in the VOD catalog — the live PPV slots go
 // black once the event window passes. The provider files them under many
 // language prefixes ("EN -", "ES -", "SOC -") and sometimes mis-categorizes them
@@ -745,9 +703,22 @@ export async function saveEpgIcons(icons: Map<string, string>): Promise<void> {
   if (icons.size) await writeFile(EPG_ICONS, JSON.stringify(Object.fromEntries(icons))).catch(() => {})
 }
 
+// Pulls already running are shared: the app's channel list and the guide build its 🏆 groups wait on
+// ask at the same moment. Nothing is kept once a pull ends, so the next list is fresh.
+const pulling = new Map<string, Promise<Channel[]>>()
+
 /** Fetch + filter provider channels into ordered, quality-sorted buckets. `vod: false`
  *  leaves out the on-demand entries, for the EPG. */
-export async function fetchCuratedChannels(cfg: XtreamConfig, vod = true): Promise<Channel[]> {
+export function fetchCuratedChannels(cfg: XtreamConfig, vod = true): Promise<Channel[]> {
+  const k = `${cfg.host}|${cfg.user}|${vod}`
+  const running = pulling.get(k)
+  if (running) return running
+  const job = pullCuratedChannels(cfg, vod).finally(() => pulling.delete(k))
+  pulling.set(k, job)
+  return job
+}
+
+async function pullCuratedChannels(cfg: XtreamConfig, vod: boolean): Promise<Channel[]> {
   const [cats, streams, vodList, icons] = await Promise.all([
     apiGet<Category[]>(cfg, 'get_live_categories'),
     apiGet<Stream[]>(cfg, 'get_live_streams'),
@@ -940,39 +911,34 @@ export async function withBackupFeeds(channels: Channel[], b = backupConfigFromE
 
 // Buckets whose channels may be listed under a competition (football only).
 export const COMP_SOURCE = new Set<string>([B.uk, B.fbPpv, B.ar, B.de, B.es, B.it, B.fr, B.plAbroad])
-// An EPG-learned association is trusted for this long (a cup round is ~monthly).
-const LEARN_DAYS = 60
-// A channel named for another sport (Sky Sports Golf/Cricket/Darts) shows football only
-// when Sky overflows a match onto it, so it's listed only from the day the learner sees
-// the match (dated by kick-off) until the day after.
-const OVERFLOW_DAYS = 1
+// A channel named for another sport (Sky Sports Golf/Cricket/Darts) shows football only when Sky
+// overflows a match onto it, so it's listed only from a day before that match.
+const OVERFLOW_S = 86_400
 
 /**
  * One "🏆 …" group per competition, leading the playlist, then the curated channels.
  * Each group lists every football-bucket channel carrying that competition — by
- * name/category, or learned from the EPG for 24/7 channels (event slots count only
- * by their CURRENT name). Always-on channels come first (an idle PPV slot's "4K"
+ * name/category, or for 24/7 channels by a match of it in the guide from now on ([upcoming],
+ * upcomingCompetitions: the guides reach ~36 h ahead, the TV listings sites ~5 days, so a match's
+ * channels are listed from well before its day); event slots count only by their CURRENT name. Always-on channels come first (an idle PPV slot's "4K"
  * marker can't be verified, so it never outranks a channel that is actually on air),
  * then quality, then language (EN > AR > DE/ES); best feed plus one spare per
  * channel. Copies keep the original's tvg-id so the guide follows them; the EPG
  * endpoint never sees them.
  */
-export function withCompetitionGroups(channels: Channel[], now = Date.now()): Channel[] {
-  const learned = learnedFile.read()
-  const since = new Date(now - LEARN_DAYS * 864e5).toISOString().slice(0, 10)
-  const overflowSince = new Date(now - OVERFLOW_DAYS * 864e5).toISOString().slice(0, 10)
+export function withCompetitionGroups(channels: Channel[], upcoming = new Map<string, Map<string, number>>(), now = Date.now()): Channel[] {
   type Row = { c: Channel; rh: number; rf: number; lang: number; region: number; idx: number }
   const byComp = new Map<string, Row[]>()
   channels.forEach((c, idx) => {
     // Provider-B feeds stay in their home group: the app reaches them through the family.
     if (c.vodExt || c.backup || !COMP_SOURCE.has(c.group)) return
     const keys = new Set(c.comps)
-    // EPG-learned memberships apply to 24/7 channels only — never to event slots
-    // (their name IS the event) nor to news/highlights channels whose guide merely
-    // mentions a match ("Premier League Weekend Live" on Sky Sports News).
+    // Guide memberships apply to 24/7 channels only — never to event slots (their name IS
+    // the event) nor to news/highlights channels whose guide merely mentions a match
+    // ("Premier League Weekend Live" on Sky Sports News).
     if (!c.isEventSlot && !WOMEN.test(c.name) && !SHOW.test(c.name)) {
-      const from = OTHER_SPORT.test(c.name) ? overflowSince : since
-      for (const [k, seen] of Object.entries(learned[c.tvgId] ?? {})) if (seen >= from) keys.add(k)
+      const until = OTHER_SPORT.test(c.name) ? now / 1000 + OVERFLOW_S : Infinity
+      for (const [k, start] of upcoming.get(c.tvgId) ?? []) if (start < until) keys.add(k)
     }
     if (!keys.size) return
     const { h: rh, fps: rf } = realRes(c.streamId, c.q ?? 2, c.isEventSlot || EVENT_ONLY.test(c.name), c.name)
@@ -1485,8 +1451,25 @@ export async function fetchProviderEpg(cfg: XtreamConfig): Promise<string> {
 const GUIDE_TTL = 6 * 3600_000
 let guides: { at: number; job: Promise<[string, MyepgGuide]> } | undefined
 
+// A built guide is shared for 5 min: the playlist and the app's channels need it too (their 🏆 groups
+// come from it), and a build takes seconds and ~600 MB, so requests at once never build it twice.
+const BUILT_TTL = 5 * 60_000
+let built: { at: number; job: Promise<{ channels: Channel[]; xml: string }> } | undefined
+
 /** The curated channels and the XMLTV guide built for them (served as /api/epg, parsed into the app's guide). */
-export async function curatedGuide(): Promise<{ channels: Channel[]; xml: string }> {
+export function curatedGuide(): Promise<{ channels: Channel[]; xml: string }> {
+  if (!built || Date.now() - built.at > BUILT_TTL) {
+    const job = buildCuratedGuide()
+    built = { at: Date.now(), job }
+    job.catch(() => { if (built?.job === job) built = undefined })
+  }
+  return built.job
+}
+
+/** Drops the shared built guide and the kept downloads, so the next request starts over (tests that change what the guide is built from). */
+export const forgetBuiltGuide = () => { built = undefined; guides = undefined }
+
+async function buildCuratedGuide(): Promise<{ channels: Channel[]; xml: string }> {
   const cfg = configFromEnv()
   const epgUrls = (process.env.EPG_URLS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
   const channelsPromise = fetchCuratedChannels(cfg, false) // VOD entries carry no guide
