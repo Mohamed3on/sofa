@@ -139,6 +139,8 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 private const val BANNER_MS = 4_000L
+/** The info view is a peek: it closes on its own this long after opening or the last zap. */
+private const val INFO_MS = 10_000L
 private const val SCREEN_ASPECT = 16f / 9f
 /** Within this of 16:9 a picture fills the screen, so a rounding never leaves hairline bars. */
 private const val ASPECT_SLACK = 0.03f
@@ -236,8 +238,14 @@ private fun PlayerChrome(
     // A brief line in the banner for the channel it was said on ("No matches on right now").
     var note by remember { mutableStateOf<Pair<ChannelIdentity?, String>?>(null) }
     var bannerKick by remember { mutableStateOf(0) }
-    // OK's info view: the banner stays up, with the stream's numbers, across zaps until Back.
+    // OK's info view: the banner stays up, with the stream's numbers, across zaps until Back or INFO_MS idle.
     var info by remember { mutableStateOf(false) }
+    LaunchedEffect(info, state.requested?.identity) {
+        if (info) {
+            delay(INFO_MS)
+            info = false
+        }
+    }
     // The key line shows in the info view's first few opens on this device, then never again.
     var hints by remember { mutableStateOf(false) }
     // Movies rise over the open channel list, which keeps its place underneath for Back.
