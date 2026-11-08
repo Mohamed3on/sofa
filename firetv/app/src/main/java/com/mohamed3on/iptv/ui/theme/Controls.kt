@@ -69,6 +69,21 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Constraints
+import kotlin.math.cos
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
  * The one button style: a label that lifts on focus and presses in to 0.96 on OK, so the
@@ -288,7 +303,6 @@ fun CheckMark(color: Color, modifier: Modifier = Modifier) {
 }
 
 private val CHECK_SIZE = 18.dp
-private val DOT_RADIUS = 4.dp
 
 /** A remote key drawn as a small cap, so instructions point at the button itself. */
 @Composable
@@ -304,23 +318,36 @@ fun KeyCap(label: String) {
     )
 }
 
+/** The drawn marks a [PageButton] can carry, one stroke weight with the app's other marks (never typed glyphs). */
+enum class Glyph { Play, Search, Live, Restart, Versions, Trailer, Details, Episodes }
+
+/** A [PageButton]'s height; a [small] one's. */
+val PAGE_BUTTON_HEIGHT = 44.dp
+private val SMALL_BUTTON_HEIGHT = 36.dp
+private val GLYPH_SIZE = 20.dp
+
 /**
- * A title page's or Up next's button: a quiet translucent pill that turns solid light when focused, so
+ * A title page's or Up next's button: a quiet translucent capsule that turns solid light when focused, so
  * the one OK will press reads from across the room. A [selected] one is outlined in the accent; a [small] one is a chip;
- * a [dot] is drawn before the label (Live TV's red).
+ * an [icon] is drawn before the label. [iconOnly] keeps it a round icon at rest and slides its label out while focused,
+ * as Apple TV's secondary buttons do, so a page leads with its one labelled action.
  */
 @Composable
-fun PageButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false, small: Boolean = false, dot: Color? = null) {
+fun PageButton(
+    label: String, onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false, small: Boolean = false,
+    icon: Glyph? = null, iconOnly: Boolean = false,
+) {
     val reduced = LocalReducedMotion.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val lift = animateFloatAsState(if (focused) 1f else 0f, Motion.focus(), label = "lift")
     val press by pressScale(interaction)
-    Text(
-        label,
-        style = (if (small) Type.body else Type.headline).copy(color = if (focused) Palette.ink else Palette.textPrimary),
-        maxLines = 1,
-        modifier = modifier
+    val height = if (small) SMALL_BUTTON_HEIGHT else PAGE_BUTTON_HEIGHT
+    // Round at rest: the icon centred in a circle as wide as the button is tall.
+    val iconInset = (height - GLYPH_SIZE) / 2
+    val side = if (small) Space.l else Space.xl
+    Row(
+        modifier
             .graphicsLayer {
                 val s = (if (reduced) 1f else 1f + 0.06f * lift.value) * press
                 scaleX = s
@@ -328,13 +355,94 @@ fun PageButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier
             }
             .drawBehind {
                 val p = lift.value.coerceIn(0f, 1f)
-                val r = CornerRadius(Radius.row.toPx())
+                val r = CornerRadius(size.height / 2)
                 drawRoundRect(lerp(Palette.material, Palette.textPrimary, p), cornerRadius = r)
                 if (p < 1f) drawRoundRect(if (selected) Palette.accent else Palette.edge, cornerRadius = r, style = Stroke((if (selected) 2 else 1).dp.toPx()), alpha = 1f - p)
-                if (dot != null) drawCircle(dot, DOT_RADIUS.toPx(), Offset((Space.l + DOT_RADIUS).toPx(), size.height / 2))
             }
             .clickable(interaction, indication = null, onClick = onClick)
-            .padding(start = if (dot != null) Space.l + DOT_RADIUS * 2 + Space.s else if (small) Space.l else Space.xl, end = if (small) Space.l else Space.xl)
-            .padding(vertical = if (small) Space.s else Space.m),
-    )
+            .semantics { contentDescription = label }
+            .height(height)
+            .padding(start = if (icon != null) iconInset else side, end = if (iconOnly) iconInset else side),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) Canvas(Modifier.size(GLYPH_SIZE)) {
+            drawGlyph(icon, lerp(Palette.textPrimary, Palette.ink, lift.value.coerceIn(0f, 1f)))
+        }
+        val text = Modifier.then(if (icon != null) Modifier.padding(start = Space.s) else Modifier)
+        Text(
+            label,
+            style = (if (small) Type.body else Type.headline).copy(color = if (focused) Palette.ink else Palette.textPrimary),
+            maxLines = 1,
+            modifier = if (!iconOnly) text else Modifier.reveal(
+                { if (reduced) (if (focused) 1f else 0f) else lift.value.coerceIn(0f, 1f) },
+                extra = side - iconInset,
+            ).then(text),
+        )
+    }
+}
+
+/** Takes [shown] (0–1) of its content's width (plus [extra] after it) and clips the rest: read while laying out, so a reveal recomposes nothing. */
+private fun Modifier.reveal(shown: () -> Float, extra: Dp) = clipToBounds().layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints.copy(minWidth = 0, maxWidth = Constraints.Infinity))
+    val full = placeable.width + extra.roundToPx()
+    layout((full * shown()).roundToInt(), placeable.height) { placeable.placeRelative(0, 0) }
+}
+
+/** [glyph] in [color], drawn to the canvas's square: 2 dp round strokes like the check mark, solid where a shape needs weight. */
+private fun DrawScope.drawGlyph(glyph: Glyph, color: Color) {
+    val w = size.width
+    val line = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+    fun at(x: Float, y: Float) = Offset(w * x, w * y)
+    fun path(vararg points: Pair<Float, Float>, close: Boolean = false) = Path().apply {
+        points.forEachIndexed { i, (x, y) -> if (i == 0) moveTo(w * x, w * y) else lineTo(w * x, w * y) }
+        if (close) close()
+    }
+    when (glyph) {
+        Glyph.Play -> drawPath(path(0.26f to 0.16f, 0.84f to 0.5f, 0.26f to 0.84f, close = true), color, style = Fill).also {
+            drawPath(path(0.26f to 0.16f, 0.84f to 0.5f, 0.26f to 0.84f, close = true), color, style = line)
+        }
+        Glyph.Search -> {
+            drawCircle(color, w * 0.29f, at(0.43f, 0.43f), style = line)
+            drawLine(color, at(0.65f, 0.65f), at(0.86f, 0.86f), line.width, StrokeCap.Round)
+        }
+        Glyph.Live -> {
+            drawCircle(Palette.live, w * 0.13f, at(0.5f, 0.5f))
+            for (r in listOf(0.3f, 0.46f)) for (start in listOf(-40f, 140f)) drawArc(
+                color, start, 80f, useCenter = false,
+                topLeft = at(0.5f - r, 0.5f - r), size = Size(w * 2 * r, w * 2 * r), style = line,
+            )
+        }
+        Glyph.Restart -> {
+            val r = 0.32f
+            // Clockwise from upper right round to upper left; the head at the start points the way it turns back (↺).
+            drawArc(color, -60f, 300f, useCenter = false, topLeft = at(0.5f - r, 0.5f - r), size = Size(w * 2 * r, w * 2 * r), style = line)
+            val a = Math.toRadians(-60.0)
+            val tip = at(0.5f + r * cos(a).toFloat(), 0.5f + r * sin(a).toFloat())
+            val tx = sin(a).toFloat()
+            val ty = -cos(a).toFloat()
+            val len = w * 0.2f
+            for (turn in listOf(0.7854f, -0.7854f)) {
+                val bx = -(tx * cos(turn) - ty * sin(turn))
+                val by = -(tx * sin(turn) + ty * cos(turn))
+                drawLine(color, tip, Offset(tip.x + bx * len, tip.y + by * len), line.width, StrokeCap.Round)
+            }
+        }
+        Glyph.Versions -> {
+            drawPath(path(0.5f to 0.14f, 0.88f to 0.36f, 0.5f to 0.58f, 0.12f to 0.36f, close = true), color, style = line)
+            drawPath(path(0.12f to 0.56f, 0.5f to 0.78f, 0.88f to 0.56f), color, style = line)
+        }
+        Glyph.Trailer -> {
+            drawRoundRect(color, at(0.1f, 0.2f), Size(w * 0.8f, w * 0.6f), CornerRadius(w * 0.12f), style = line)
+            drawPath(path(0.42f to 0.37f, 0.64f to 0.5f, 0.42f to 0.63f, close = true), color, style = Fill)
+        }
+        Glyph.Details -> {
+            drawCircle(color, w * 0.4f, at(0.5f, 0.5f), style = line)
+            drawCircle(color, w * 0.06f, at(0.5f, 0.31f))
+            drawLine(color, at(0.5f, 0.46f), at(0.5f, 0.7f), line.width, StrokeCap.Round)
+        }
+        Glyph.Episodes -> for (y in listOf(0.26f, 0.5f, 0.74f)) {
+            drawCircle(color, w * 0.06f, at(0.16f, y))
+            drawLine(color, at(0.34f, y), at(0.86f, y), line.width, StrokeCap.Round)
+        }
+    }
 }

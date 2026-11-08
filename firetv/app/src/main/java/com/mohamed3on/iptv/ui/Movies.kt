@@ -202,6 +202,8 @@ import com.mohamed3on.iptv.ui.theme.material
 import com.mohamed3on.iptv.ui.theme.slideFade
 import com.mohamed3on.iptv.ui.theme.pressable
 import com.mohamed3on.iptv.ui.theme.PageButton
+import com.mohamed3on.iptv.ui.theme.Glyph
+import com.mohamed3on.iptv.ui.theme.PAGE_BUTTON_HEIGHT
 import com.mohamed3on.iptv.ui.theme.SlidePanel
 import com.mohamed3on.iptv.ui.theme.CardScrim
 import com.mohamed3on.iptv.ui.theme.TileScrim
@@ -756,11 +758,12 @@ private fun MoviesBrowse(
             ) {
                 PageButton(
                     "Search", ::openSearch,
-                    Modifier
+                    icon = Glyph.Search, iconOnly = true,
+                    modifier = Modifier
                         .focusRequester(searchButton)
                         .onFocusChanged { if (it.isFocused) at = FocusAt.SearchButton },
                 )
-                PageButton("Live TV", onLive, Modifier.onFocusChanged { if (it.isFocused) at = FocusAt.SearchButton }, dot = Palette.live)
+                PageButton("Live TV", onLive, Modifier.onFocusChanged { if (it.isFocused) at = FocusAt.SearchButton }, icon = Glyph.Live, iconOnly = true)
             }
         }
         SlidePanel(actions) { a, open, m ->
@@ -1045,10 +1048,10 @@ private fun UpNextPage(
             horizontalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             // A next episode (no place saved) plays from its start.
-            PageButton(if (shows) "${if (saved.at == 0L) "Play" else "Resume"} ${saved.label.orEmpty()}".trim() else "Resume", { onResume(movie) }, Modifier.focusRequester(resumeButton))
-            if (shows) PageButton("Episodes", { onOpen(movie) }) else {
-                PageButton("Start over", { onStartOver(movie) })
-                PageButton("Details", { onOpen(movie) })
+            PageButton(if (shows) "${if (saved.at == 0L) "Play" else "Resume"} ${saved.label.orEmpty()}".trim() else "Resume", { onResume(movie) }, Modifier.focusRequester(resumeButton), icon = Glyph.Play)
+            if (shows) PageButton("Episodes", { onOpen(movie) }, icon = Glyph.Episodes, iconOnly = true) else {
+                PageButton("Start over", { onStartOver(movie) }, icon = Glyph.Restart, iconOnly = true)
+                PageButton("Details", { onOpen(movie) }, icon = Glyph.Details, iconOnly = true)
             }
         }
         if (alone) {
@@ -1262,7 +1265,7 @@ private val CHIP_SHAPE = RoundedCornerShape(Radius.row - Space.xs)
 private val CHIP_TEXT = Type.caption.copy(color = Palette.textPrimary)
 
 /** A [PageButton]'s height: a headline line and its padding. */
-private val BUTTON_HEIGHT = 21.dp + Space.m * 2
+private val BUTTON_HEIGHT = PAGE_BUTTON_HEIGHT
 
 /** A toggle on a title only Letterboxd's watchlist holds: there is no API to take it off. */
 
@@ -1271,7 +1274,7 @@ private val BUTTON_HEIGHT = 21.dp + Space.m * 2
 private fun TrailerButton(key: String?) {
     if (key.isNullOrEmpty()) return
     val context = LocalContext.current
-    PageButton("Trailer", { playTrailer(context, key) }, Modifier.appear())
+    PageButton("Trailer", { playTrailer(context, key) }, Modifier.appear(), icon = Glyph.Trailer, iconOnly = true)
 }
 
 /** Ad-free SmartTube first, then Amazon's YouTube app, then whatever opens YouTube links. */
@@ -1941,9 +1944,9 @@ private fun FilmPage(
                             Modifier.padding(top = Space.s).wrapContentWidth(Alignment.Start, unbounded = true).widthIn(max = LocalConfiguration.current.screenWidthDp.dp - EDGE * 2),
                         )
                         if (!buttons) Box(Modifier.height(BUTTON_HEIGHT)) else Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                            PageButton(if (started) "Resume" else "Play", { onPlay(false) }, Modifier.focusRequester(primary))
-                            if (started) PageButton("Start over", { onPlay(true) })
-                            PageButton("Versions", { versions = true }, Modifier.focusRequester(versionsButton))
+                            PageButton(if (started) "Resume" else "Play", { onPlay(false) }, Modifier.focusRequester(primary), icon = Glyph.Play)
+                            if (started) PageButton("Start over", { onPlay(true) }, icon = Glyph.Restart, iconOnly = true)
+                            PageButton("Versions", { versions = true }, Modifier.focusRequester(versionsButton), icon = Glyph.Versions, iconOnly = true)
                             TrailerButton(info?.trailer)
                         }
                         if (buttons) AudioChips(film.titleId, prepared)
@@ -2551,8 +2554,8 @@ private fun ShowPage(
                         FlowRow(Modifier.glide().padding(top = Space.m), horizontalArrangement = Arrangement.spacedBy(Space.m), verticalArrangement = Arrangement.spacedBy(Space.m)) {
                             when {
                                 next != null -> {
-                                    PageButton("${if (started) "Resume" else "Play"} ${next.code}", { onPlay(episodes, target, false) }, Modifier.focusRequester(primary).appear())
-                                    if (started) PageButton("Start over", { onPlay(episodes, target, true) }, Modifier.appear())
+                                    PageButton("${if (started) "Resume" else "Play"} ${next.code}", { onPlay(episodes, target, false) }, Modifier.focusRequester(primary).appear(), icon = Glyph.Play)
+                                    if (started) PageButton("Start over", { onPlay(episodes, target, true) }, Modifier.appear(), icon = Glyph.Restart, iconOnly = true)
                                     TrailerButton(info?.trailer)
                                 }
                                 failed -> PageButton("Try again", { attempt++ }, Modifier.focusRequester(primary).appear())
