@@ -42,8 +42,26 @@ fun Feed.liveNow(airing: List<Airing>): LiveNow {
             }
         }
     }
-    val slots = trophy.filter { it.slot && it.fixture }.distinctBy { it.name }.map { LiveEntry(it.name, null, it, bestOf(it)) }
-    return LiveNow(sameMatchOnce(matches), slots)
+    // An event channel named for a confirmed match, in any group ("Live | Atlético Madrid vs. Barcelona | … | DE: SOCCER PPV
+    // 104"), is listed under it: a team word from each side, so the club channel "LA LIGA - ATLETICO MADRID" is not.
+    val named = channels.filter { it.slot && it.fixture }
+    val folded = HashSet<String>()
+    val confirmed = sameMatchOnce(matches).map { m ->
+        val (home, away) = sidesOf(m.title) ?: return@map m
+        val more = named.filter { s -> teamWords(s.name).let { w -> w.any { it in home } && w.any { it in away } } }
+        folded += more.map { it.family }
+        val alsoOn = (m.alsoOn + more.map { bestOf(it) }).distinctBy { it.family }.filter { it.family != m.tune.family }
+        m.copy(alsoOn = alsoOn)
+    }
+    val slots = trophy.filter { it.slot && it.fixture && it.family !in folded }.distinctBy { it.name }.map { LiveEntry(it.name, null, it, bestOf(it)) }
+    return LiveNow(confirmed, slots)
+}
+
+/** A fixture's two sides as team words ("Atletico Madrid vs Barcelona" → atletico madrid, barcelona), or null. */
+private fun sidesOf(fixture: String): Pair<Set<String>, Set<String>>? {
+    val parts = VERSUS.find(fixture)?.let { listOf(fixture.take(it.range.first), fixture.drop(it.range.last + 1)) }
+        ?: fixture.split(" - ").takeIf { it.size == 2 } ?: return null
+    return (teamWords(parts[0]) to teamWords(parts[1])).takeIf { it.first.isNotEmpty() && it.second.isNotEmpty() }
 }
 
 /**
