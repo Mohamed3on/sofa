@@ -1544,5 +1544,6 @@ async function buildCuratedGuide(): Promise<{ channels: Channel[]; xml: string }
   const [channels, [providerXml, myepg], listings] = await Promise.all([channelsPromise, guides.job, fetchListings()])
   const xml = buildEventEpg(channels, providerXml, myepg, placeListings(channels, listings))
   void judgeSameMatches() // for the next build
+  Bun.gc(true) // hand back the build's garbage now: Bun otherwise keeps it resident, and the next build starts from there
   return { channels, xml }
 }
