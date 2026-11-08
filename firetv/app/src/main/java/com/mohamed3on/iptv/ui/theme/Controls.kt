@@ -280,6 +280,7 @@ fun CheckMark(color: Color, modifier: Modifier = Modifier) {
 }
 
 private val CHECK_SIZE = 18.dp
+private val DOT_RADIUS = 4.dp
 
 /** A remote key drawn as a small cap, so instructions point at the button itself. */
 @Composable
@@ -297,10 +298,11 @@ fun KeyCap(label: String) {
 
 /**
  * A title page's or Up next's button: a quiet translucent pill that turns solid light when focused, so
- * the one OK will press reads from across the room. A [selected] one is outlined in the accent; a [small] one is a chip.
+ * the one OK will press reads from across the room. A [selected] one is outlined in the accent; a [small] one is a chip;
+ * a [dot] is drawn before the label (Live TV's red).
  */
 @Composable
-fun PageButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false, small: Boolean = false) {
+fun PageButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false, small: Boolean = false, dot: Color? = null) {
     val reduced = LocalReducedMotion.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
@@ -321,8 +323,10 @@ fun PageButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier
                 val r = CornerRadius(Radius.row.toPx())
                 drawRoundRect(lerp(Palette.material, Palette.textPrimary, p), cornerRadius = r)
                 if (p < 1f) drawRoundRect(if (selected) Palette.accent else Palette.edge, cornerRadius = r, style = Stroke((if (selected) 2 else 1).dp.toPx()), alpha = 1f - p)
+                if (dot != null) drawCircle(dot, DOT_RADIUS.toPx(), Offset((Space.l + DOT_RADIUS).toPx(), size.height / 2))
             }
             .clickable(interaction, indication = null, onClick = onClick)
-            .padding(horizontal = if (small) Space.l else Space.xl, vertical = if (small) Space.s else Space.m),
+            .padding(start = if (dot != null) Space.l + DOT_RADIUS * 2 + Space.s else if (small) Space.l else Space.xl, end = if (small) Space.l else Space.xl)
+            .padding(vertical = if (small) Space.s else Space.m),
     )
 }

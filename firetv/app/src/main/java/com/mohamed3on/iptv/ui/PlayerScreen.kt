@@ -309,9 +309,43 @@ private fun PlayerChrome(
     // reach the keyboard Search opens on. A tap keeps its steps (the info view, then the list).
     var okHeld by remember { mutableStateOf(false) }
 
+    // Back held switches between live and Movies & Shows, either way; the press has done its one step by then.
+    // Leaving Movies so keeps the title page (or the playing title's page) it was on, for the switch back.
+    val back = remember { object { var held = false; var live = false; var screen: String? = null } }
+    var left by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(movies) { if (movies) left = null }
+    fun toLive(from: String?) {
+        movies = false
+        layer = Layer.None
+        left = from
+    }
+    fun toMovies() {
+        info = false
+        left?.let(Check::request) ?: run { movies = true }
+    }
+
     Box(
         Modifier
             .fillMaxSize()
+            .onPreviewKeyEvent { event ->
+                val native = event.nativeKeyEvent
+                if (native.keyCode != android.view.KeyEvent.KEYCODE_BACK || multiView || pick != null) return@onPreviewKeyEvent false
+                val down = event.type == KeyEventType.KeyDown
+                if (down && native.repeatCount == 0) {
+                    back.held = false
+                    back.live = !movies && layer == Layer.None
+                    back.screen = if (movies) graph.prefs.get(Check.LAST_SCREEN)?.takeIf { it != "movies" }?.replace("play:", "title:") else null
+                    return@onPreviewKeyEvent false
+                }
+                if (!back.held) {
+                    if (!down) return@onPreviewKeyEvent false
+                    back.held = true
+                    if (movies) toLive(back.screen) else toMovies()
+                }
+                // The rest of the hold, and its release, belong to the switch.
+                if (!down) back.held = false
+                true
+            }
             // Bubbles up from whatever is focused: an open layer's own keys never get here as player keys.
             .onKeyEvent { event ->
                 val key = remoteKey(event.nativeKeyEvent.keyCode) ?: return@onKeyEvent false
@@ -331,6 +365,11 @@ private fun PlayerChrome(
                     return@onKeyEvent true
                 }
                 if (action == KeyAction.Pass) return@onKeyEvent false
+                // Back over the bare picture acts at its release (a hold switches to Movies instead), and only for a press that began here.
+                if (key == RemoteKey.Back && layer == Layer.None && !multiView) {
+                    if (event.type == KeyEventType.KeyUp && back.live) perform(action)
+                    return@onKeyEvent true
+                }
                 if (event.type == KeyEventType.KeyDown) perform(action)
                 true // the key-up too, so Back never reaches the activity and leaves the app
             }
@@ -507,6 +546,7 @@ private fun PlayerChrome(
             open = movies,
             onPlaying = onMovie,
             onClose = { movies = false },
+            onLive = { toLive(null) },
         )
 
         SlidePanel(Unit.takeIf { layer == Layer.Recent }, Modifier.onFocusChanged { layerFocused = it.hasFocus }) { _, _, m ->
@@ -789,7 +829,7 @@ private fun KeyHints() {
 
 private val KEY_HINTS = listOf(
     "OK again: channel list · Left: groups · Right: recent · Hold OK: search · Menu: options",
-    "Rewind, Fast-forward: the previous or next live match",
+    "Rewind, Fast-forward: the previous or next live match · Hold Back: Movies & Shows",
     "In the list: Right: schedule · Menu: favourite or move · Rewind, Fast-forward: top, bottom",
 )
 

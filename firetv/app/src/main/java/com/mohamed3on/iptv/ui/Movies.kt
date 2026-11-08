@@ -239,8 +239,8 @@ private val PROGRESS_WIDTH = 200.dp
 /** Up next's cards: 16:9, so a backdrop fits whole. */
 private val WIDE = DpSize(184.dp, 104.dp)
 private val STILL = DpSize(128.dp, 72.dp)
-/** Room kept at the hero's right for the Search button. */
-private val SEARCH_ROOM = 120.dp
+/** Room kept at the hero's right for the Search and Live TV buttons. */
+private val SEARCH_ROOM = 260.dp
 /** Prefs key: "1" while the rows show watched titles (they leave them out by default). */
 private const val SHOW_WATCHED = "movies.showWatched"
 /** Backdrops decode at 720p: darkened behind text, more pixels show nothing and cost the stick's memory. */
@@ -284,6 +284,8 @@ fun MoviesLayer(
     open: Boolean,
     onPlaying: (Boolean) -> Unit,
     onClose: () -> Unit,
+    /** Live TV, full screen (the browsing screen's Live TV button). */
+    onLive: () -> Unit,
 ) {
     val graph = LocalContext.current.graph
     val sync = graph.titles.library
@@ -410,6 +412,7 @@ fun MoviesLayer(
                 onResume = { nav.resume(it, fromStart = false) },
                 onStartOver = { nav.resume(it, fromStart = true) },
                 onBack = ::leave,
+                onLive = onLive,
             )
             pages.forEachIndexed { i, page ->
                 key(i, page) {
@@ -548,6 +551,7 @@ private fun MoviesBrowse(
     onResume: (Movie) -> Unit,
     onStartOver: (Movie) -> Unit,
     onBack: () -> Unit,
+    onLive: () -> Unit,
 ) {
     val reduced = LocalReducedMotion.current
     val prefs = LocalContext.current.graph.prefs
@@ -745,14 +749,19 @@ private fun MoviesBrowse(
                     }
                 }
             }
-            if (kind == 2 && shownPage != BrowsePage.Search) PageButton(
-                "Search", ::openSearch,
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = Space.safeY, end = EDGE)
-                    .focusRequester(searchButton)
-                    .onFocusChanged { if (it.isFocused) at = FocusAt.SearchButton },
-            )
+            // Search, then Live TV in the corner: Up lands on Search as before, Right goes on to live (so does holding Back).
+            if (kind == 2 && shownPage != BrowsePage.Search) Row(
+                Modifier.align(Alignment.TopEnd).padding(top = Space.safeY, end = EDGE),
+                horizontalArrangement = Arrangement.spacedBy(Space.m),
+            ) {
+                PageButton(
+                    "Search", ::openSearch,
+                    Modifier
+                        .focusRequester(searchButton)
+                        .onFocusChanged { if (it.isFocused) at = FocusAt.SearchButton },
+                )
+                PageButton("Live TV", onLive, Modifier.onFocusChanged { if (it.isFocused) at = FocusAt.SearchButton }, dot = Palette.live)
+            }
         }
         SlidePanel(actions) { a, open, m ->
             TitleActions(

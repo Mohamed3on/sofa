@@ -255,7 +255,7 @@ Quiet until focused; the press is felt on the same frame as the key.
 - **Edges:** lists fade into their ground over 24dp at the top and 48dp at the bottom (12/24dp inside an episode panel).
 
 ### Navigation
-D-pad only. Panels enter from the edge they leave by (list from the left, banner from the bottom) by a third of their size on the 0.35s panel spring, staggered 15% for a second column. Zapping moves banner content in the direction of travel. Back always peels one layer. With Remove animations on, everything cross-fades over 160ms and nothing scales.
+D-pad only. Panels enter from the edge they leave by (list from the left, banner from the bottom) by a third of their size on the 0.35s panel spring, staggered 15% for a second column. Zapping moves banner content in the direction of travel. Back always peels one layer. Held, Back switches between live and Movies & Shows (reopening the title page it was left on); Movies' top-right corner carries a Live TV page button with a drawn Live Red dot beside Search for the same trip. With Remove animations on, everything cross-fades over 160ms and nothing scales.
 
 ### Library Backdrop (signature)
 A full-bleed title still decoded at 720p, crossfading over 400ms on an ink ground, under a dense left scrim, a bottom scrim, and a top band. On the rows page it dims a further 35% and an ink ground rises from the bottom to where the rows start, fading in over 72dp.
