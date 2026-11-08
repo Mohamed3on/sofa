@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
@@ -168,7 +169,13 @@ fun PlayerScreen(feed: Feed, session: StreamSession?, audio: AudioTracks?, surfa
         // The picture keeps its shape: a 4:3 channel is pillarboxed, never stretched; widescreen fills the screen.
         val fill = aspect <= 0f || abs(aspect - SCREEN_ASPECT) < ASPECT_SLACK
         if (grid.tiles.isEmpty() && !movie) AndroidView(factory = { surface }, modifier = Modifier.align(Alignment.Center).then(if (fill) Modifier.fillMaxSize() else Modifier.aspectRatio(aspect)))
-        if (session != null) PlayerChrome(feed, session, audio, tiles, grid, live, health, onMovie = { movie = it })
+        if (session != null) {
+            // Match rows draw their crests from the guide (LocalCrests), in the list, Live now and the banner.
+            val guide by LocalContext.current.graph.sync.guide.collectAsState()
+            CompositionLocalProvider(LocalCrests provides (guide?.crests ?: emptyMap())) {
+                PlayerChrome(feed, session, audio, tiles, grid, live, health, onMovie = { movie = it })
+            }
+        }
     }
 }
 
@@ -720,6 +727,7 @@ private fun Guide(channel: Channel, guide: GuideDb?, clock: State<Long>, describ
     if (now != null) {
         Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
             if (now.match) LiveMark()
+            MatchCrests(now.title)
             Text(remember(now) { shownTitle(now) }, style = Type.headline, maxLines = 2)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
