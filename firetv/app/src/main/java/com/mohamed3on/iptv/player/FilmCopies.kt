@@ -62,9 +62,16 @@ data class Prepared(
     fun pick(skip: Set<String> = emptySet(), iptvBusy: Boolean = false): Ranked? =
         ranking?.copies?.firstOrNull { r -> r.copy.id !in skip && (r.support != Support.Wont || r.pinned) && playable(r.copy, iptvBusy) }
 
-    /** What Play opens when the debrid check outlasts its wait (KTD13): the best that plays without the check. */
-    fun pickWithoutWaiting(): Ranked? =
-        pick(ranking?.copies.orEmpty().filter { it.copy.source != Source.Iptv && debrid[it.copy.id] !is DebridCheck.Ready }.mapTo(HashSet()) { it.copy.id })
+    /**
+     * What Play opens (#22), [late] once it has waited [FilmSession.WAIT_MS]: [pick] once the debrid check is in; past the
+     * wait with the check still out, the best that plays without it (KTD13); before then, not known yet. The one answer
+     * for the Plays line, Versions and a play's first open.
+     */
+    fun opens(late: Boolean, skip: Set<String> = emptySet(), iptvBusy: Boolean = false): Ranked? = when {
+        debridChecked -> pick(skip, iptvBusy)
+        late -> pick(skip + ranking?.copies.orEmpty().filter { it.copy.source != Source.Iptv && debrid[it.copy.id] !is DebridCheck.Ready }.map { it.copy.id }, iptvBusy)
+        else -> null
+    }
 }
 
 /**
@@ -88,12 +95,27 @@ class CopyPlan(
 ) {
     private class Link(val at: Long, val ip: Any?, val url: Deferred<String?>)
 
-    internal val made = now()
+    /** When it was made, or its last play ended: [FilmCopies] keeps it 30 min from then, and all through a play. */
+    @Volatile internal var kept = now()
+    /** Plays holding it ([playing]). */
+    @Volatile internal var plays = 0
     private val _state = MutableStateFlow(Prepared(debridOff = debrid.status.value.state == DebridState.NotPremium))
     val state: StateFlow<Prepared> = _state
     @Volatile private var checking: Job? = null
     @Volatile private var fallback: Copy? = null
     private val links = ConcurrentHashMap<String, Link>()
+    /** [usable] for the state it was ranked from: ranked once per change, not on every tick of a play. */
+    @Volatile private var usableFor: Pair<Prepared, Ranking>? = null
+
+    /**
+     * A play holds its plan ([on]) until it ends: nothing replaces it meanwhile, so its links, IPTV containers and what
+     * it learned stay the play's, and the title page shows them after (#22).
+     */
+    @Synchronized
+    fun playing(on: Boolean) {
+        plays += if (on) 1 else -1
+        if (!on) kept = now()
+    }
 
     /** The box's answer: ranked, then the unchecked debrid copies are checked. */
     @Synchronized
@@ -131,8 +153,9 @@ class CopyPlan(
     /** The copies that can play now, ranked: IPTV's and the ready debrid ones (R1), for step-downs and offers. */
     fun usable(): Ranking {
         val p = _state.value
+        usableFor?.takeIf { it.first === p }?.let { return it.second }
         val copies = p.ranking?.copies.orEmpty().map { it.copy }.filter { it.source == Source.Iptv || p.debrid[it.id] is DebridCheck.Ready }
-        return choices.rank(title, copies, p.answer?.copies?.originalLanguage, setup(), typical)
+        return choices.rank(title, copies, p.answer?.copies?.originalLanguage, setup(), typical).also { usableFor = p to it }
     }
 
     /**
@@ -243,7 +266,7 @@ class FilmCopies(
 
     /** [title]'s plan: a recent one kept, else a new one, asking the box now. */
     fun plan(title: String): CopyPlan = synchronized(plans) {
-        plans[title]?.takeIf { now() - it.made < KEEP_MS && !it.state.value.failed }
+        plans[title]?.takeIf { it.plays > 0 || now() - it.kept < KEEP_MS && !it.state.value.failed }
             ?: CopyPlan(title, debrid, choices, setup, { capacity.typicalMbps(it, now()) }, scope, now, ip, linked).also {
                 plans[title] = it
                 held += it

@@ -3,6 +3,7 @@ package com.mohamed3on.iptv
 import com.mohamed3on.iptv.data.DebridCandidate
 import com.mohamed3on.iptv.data.DebridCheck
 import com.mohamed3on.iptv.data.DebridState
+import com.mohamed3on.iptv.data.ServerCopy
 import com.mohamed3on.iptv.player.Capacity
 import com.mohamed3on.iptv.player.Capacity.Source.Iptv
 import com.mohamed3on.iptv.player.Capacity.Source.Debrid
@@ -63,7 +64,7 @@ class FilmSessionTest {
         val net = FakeBandwidth()
         val plan = CopyPlan("movie:1", debrid, choices, { setup }, { null }, backgroundScope, { testScheduler.currentTime })
         val session = FilmSession(
-            "movie:1", plan, player, choices, { setup }, net, { "http://iptv.test/${it.id}" }, backgroundScope,
+            "movie:1", plan, player, choices, { setup }, net, { c, ext -> "http://iptv.test/${c.id}" + (ext?.let { ".$it" } ?: "") }, backgroundScope,
             { testScheduler.currentTime },
         )
         return Rig(session, plan, player, debrid, choices, net)
@@ -435,5 +436,30 @@ class FilmSessionTest {
         assertEquals(plays, r.state.copy)
         assertEquals(FilmPhase.Playing, r.state.phase)
         assertEquals(1, r.debrid.checks)
+    }
+
+    // #22: past Play's wait, with the debrid check still out, the Plays line names the IPTV copy Play opens.
+    @Test fun pastThePlayWaitThePlaysLineNamesWhatTheFirstOpenPlays() = runTest {
+        val r = rig(debrid = FakeDebrid(answerMs = 10_000))
+        answer(r, rd4k, iptv1080)
+        runCurrent()
+        assertNull(r.plan.state.value.opens(late = false))
+        val named = r.plan.state.value.opens(late = true)?.copy
+        assertEquals(iptv1080, named)
+        r.session.play(Place(0), fallback = iptv1080)
+        advance(FilmSession.WAIT_MS)
+        assertEquals(named, r.state.copy)
+    }
+
+    // #22: the play's own plan names an IPTV copy's container, however long the film has played.
+    @Test fun aFailoverLateInAFilmKeepsTheIptvContainer() = runTest {
+        val r = rig()
+        r.plan.answered(TitleAnswer(titleCopies(iptv1080), server = mapOf(iptv1080.id to ServerCopy("iptv", id = 1, ext = "mkv"))))
+        r.session.play(Place(0, audio = "en"))
+        runCurrent()
+        advance(45 * MIN)
+        r.player.fail(StreamFailure.Http(500))
+        advance(1_000)
+        assertEquals(listOf("http://iptv.test/iptv:1.mkv", "http://iptv.test/iptv:1.mkv"), r.urls)
     }
 }

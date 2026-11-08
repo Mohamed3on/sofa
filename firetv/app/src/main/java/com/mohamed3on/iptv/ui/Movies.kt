@@ -365,10 +365,10 @@ fun MoviesLayer(
 
     fun leave() = onClose()
 
-    /** An IPTV copy's stream: the container the box named, else the library's. */
-    fun iptvUrl(p: Playing): (Copy) -> String = { c ->
+    /** An IPTV copy's stream: the container the play's plan names (#22), else the library's. */
+    fun iptvUrl(p: Playing): (Copy, String?) -> String = { c, named ->
         val id = c.id.removePrefix("iptv:").toInt()
-        val ext = graph.films.state(p.title).value.answer?.ext(c.id) ?: p.movie.ext
+        val ext = named ?: p.movie.ext
         if (p.show != null) feed.route.episodeUrl(graph.route.effective.value, id, ext) else feed.route.movieUrl(graph.route.effective.value, id, ext)
     }
 
@@ -1988,7 +1988,7 @@ private fun PlaysLine(title: TitleId, fallback: List<String>?, modifier: Modifie
         delay(FilmSession.WAIT_MS)
         late = true
     }
-    val copy = p.plays ?: p.takeIf { late }?.pickWithoutWaiting()?.copy
+    val copy = p.opens(late)?.copy
     val text = when {
         copy != null -> copyLine(copy, p.answer, service)
         p.failed || (late && p.ranking == null) -> fallback?.joinToString(" · ")

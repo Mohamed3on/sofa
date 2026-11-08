@@ -125,7 +125,8 @@ class FilmSession(
     private val choices: CopyChoices,
     private val setup: () -> SetupProfile,
     private val bandwidth: Bandwidth,
-    private val iptvUrl: (Copy) -> String,
+    /** An IPTV copy's stream, in the container the play's plan names (null: unknown). */
+    private val iptvUrl: (Copy, String?) -> String,
     scope: CoroutineScope,
     private val now: () -> Long,
     private val report: (FilmEvent) -> Unit = {},
@@ -349,12 +350,15 @@ class FilmSession(
         }
     }
 
-    /** The plan's next copy: the best not yet tried that can play (no IPTV while the provider's connection is taken). */
-    private fun candidate(): Ranked? = plan.state.value.pick(tried, iptvBusy)
+    /**
+     * The plan's next copy: the best not yet tried that can play (no IPTV while the provider's connection is taken); the first
+     * open is what the Plays line names ([Prepared.opens]), past Play's wait too.
+     */
+    private fun candidate(): Ranked? = plan.state.value.let { p -> (if (current == null) p.opens(now() >= startBy, tried, iptvBusy) else null) ?: p.pick(tried, iptvBusy) }
 
     /** [copy]'s URL: IPTV's at once; a debrid copy's once ready, from a link fetched ahead or a fresh one. Null when it can't play. */
     private suspend fun url(copy: Copy, chosen: Boolean = false): String? {
-        if (copy.source == Source.Iptv) return iptvUrl(copy)
+        if (copy.source == Source.Iptv) return iptvUrl(copy, plan.state.value.answer?.ext(copy.id))
         ready(copy, chosen) ?: return null
         return try {
             plan.link(copy)

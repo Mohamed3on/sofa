@@ -20,6 +20,8 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -64,5 +66,26 @@ class FilmCopiesTest {
         advanceTimeBy(3_000)
         runCurrent()
         assertEquals("iptv:7", notCached.value.plays?.id)
+    }
+
+    // #22: past the 30 minutes a plan is kept, a play's plan isn't replaced by an empty one (its IPTV container with it).
+    @Test
+    fun `a play keeps its plan past the 30 minutes, and the plan is let go 30 minutes after it`() = runTest {
+        var t = 0L
+        val films = FilmCopies(
+            fetch = { Result.success(CopiesAnswer("movie:1", "en", copies = listOf(iptv.copy(ext = "mkv")))) },
+            debrid = FakeDebrid(), choices = CopyChoices(MapStore()), capacity = Capacity(MapStore()), setup = { tv }, scope = backgroundScope, now = { t },
+        )
+        val plan = films.plan("movie:1")
+        runCurrent()
+        plan.playing(true)
+        t = 31 * 60_000L
+        assertSame(plan, films.plan("movie:1"))
+        assertEquals("mkv", films.state("movie:1").value.answer?.ext("iptv:7"))
+        plan.playing(false)
+        t += 29 * 60_000L
+        assertSame(plan, films.plan("movie:1"))
+        t += 2 * 60_000L
+        assertNotSame(plan, films.plan("movie:1"))
     }
 }

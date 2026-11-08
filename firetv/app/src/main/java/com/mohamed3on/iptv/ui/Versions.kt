@@ -128,8 +128,8 @@ internal fun Versions(title: String, data: VersionsData, first: FocusRequester, 
         rows.distinctBy { (r, s) -> s to kind(r) }.groupBy { it.second }.values.flatMap { it.take(SPREAD) }.mapTo(HashSet()) { it.first.copy.id } +
             rows.filter { (r, _) -> r.pinned || r.copy.id == data.playing }.map { it.first.copy.id }
     }
-    // Reasons are worded against the copy Play opens, as the Plays line names it: the best one that can play.
-    val plays = data.prepared.pick()?.copy?.id
+    // Reasons are worded against the copy playing, else the one Play opens, as the Plays line names it (#22).
+    val plays = data.playing ?: data.prepared.opens(late = true)?.copy?.id
     val state = rememberLazyListState()
     val shown = if (all) rows else rows.filter { it.first.copy.id in spread }
     val firstMore = if (all) shown.firstOrNull { it.first.copy.id !in spread }?.first?.copy?.id else null

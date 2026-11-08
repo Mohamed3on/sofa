@@ -178,7 +178,7 @@ internal val LocalIdleWatch = compositionLocalOf<IdleWatch?> { null }
  */
 @Composable
 internal fun MoviePlayback(
-    movie: Movie, of: PlayOf, from: Long, fallback: Copy?, iptvUrl: (Copy) -> String,
+    movie: Movie, of: PlayOf, from: Long, fallback: Copy?, iptvUrl: (Copy, String?) -> String,
     onEnded: () -> Unit, onClose: () -> Unit, onNext: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current

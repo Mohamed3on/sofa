@@ -43,7 +43,7 @@ class FilmPlayTest {
         val choices = CopyChoices(MapStore()) { testScheduler.currentTime }
         val plan = CopyPlan(of.id, FakeDebrid(), choices, { tv }, { null }, backgroundScope, { testScheduler.currentTime })
         plan.answered(TitleAnswer(TitleCopies(listOf(Copy("iptv:1", Iptv, 1080)), originalLanguage = "en")))
-        val session = FilmSession(of.id, plan, player, choices, { tv }, FakeBandwidth(), { "http://iptv.test/${it.id}" }, backgroundScope, { testScheduler.currentTime })
+        val session = FilmSession(of.id, plan, player, choices, { tv }, FakeBandwidth(), { c, _ -> "http://iptv.test/${c.id}" }, backgroundScope, { testScheduler.currentTime })
         val store = MapStore()
         val trakt = mutableListOf<String>()
         val events = mutableListOf<String>()

@@ -191,7 +191,7 @@ class ExoFilmPlay(val exo: ExoPlayer, val play: FilmPlay, val plan: CopyPlan, va
  * meter its loading teaches (KTD8), and a film's quality reading for the box. [ExoFilmPlay.start] plays it from [from]; [FilmPlay.close] lets it all go.
  */
 fun openFilmPlay(
-    context: Context, window: Window?, graph: AppGraph, of: PlayOf, from: Long, fallback: Copy?, iptvUrl: (Copy) -> String,
+    context: Context, window: Window?, graph: AppGraph, of: PlayOf, from: Long, fallback: Copy?, iptvUrl: (Copy, String?) -> String,
     scope: CoroutineScope, onEnded: () -> Unit, onClose: () -> Unit,
 ): ExoFilmPlay {
     val title = of.id
@@ -203,7 +203,7 @@ fun openFilmPlay(
     val exo = moviePlayer(context, graph.http, graph.filmHeads, load) { fileBytes.compareAndSet(0, it) }
     val film = ExoFilmPlayer(exo)
     val setup = graph.setup
-    val plan = graph.films.plan(title)
+    val plan = graph.films.plan(title).also { it.playing(true) }
     val session = FilmSession(title, plan, film, graph.copyChoices, { setup.profile.value }, meter, iptvUrl, scope, System::currentTimeMillis, graph.telemetry::film)
     val fetched = SubtitleFetch(exo, graph.http, graph.titles, scope, { plan.state.value.answer?.copies?.originalLanguage }) {
         session.inform(Notice.Subtitles(it.lang))
@@ -266,6 +266,7 @@ fun openFilmPlay(
             if (graph.premiumEndedShown.compareAndSet(false, true)) emit(lapsed.name)
         },
         release = {
+            plan.playing(false)
             parts.cancel()
             surface.release()
             subtitles.release()
