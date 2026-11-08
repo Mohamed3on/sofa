@@ -4,6 +4,7 @@ import {
   autoIncluded,
   bucketForCategory,
   buildEventEpg,
+  oneSchedule,
   chanKey,
   couldBeLiveMatch,
   fetchMyepgGuide,
@@ -127,6 +128,21 @@ describe('sibling feeds', () => {
     expect(xml).toContain('start="20261108220000 +0300" stop="20261109010000 +0300" channel="B1.qa"><title>Atletico vs Barcelona</title>')
     expect(xml).not.toContain('(2nd listing)')
     expect(xml).toContain('<title>Highlights</title>')
+  })
+
+  test('EPG: each channel keeps one schedule', () => {
+    const p = (start: string, stop: string, title: string) => `<programme start="20261108${start}00 +0000" stop="20261108${stop}00 +0000" channel="x"><title>${title}</title></programme>`
+    const titles = (bs: string[]) => bs.map((b) => `${b.match(/start="\d{8}(\d{4})/)![1]}-${b.match(/stop="\d{8}(\d{4})/)![1]} ${b.match(/<title>([^<]*)/)![1]}`)
+    // the same listing twice
+    expect(titles(oneSchedule([p('1900', '2100', 'Snooker'), p('1900', '2100', 'Snooker'), p('2100', '2200', 'Riding'), p('2100', '2200', 'Riding')])))
+      .toEqual(['1900-2100 Snooker', '2100-2200 Riding'])
+    // the programme on air given a made-up hour
+    expect(titles(oneSchedule([p('2015', '2045', 'Report'), p('2045', '2145', 'Five reasons'), p('2100', '2115', 'News'), p('2115', '2130', 'Sci-fi')])))
+      .toEqual(['2015-2045 Report', '2045-2100 Five reasons', '2100-2115 News', '2115-2130 Sci-fi'])
+    // two listings interleaved: the longer one wins, the other only fills its gaps
+    expect(titles(oneSchedule([p('1330', '1630', 'Palace'), p('1630', '1950', 'Man Utd'), p('1950', '2300', 'Atletico'),
+      p('1300', '1600', 'Palace B'), p('1600', '1930', 'Man Utd B'), p('2300', '2330', 'Moments B')])))
+      .toEqual(['1300-1330 Palace B', '1330-1630 Palace', '1630-1950 Man Utd', '1950-2300 Atletico', '2300-2330 Moments B'])
   })
 
   test('EPG: guide ids match in any case, and Jev matches feed further channels', async () => {

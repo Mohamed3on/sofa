@@ -1046,6 +1046,51 @@ const epgCountry = (id: string) => id.match(/\.([a-z]{2,3})$/i)?.[1].toLowerCase
 const isRegular = (c: Channel) => !c.isEventSlot && !!c.tvgId
 // Channel id of a <programme> block (what TiviMate maps EPG by).
 const programmeChannel = (block: string) => block.match(/\bchannel="([^"]*)"/)?.[1] ?? ''
+/** A <programme> block's start or stop in epoch ms; NaN when it has none. */
+const xmltvAt = (block: string, attr: 'start' | 'stop') => {
+  const s = block.match(attr === 'start' ? /\bstart="(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d) ([+-]\d\d)(\d\d)"/ : /\bstop="(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d) ([+-]\d\d)(\d\d)"/)
+  return s ? Date.parse(`${s[1]}-${s[2]}-${s[3]}T${s[4]}:${s[5]}:${s[6]}${s[7]}:${s[8]}`) : NaN
+}
+
+/**
+ * One channel's programmes as ONE schedule, in time order. The guides overlap a channel three ways:
+ * the same listing twice (Eurosport), the programme on air given a made-up hour that runs into the
+ * next (the provider's Russian channels: 20:45–21:45, then 21:00–21:15), and two different listings
+ * of one channel interleaved (myepg's beIN Sports 1 English). Runs of back-to-back programmes are
+ * kept longest first; a shorter run only fills the time still free, and each run's last programme,
+ * the one the made-up hour lands on, waits until every run's body is placed. A programme starting
+ * in time already taken is dropped; one running into a kept programme ends where it starts (if 5
+ * min or more is left). Blocks without a usable start and stop pass through as they are.
+ */
+export function oneSchedule(blocks: string[]): string[] {
+  type P = { b: string; s: number; e: number }
+  const ps: P[] = []
+  const keep: P[] = []
+  for (const b of blocks) {
+    const p = { b, s: xmltvAt(b, 'start'), e: xmltvAt(b, 'stop') }
+    ;(p.e > p.s ? ps : keep).push(p)
+  }
+  if (ps.length < 2) return blocks
+  ps.sort((x, y) => x.s - y.s || y.e - x.e)
+  const runs: P[][] = []
+  for (const p of ps) {
+    const run = runs.find((r) => Math.abs(r[r.length - 1].e - p.s) <= 120_000)
+    if (run) run.push(p)
+    else runs.push([p])
+  }
+  const span = (r: P[]) => r.reduce((n, p) => n + p.e - p.s, 0)
+  runs.sort((x, y) => span(y) - span(x))
+  const placed: P[] = []
+  const place = (p: P) => {
+    if (placed.some((k) => p.s >= k.s && p.s < k.e)) return
+    const end = Math.min(p.e, ...placed.filter((k) => k.s > p.s).map((k) => k.s))
+    if (end < p.e && end - p.s < 300_000) return
+    placed.push(end < p.e ? { b: p.b.replace(/\bstop="[^"]*"/, `stop="${xmltvTime(new Date(end))}"`), s: p.s, e: end } : p)
+  }
+  for (const r of runs) r.slice(0, -1).forEach(place)
+  for (const r of runs) place(r[r.length - 1])
+  return [...placed, ...keep].sort((x, y) => (x.s || 0) - (y.s || 0)).map((p) => p.b)
+}
 
 /** Real myepg programmes, re-tagged to OUR channel tvg-ids (TiviMate maps by id). */
 export interface MyepgGuide {
@@ -1299,10 +1344,7 @@ export function buildEventEpg(
   // the right one showed the match before, so it is moved 3h earlier (+0200 -> +0500).
   const lateKeys = new Set<string>()
   const okKeys = new Set<string>()
-  const at = (block: string, attr: 'start' | 'stop') => {
-    const s = block.match(new RegExp(`\\b${attr}="(\\d{4})(\\d\\d)(\\d\\d)(\\d\\d)(\\d\\d)(\\d\\d) ([+-]\\d\\d)(\\d\\d)"`))
-    return s ? Date.parse(`${s[1]}-${s[2]}-${s[3]}T${s[4]}:${s[5]}:${s[6]}${s[7]}:${s[8]}`) : NaN
-  }
+  const at = xmltvAt
   const progKey = (block: string) => {
     const start = at(block, 'start')
     const title = block.match(/<title[^>]*>([^<]*)/)?.[1]
@@ -1385,8 +1427,17 @@ export function buildEventEpg(
     if (!gotProg.has(c.tvgId)) nameAsTitle(c)
   }
 
-  out.push('</tv>')
-  return out.join('\n')
+  // every channel's programmes as one schedule (channels declared first, as XMLTV wants)
+  const head = out.filter((l) => !l.startsWith('<programme'))
+  const byChannel = new Map<string, string[]>()
+  for (const l of out) {
+    if (!l.startsWith('<programme')) continue
+    const id = programmeChannel(l)
+    ;(byChannel.get(id) ?? byChannel.set(id, []).get(id)!).push(l)
+  }
+  for (const ps of byChannel.values()) for (const p of oneSchedule(ps)) head.push(p)
+  head.push('</tv>')
+  return head.join('\n')
 }
 
 /** Fetch the provider's full XMLTV guide; '' on any failure (best-effort). */
