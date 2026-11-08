@@ -1,5 +1,6 @@
 package com.mohamed3on.iptv.ui
 
+import kotlin.math.sqrt
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -753,7 +754,7 @@ private fun MoviesBrowse(
             }
             // Search, then Live TV in the corner: Up lands on Search as before, Right goes on to live (so does holding Back).
             if (kind == 2 && shownPage != BrowsePage.Search) Row(
-                Modifier.align(Alignment.TopEnd).padding(top = Space.safeY, end = EDGE),
+                Modifier.align(Alignment.TopEnd).padding(top = Space.safeY, end = EDGE + Space.s),
                 horizontalArrangement = Arrangement.spacedBy(Space.m),
             ) {
                 PageButton(
@@ -2035,7 +2036,7 @@ private fun TitleArt(title: String, logo: String?, modifier: Modifier = Modifier
     Box(modifier, contentAlignment = Alignment.BottomStart) {
         if (shown < 1f) Box(Modifier.graphicsLayer { alpha = 1f - shown; compositingStrategy = CompositingStrategy.ModulateAlpha }) { text() }
         art?.let { a ->
-            val scale = minOf(LOGO_MAX.width.value / a.width, LOGO_MAX.height.value / a.height)
+            val scale = minOf(LOGO_MAX.width.value / a.width, LOGO_MAX.height.value / a.height, sqrt(LOGO_AREA / (a.width * a.height)))
             androidx.compose.foundation.Image(
                 a, contentDescription = title, contentScale = ContentScale.Fit, alignment = Alignment.BottomStart,
                 modifier = Modifier.size((a.width * scale).dp, (a.height * scale).dp).graphicsLayer { alpha = shown; compositingStrategy = CompositingStrategy.ModulateAlpha },
@@ -2046,6 +2047,8 @@ private fun TitleArt(title: String, logo: String?, modifier: Modifier = Modifier
 
 /** The box a title's logo fits in: wide wordmarks run to its width, stacked ones to its height. */
 private val LOGO_MAX = DpSize(380.dp, 120.dp)
+/** At most this much ink (dp²), so a squarish logo (Bluey) weighs what a long wordmark (Interstellar) does instead of filling the box. */
+private const val LOGO_AREA = 16_000f
 
 /** A logo's answer: its picture ready to draw, or null when it didn't load or is too dark to read on ink. */
 private class LogoArt(val bitmap: ImageBitmap?)
