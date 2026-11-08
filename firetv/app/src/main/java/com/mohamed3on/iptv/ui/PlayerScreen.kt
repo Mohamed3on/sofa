@@ -41,6 +41,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,6 +80,7 @@ import com.mohamed3on.iptv.data.displayName
 import com.mohamed3on.iptv.data.NowNext
 import com.mohamed3on.iptv.data.shownTitle
 import com.mohamed3on.iptv.data.groupName
+import com.mohamed3on.iptv.data.isEventOnly
 import com.mohamed3on.iptv.data.liveNow
 import com.mohamed3on.iptv.data.RouteKind
 import com.mohamed3on.iptv.graph
@@ -175,7 +177,7 @@ private enum class Pick { MultiView, AddTile, ReplaceTile }
 
 @Composable
 private fun PlayerChrome(
-    feed: Feed,
+    arranged: Feed,
     session: StreamSession,
     audio: AudioTracks?,
     tiles: MultiView<ExoStreamPlayer>,
@@ -191,6 +193,13 @@ private fun PlayerChrome(
     val state by session.state.collectAsState()
     val guide by graph.sync.guide.collectAsState()
     val clock = rememberMinuteClock()
+    // Event-only feeds ("TNT Sports (event)") sit out of their groups while the guide has nothing on them, the one playing
+    // excepted; they come back when something is on. Read each minute, a new feed only when the set changes.
+    val events = remember(arranged) { eventOnlyFamilies(arranged) }
+    val idle by remember(arranged, guide) {
+        derivedStateOf(structuralEqualityPolicy()) { idleEvents(events, guide, clock.value, state.requested?.family) }
+    }
+    val feed = remember(arranged, idle) { if (idle.isEmpty()) arranged else arranged.copy(hidden = idle) }
     var layer by remember { mutableStateOf(Layer.None) }
     // What Up/Down walk: a Live now tune carries its list; a tune from a group carries none (its group).
     var zapContext by remember { mutableStateOf<List<Channel>?>(null) }
@@ -917,3 +926,17 @@ private fun HealthCorner(health: Health?, modifier: Modifier) = CornerNotice(hea
 }
 
 private val HEALTH_DOT = 10.dp
+
+/** Each family whose every feed is event-only, with the guide ids its feeds carry. */
+private fun eventOnlyFamilies(feed: Feed): Map<String, List<String>> =
+    feed.channels.groupBy { it.family }
+        .filterValues { feeds -> feeds.all(::isEventOnly) }
+        .mapValues { (_, feeds) -> feeds.map { it.tvgId }.filter(String::isNotEmpty).distinct() }
+
+/** The event-only families with nothing on in the guide at [nowSec], never [playing]; none while there is no guide. */
+private fun idleEvents(events: Map<String, List<String>>, guide: GuideDb?, nowSec: Long, playing: String?): Set<String> {
+    if (events.isEmpty() || guide == null) return emptySet()
+    // The guide can be swapped (and the old file closed) mid-read after a download.
+    val on = runCatching { guide.nowNextFor(events.values.flatten(), nowSec) }.getOrNull() ?: return emptySet()
+    return events.filter { (family, ids) -> family != playing && ids.none { on[it]?.now?.let { p -> !p.synthetic } == true } }.keys
+}

@@ -44,6 +44,8 @@ data class Feed(
     val realDebrid: String? = null,
     /** The TorBox API token, when the server has one: [TorBox] then stands in for Real-Debrid, every call from the stick. */
     val torbox: String? = null,
+    /** Families whose rows sit out of their groups for now (Favourites keeps them; Search and zap context don't use groups). */
+    @kotlinx.serialization.Transient val hidden: Set<String> = emptySet(),
 ) {
     private val byGroup by lazy { channels.groupBy { it.group } }
     @kotlinx.serialization.Transient private val rowsByGroup = java.util.concurrent.ConcurrentHashMap<String, List<Channel>>()
@@ -58,7 +60,8 @@ data class Feed(
      * channel, for TiviMate); a session fails over through the family by itself, so one row is enough.
      */
     fun channelsIn(group: String): List<Channel> = rowsByGroup.getOrPut(group) {
-        val rows = byGroup[group].orEmpty()
+        val all = byGroup[group].orEmpty()
+        val rows = if (hidden.isEmpty() || group == FAVOURITES) all else all.filter { it.family !in hidden }
         val best = rows.groupBy { it.family }.mapValues { (_, feeds) -> feeds.minBy { it.rank } }
         rows.distinctBy { it.family }.map { best.getValue(it.family) }
     }
@@ -77,6 +80,12 @@ data class Feed(
     fun familyMembers(family: String): List<Channel> =
         byFamily[family].orEmpty().sortedWith(compareBy({ it.rank }, { it.group != it.home })).distinctBy { it.id }
 }
+
+/** A feed the provider only lights for events: "TNT SPORTS (EVENT)", "(LIVE-EVENT)", "(EVENT ONLY)", "( SOLO EVENTOS)". */
+private val EVENT_ONLY = Regex("""\(\s*(?:live[- ]?)?events?(?:\s+only)?\s*\)|\(\s*solo\s+eventos\s*\)""", RegexOption.IGNORE_CASE)
+
+/** Whether [channel] is an event-only feed (not an event slot, whose name is the event itself). */
+fun isEventOnly(channel: Channel) = !channel.slot && EVENT_ONLY.containsMatchIn(channel.name)
 
 private val json = Json { ignoreUnknownKeys = true }
 
