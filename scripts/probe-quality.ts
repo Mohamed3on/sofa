@@ -27,7 +27,7 @@
 // every reading carries the day it was taken (`at`), and refresh first re-probes readings
 // older than STALE_DAYS (in playlist order), REPLACING them with what the feed shows now. A
 // below-marker result is chased back up by the gap pass on later runs; PPV/event feeds
-// are floored at their marker by realRes in lib/curation.ts, so an idle re-probe can't bury them.
+// are floored at their marker by channelPicture in lib/curation.ts, so an idle re-probe can't bury them.
 // A re-probe with NO signal proves nothing (dead feed, or a refused connection): the
 // reading stays due, and `tried` only moves it to the back of the queue so dead feeds
 // don't eat every night's budget.
