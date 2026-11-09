@@ -55,7 +55,7 @@ describe('app channel feed', () => {
     expect(tnt1.family).toBe(tnt2.family)
     expect([tnt1.rank, tnt2.rank]).toEqual([0, 1])
     expect(mainEvent.family).not.toBe(news.family)
-    expect(tnt2.q).toBe(3)
+    expect(tnt2.pic.q).toBe(3)
   })
 
   test("the backup provider's copy joins its channel's family last, on its own front and account", async () => {

@@ -23,14 +23,12 @@ data class Channel(
     val rank: Int,
     /** Probed video height, null when never measured. */
     val h: Int? = null,
-    /** Name-marker quality tier, 0–5. */
-    val q: Int = 0,
+    /** The server's effective picture: the one quality order its 🏆 groups and Live now share. */
+    val pic: Picture = Picture(),
     val fixture: Boolean = false,
     val badges: List<String> = emptyList(),
     /** The feed's bitrate in Mbps, measured while watching it; null when never measured. */
     val mbps: Float? = null,
-    /** The picture detail its bitrate leaves room for: 0 thin, 1 in between or never measured, 2 rich. */
-    val detail: Int = 1,
     /** The provider keeps letting this feed down (the server learns it from the watch log). */
     val flaky: Boolean = false,
     /** From outside the preferred regions: Live now lists it only when its picture holds up ([liveNow]). */
@@ -38,6 +36,17 @@ data class Channel(
 ) {
     val identity get() = ChannelIdentity(id, group)
 }
+
+/**
+ * A feed's effective picture, worked out by the server (lib/curation.ts channelPicture, which says how): height,
+ * fps, the detail its bitrate leaves room for (0 thin, 2 rich), audio (2 Atmos, 1 5.1), the name's marker tier (0–5).
+ */
+@Serializable
+data class Picture(val h: Int = 0, val fps: Float = 0f, val detail: Int = 1, val audio: Int = 0, val q: Int = 0)
+
+/** Better picture first, the server's byPicture. */
+val BETTER_PICTURE: Comparator<Picture> = compareByDescending<Picture> { it.h }.thenByDescending { it.fps }
+    .thenByDescending { it.detail }.thenByDescending { it.audio }.thenByDescending { it.q }
 
 @Serializable
 data class Feed(

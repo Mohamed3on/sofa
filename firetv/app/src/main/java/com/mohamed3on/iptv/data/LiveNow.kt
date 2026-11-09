@@ -65,17 +65,12 @@ fun Feed.liveNow(airing: List<Airing>): LiveNow {
 }
 
 /**
- * A match's channels: steady before ones the provider keeps letting down, then picture quality as measured
- * (height, fps, then the detail its bitrate leaves room for), the name's marker tier only between equals, then
- * language. Like the server's order: a "4K" name is mostly a 1080p feed, so unmeasured it counts as 1080p
- * (an event slot keeps its marker's height, since between matches it shows low filler).
+ * A match's channels as its 🏆 group orders them: always-on channels before event slots (an idle slot's marker
+ * can't be verified), steady before ones the provider keeps letting down, then the server's effective picture
+ * ([Picture]), then language.
  */
-private val PICTURE = compareByDescending<Channel> { height(it) }
-    .thenByDescending { c -> c.badges.firstNotNullOfOrNull { FPS.matchEntire(it)?.groupValues?.get(1)?.toInt() } ?: 0 }
-    .thenByDescending { it.detail }
-    .thenByDescending { it.q }
-private val BEST_FIRST = compareBy<Channel> { it.flaky }.then(PICTURE).thenBy { languageRank(it) }
-private fun height(c: Channel) = c.h ?: NOMINAL_HEIGHT[c.q]?.let { h -> if (c.slot) h else minOf(h, 1080) } ?: 0
+private val PICTURE = compareBy(BETTER_PICTURE) { c: Channel -> c.pic }
+private val BEST_FIRST = compareBy<Channel>({ it.slot }, { it.flaky }).then(PICTURE).thenBy { languageRank(it) }
 
 /**
  * A match's channels from outside the preferred regions only when 1080p or better and at least as good a
@@ -83,10 +78,8 @@ private fun height(c: Channel) = c.h ?: NOMINAL_HEIGHT[c.q]?.let { h -> if (c.sl
  */
 internal fun withinBar(channels: List<Channel>): List<Channel> {
     val worst = channels.filter { !it.abroad }.maxWithOrNull(PICTURE) ?: return channels
-    return channels.filter { !it.abroad || (height(it) >= 1080 && PICTURE.compare(it, worst) <= 0) }
+    return channels.filter { !it.abroad || (it.pic.h >= 1080 && PICTURE.compare(it, worst) <= 0) }
 }
-private val NOMINAL_HEIGHT = mapOf(5 to 2160, 4 to 1080, 3 to 720)
-private val FPS = Regex("""(\d+)fps""")
 
 /** English (UK and Ireland before the US), then Arabic, then German and Spanish, then the rest. */
 private fun languageRank(c: Channel) = when (feedFlag(c)) {

@@ -363,20 +363,31 @@ export const saneFps = (fps: number): number =>
 // same feed reads 540p25 one moment and 1080p50 the next, and the cache keeps the peak,
 // so their probe is capped at the 720p25 they mostly deliver — below every steady 1080p feed.
 const MOBILE = /\(MOBILE?\)|720P/i
-function realRes(streamId: number, markerQ: number, trustMarker: boolean, name: string): { h: number; fps: number } {
-  const nominal = markerQ >= 5 ? 2160 : markerQ === 4 ? 1080 : markerQ === 3 ? 720 : markerQ === 2 ? 540 : 360
-  const m = qualityOf(streamId)
-  if (!m) return { h: trustMarker ? nominal : Math.min(nominal, 1080), fps: 0 }
-  if (trustMarker && m.h < nominal) return { h: nominal, fps: 0 }
-  const r = { h: m.h, fps: saneFps(m.fps) }
-  return MOBILE.test(name) ? { h: Math.min(r.h, 720), fps: Math.min(r.fps, 25) } : r
+
+/** A feed's effective picture (channelPicture), compared by byPicture. */
+export interface Picture { h: number; fps: number; detail: number; audio: number; q: number }
+
+/**
+ * A feed's effective picture, the one quality order every server ordering and the app use: height and
+ * fps as above, then the picture detail its measured bitrate leaves room for (detailRank, between feeds
+ * of one height and fps), audio (Atmos over 5.1 over stereo: a centre channel carries the commentary, so
+ * a soundbar can lift it over the crowd), then the name's marker tier. Worked out once per feed, so a
+ * sort never reads the quality store mid-comparison.
+ */
+export function channelPicture(c: { streamId: number; name: string; q?: number; isEventSlot: boolean }): Picture {
+  const q = c.q ?? 2
+  const trustMarker = c.isEventSlot || EVENT_ONLY.test(c.name)
+  const nominal = q >= 5 ? 2160 : q === 4 ? 1080 : q === 3 ? 720 : q === 2 ? 540 : 360
+  const m = qualityOf(c.streamId)
+  const res = !m ? { h: trustMarker ? nominal : Math.min(nominal, 1080), fps: 0 }
+    : trustMarker && m.h < nominal ? { h: nominal, fps: 0 }
+    : MOBILE.test(c.name) ? { h: Math.min(m.h, 720), fps: Math.min(saneFps(m.fps), 25) }
+    : { h: m.h, fps: saneFps(m.fps) }
+  return { ...res, detail: detailRank(m), audio: audioRank(m), q }
 }
 
-// Atmos over 5.1 over stereo — breaks ties between equal-res/fps feeds (a centre channel
-// carries the commentary, so a soundbar can lift it over the crowd).
-const audio = (streamId: number): number => audioRank(qualityOf(streamId))
-// The picture detail the feed's measured bitrate leaves room for (detailRank) — between feeds of one height and fps, ahead of audio.
-const detail = (streamId: number): number => detailRank(qualityOf(streamId))
+/** Better picture first: height, fps, bitrate detail, audio, marker tier. */
+export const byPicture = (a: Picture, b: Picture) => b.h - a.h || b.fps - a.fps || b.detail - a.detail || b.audio - a.audio || b.q - a.q
 
 type Stream = LiveStream
 
@@ -418,7 +429,7 @@ const BACKUP_GROUP = /ᴮᴱ|ᴮᴷ|⁽ᴮᴷ⁾|\(BK\)|BACKUP/i
 const BEIN = /bein/i
 // Feeds that only carry signal during an event (beIN's 4K slots, mostly). They
 // idle or show low-res filler in between, so a probe below their marker is that
-// filler, not the feed — trust the marker instead (see realRes).
+// filler, not the feed — trust the marker instead (see channelPicture).
 export const EVENT_ONLY = /\(\s*EVENT\s*ONLY\s*\)/i
 // The provider stamps beIN MENA ids wrongly: Arabic beIN 1-9 feeds carry the English channels'
 // ids (beINSports3En.qa: there is no English beIN 3-9, so no guide has them), and a French feed
@@ -772,7 +783,7 @@ async function pullCuratedChannels(cfg: XtreamConfig): Promise<Channel[]> {
     .filter(([id, name]) => !keepSet.has(id) && (auto(name) || EXTRA_CATEGORIES?.test(name)))
     .map(([id]) => id)
 
-  type Item = { c: Channel; q: number; rh: number; rf: number; lang: number; region: number; backup: number; bein: number; nkey: string; ck: string; idx: number }
+  type Item = { c: Channel; q: number; pic: Picture; lang: number; region: number; backup: number; bein: number; nkey: string; ck: string; idx: number }
   const byBucket = new Map<string, Item[]>()
 
   const ids = [...keep, ...autoIds]
@@ -799,13 +810,12 @@ async function pullCuratedChannels(cfg: XtreamConfig): Promise<Channel[]> {
       const chBucket = home && id === 6 && RU_KIDS.test(name) ? B.kids : bucket
       // Feeds that only light up during a match (PPV slots, beIN's "(EVENT ONLY)"
       // 4K slots) keep their marker tier when probed low — that's idle filler.
-      const { h: rh, fps: rf } = realRes(s.stream_id, q, isEventSlot || EVENT_ONLY.test(name), name)
+      const pic = channelPicture({ streamId: s.stream_id, name, q, isEventSlot })
       // Event slots get a synthetic id served by /api/epg; others use provider EPG ids
       const tvgId = isEventSlot ? `ppv.${s.stream_id}` : beinEpgId(String(s.epg_channel_id ?? ''), name)
       const item: Item = {
         q,
-        rh,
-        rf,
+        pic,
         lang: languageRank(name),
         region: regionPref(name),
         backup,
@@ -835,7 +845,7 @@ async function pullCuratedChannels(cfg: XtreamConfig): Promise<Channel[]> {
     const items = byBucket.get(bucket)
     if (!items) continue
     // beIN first in the Arabic bucket, then by EFFECTIVE resolution/fps — the probed
-    // value where we have one, else the marker's nominal tier (realRes already makes
+    // value where we have one, else the marker's nominal tier (channelPicture already makes
     // that substitution), so an unprobed or idle "4K" feed still ranks as 4K while a
     // feed MEASURED at 720p stops outranking a measured 1080p50 one just because the
     // provider stamped "4K" on its name. A feed the provider keeps letting down (flakyRank) goes
@@ -847,7 +857,7 @@ async function pullCuratedChannels(cfg: XtreamConfig): Promise<Channel[]> {
     items.sort(
       (a, b) =>
         (isArabic ? a.bein - b.bein : 0) || (isKids ? a.lang - b.lang : 0) || flakyRank(a.c.streamId) - flakyRank(b.c.streamId) ||
-        b.rh - a.rh || b.rf - a.rf || detail(b.c.streamId) - detail(a.c.streamId) || audio(b.c.streamId) - audio(a.c.streamId) || b.q - a.q ||
+        byPicture(a.pic, b.pic) ||
         a.lang - b.lang || a.region - b.region || a.backup - b.backup ||
         a.nkey.localeCompare(b.nkey, 'en', { numeric: true }) || a.idx - b.idx,
     )
@@ -858,10 +868,10 @@ async function pullCuratedChannels(cfg: XtreamConfig): Promise<Channel[]> {
     // Kids holds every language: "DE: CARTOON NETWORK" is not a copy of the UK one (US and UK are one).
     const lang = (it: Item) => (isKids ? (it.c.name.match(FEED_PREFIX)?.[0] ?? '').replace(/^US/i, 'UK') : '')
     const bestRes = new Map<string, number>()
-    for (const it of items) bestRes.set(lang(it) + it.ck, Math.max(bestRes.get(lang(it) + it.ck) ?? 0, it.rh))
+    for (const it of items) bestRes.set(lang(it) + it.ck, Math.max(bestRes.get(lang(it) + it.ck) ?? 0, it.pic.h))
     const seen = new Map<string, number>()
     for (const it of items) {
-      if (it.rh < 1080 && (bestRes.get(lang(it) + it.ck) ?? 0) >= 1080) continue
+      if (it.pic.h < 1080 && (bestRes.get(lang(it) + it.ck) ?? 0) >= 1080) continue
       // Arabic bundles the same AD/StarzPlay channel at many quality tiers, so
       // collapse it tier-agnostically there; elsewhere keep tiers distinct.
       const key = lang(it) + (isArabic ? dedupeKey(it.c.name) : dedupeKey(it.c.name, it.q))
@@ -886,7 +896,8 @@ async function pullCuratedChannels(cfg: XtreamConfig): Promise<Channel[]> {
   // provider put on one of them, and myepg's guide lights up all of them.
   const sibKey = (c: Channel) => `${c.group}|${epgExactNorm(c.name)}`
   const sibId = new Map<string, string>()
-  for (const { c } of [...byBucket.values()].flat()) {
+  // In the provider's order, not the quality order the buckets are now in: a new reading must not change a channel's id.
+  for (const { c } of [...byBucket.values()].flat().toSorted((a, b) => a.idx - b.idx || a.c.streamId - b.c.streamId)) {
     if (!isRegular(c)) continue
     const k = sibKey(c)
     if (k && !sibId.has(k)) sibId.set(k, c.tvgId)
@@ -955,7 +966,7 @@ const OVERFLOW_S = 86_400
  * endpoint never sees them.
  */
 export function withCompetitionGroups(channels: Channel[], upcoming = new Map<string, Map<string, number>>(), now = Date.now()): Channel[] {
-  type Row = { c: Channel; rh: number; rf: number; lang: number; region: number; idx: number }
+  type Row = { c: Channel; pic: Picture; lang: number; region: number; idx: number }
   const byComp = new Map<string, Row[]>()
   channels.forEach((c, idx) => {
     // Provider-B feeds stay in their home group: the app reaches them through the family.
@@ -969,13 +980,10 @@ export function withCompetitionGroups(channels: Channel[], upcoming = new Map<st
       for (const [k, start] of upcoming.get(c.tvgId) ?? []) if (start < until) keys.add(k)
     }
     if (!keys.size) return
-    const { h: rh, fps: rf } = realRes(c.streamId, c.q ?? 2, c.isEventSlot || EVENT_ONLY.test(c.name), c.name)
-    const row: Row = { c, rh, rf, lang: languageRank(c.name), region: regionPref(c.name), idx }
+    const row: Row = { c, pic: channelPicture(c), lang: languageRank(c.name), region: regionPref(c.name), idx }
     for (const k of keys) (byComp.get(k) ?? byComp.set(k, []).get(k)!).push(row)
   })
-  // Better picture first: height, fps, bitrate detail, audio, marker tier.
-  const picture = (a: Row, b: Row) =>
-    b.rh - a.rh || b.rf - a.rf || detail(b.c.streamId) - detail(a.c.streamId) || audio(b.c.streamId) - audio(a.c.streamId) || (b.c.q ?? 0) - (a.c.q ?? 0)
+  const picture = (a: Row, b: Row) => byPicture(a.pic, b.pic)
   const groups: Channel[] = []
   for (const comp of COMPS) {
     const rows = byComp.get(comp.key)
@@ -998,7 +1006,7 @@ export function withCompetitionGroups(channels: Channel[], upcoming = new Map<st
     // channel's, or when the group has no in-region channel (TiviMate can't tell matches apart, so the group is the unit).
     const worst = listed.filter((r) => !isAbroad(r.c.group)).reduce<Row | undefined>((w, r) => (!w || picture(w, r) < 0 ? r : w), undefined)
     for (const r of listed) {
-      if (worst && isAbroad(r.c.group) && (r.rh < 1080 || picture(r, worst) > 0)) continue
+      if (worst && isAbroad(r.c.group) && (r.pic.h < 1080 || picture(r, worst) > 0)) continue
       groups.push({ ...r.c, group: comp.group, home: r.c.group })
     }
   }
@@ -1067,7 +1075,7 @@ const cutMatch = (block: string) => {
 }
 /** A <programme> block's start or stop in epoch ms; NaN when it has none. */
 const xmltvAt = (block: string, attr: 'start' | 'stop') => {
-  const s = block.match(attr === 'start' ? /\bstart="(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d) ([+-]\d\d)(\d\d)"/ : /\bstop="(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d) ([+-]\d\d)(\d\d)"/)
+  const s = block.match(attr === 'start' ? /\bstart="(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d) ?([+-]\d\d)(\d\d)"/ : /\bstop="(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d) ?([+-]\d\d)(\d\d)"/)
   return s ? Date.parse(`${s[1]}-${s[2]}-${s[3]}T${s[4]}:${s[5]}:${s[6]}${s[7]}:${s[8]}`) : NaN
 }
 
@@ -1373,7 +1381,7 @@ export function buildEventEpg(
     return !Number.isNaN(start) && title ? `${title.replace(/\s+/g, ' ').trim()}|${start}` : ''
   }
   const lessThree = (block: string) =>
-    block.replace(/\b(start|stop)="(\d{14}) ([+-])(\d\d)(\d\d)"/g, (_, k, ts, sign, hh, mm) => {
+    block.replace(/\b(start|stop)="(\d{14}) ?([+-])(\d\d)(\d\d)"/g, (_, k, ts, sign, hh, mm) => {
       const off = (sign === '-' ? -1 : 1) * (Number(hh) * 60 + Number(mm)) + 180
       const a = Math.abs(off)
       return `${k}="${ts} ${off < 0 ? '-' : '+'}${String(Math.floor(a / 60)).padStart(2, '0')}${String(a % 60).padStart(2, '0')}"`

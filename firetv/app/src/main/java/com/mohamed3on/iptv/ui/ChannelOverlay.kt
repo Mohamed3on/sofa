@@ -365,7 +365,9 @@ fun ChannelOverlay(
     val playing by rememberUpdatedState(current)
     val scope = rememberCoroutineScope()
 
-    val live by produceState<LiveNow?>(null, feed, guide) {
+    // Worked out while the list is open (and at once on opening), not each minute under a film or the bare picture.
+    val live by produceState<LiveNow?>(null, feed, guide, open) {
+        if (!open) return@produceState
         snapshotFlow { clock.value }.collectLatest { now ->
             // The guide can be swapped (and the old file closed) mid-read after a download: keep what is shown.
             value = withContext(Dispatchers.IO) {

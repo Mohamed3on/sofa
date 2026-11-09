@@ -83,6 +83,7 @@ import com.mohamed3on.iptv.data.NowNext
 import com.mohamed3on.iptv.data.shownTitle
 import com.mohamed3on.iptv.data.groupName
 import com.mohamed3on.iptv.data.isEventOnly
+import com.mohamed3on.iptv.data.LiveNow
 import com.mohamed3on.iptv.data.liveNow
 import com.mohamed3on.iptv.data.SameMatch
 import com.mohamed3on.iptv.data.RouteKind
@@ -135,6 +136,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
@@ -226,6 +229,7 @@ private fun PlayerChrome(
     var layer by remember { mutableStateOf(Layer.None) }
     // What Up/Down walk: a Live now tune carries its list; a tune from a group carries none (its group).
     var zapContext by remember { mutableStateOf<List<Channel>?>(null) }
+    val zapLock = remember { Mutex() }
     // The last zap's direction, for the banner's motion; null for a jump (a promoted tile).
     var down by remember { mutableStateOf<Boolean?>(true) }
     val focus = remember { FocusRequester() }
@@ -289,6 +293,13 @@ private fun PlayerChrome(
         layer = Layer.ChannelList
     }
 
+    /** Live now as it is: the guide can be swapped (and the old file closed) mid-read after a download. */
+    suspend fun currentLiveNow(): LiveNow? {
+        val g = guide
+        val now = System.currentTimeMillis() / 1000
+        return withContext(Dispatchers.IO) { runCatching { feed.liveNow(g?.airingMatches(now).orEmpty()) }.getOrNull() }
+    }
+
     fun perform(action: KeyAction) {
         when (action) {
             is KeyAction.Zap -> {
@@ -307,12 +318,7 @@ private fun PlayerChrome(
             KeyAction.OpenPanel -> layer = Layer.QuickPanel
             KeyAction.OpenRecent -> layer = Layer.Recent
             is KeyAction.LiveZap -> scope.launch {
-                val g = guide
-                val now = System.currentTimeMillis() / 1000
-                // The guide can be swapped (and the old file closed) mid-read after a download.
-                val live = withContext(Dispatchers.IO) {
-                    runCatching { feed.liveNow(g?.airingMatches(now).orEmpty()) }.getOrNull()
-                } ?: return@launch
+                val live = currentLiveNow() ?: return@launch
                 val matches = live.context
                 val from = session.state.value.requested
                 // From another channel showing a match, the step is from that match's row.
@@ -325,6 +331,19 @@ private fun PlayerChrome(
                 down = action.down
                 zapContext = live.contextFor(to)
                 session.zap(to, feed)
+            }
+            // One press at a time, so a quick second press steps from where the first landed.
+            is KeyAction.LiveStep -> scope.launch {
+                zapLock.withLock {
+                    val live = currentLiveNow() ?: return@launch
+                    val from = session.state.value.requested ?: return@launch
+                    if (live.context.isEmpty()) note = from.identity to "No matches on right now"
+                    // Nowhere to go in Live now: the channel's group, which Up/Down then follow.
+                    val (to, context) = live.zapStep(zapContext is SameMatch, from, action.down) ?: (action.orElse ?: return@launch run { bannerKick++ }) to null
+                    down = action.down
+                    zapContext = context
+                    session.zap(to, feed)
+                }
             }
             KeyAction.Close -> {
                 layer = Layer.None

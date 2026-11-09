@@ -18,7 +18,7 @@ const val TILE_CAP = 3
  */
 fun tileFeed(feed: Feed, channel: Channel): Channel {
     val members = feed.familyMembers(channel.family).ifEmpty { listOf(channel) }
-    return members.firstOrNull { it.h != null && it.h <= 1080 } ?: members.firstOrNull { it.q < 5 } ?: members.first()
+    return members.firstOrNull { it.h != null && it.h <= 1080 } ?: members.firstOrNull { it.pic.q < 5 } ?: members.first()
 }
 
 /** Full screen plays the channel's best feed: the picked row when it is the best, so a 🏆 pick keeps its group. */

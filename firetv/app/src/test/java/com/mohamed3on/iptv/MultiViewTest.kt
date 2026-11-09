@@ -2,6 +2,7 @@ package com.mohamed3on.iptv
 
 import com.mohamed3on.iptv.data.Channel
 import com.mohamed3on.iptv.data.Feed
+import com.mohamed3on.iptv.data.Picture
 import com.mohamed3on.iptv.data.ProviderRoute
 import com.mohamed3on.iptv.data.Route
 import com.mohamed3on.iptv.player.MultiView
@@ -39,8 +40,8 @@ private class FakeTilePlayer : TilePlayer {
 @OptIn(ExperimentalCoroutinesApi::class)
 class MultiViewTest {
     // Family "a": its best feed is 4K, then an HD one probed at 1080 (listed in another group).
-    private val a4k = Channel(id = 1, name = "A 4K", group = "G", family = "a", rank = 0, q = 5)
-    private val aHd = Channel(id = 2, name = "A HD", group = "H", family = "a", rank = 1, h = 1080, q = 3)
+    private val a4k = Channel(id = 1, name = "A 4K", group = "G", family = "a", rank = 0, pic = Picture(q = 5))
+    private val aHd = Channel(id = 2, name = "A HD", group = "H", family = "a", rank = 1, h = 1080, pic = Picture(1080, q = 3))
     private val b = Channel(id = 3, name = "B", group = "G", family = "b", rank = 0)
     private val c = Channel(id = 4, name = "C", group = "G", family = "c", rank = 0)
     private val d = Channel(id = 5, name = "D", group = "G", family = "d", rank = 0)

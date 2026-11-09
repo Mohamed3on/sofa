@@ -319,6 +319,10 @@ fun MoviesLayer(
     }
     val playing = nav.playing
     val pages = nav.pages
+    // A playing film or episode saves its place every 10 s: the screens hidden under it keep the places they
+    // showed and catch up once it ends, so their rows aren't rebuilt and recomposed through the film (#29).
+    val shownResume = heldWhile(playing != null, resume)
+    val shownNextUp = heldWhile(playing != null, nextUp)
     var failed by remember { mutableStateOf<SyncError?>(null) }
     var attempt by remember { mutableStateOf(0) }
     val refreshed = remember { booleanArrayOf(false) }
@@ -397,9 +401,9 @@ fun MoviesLayer(
         Box(Modifier.fillMaxSize()) {
             MoviesBrowse(
                 library = library,
-                resume = resume,
+                resume = shownResume,
                 history = history,
-                nextUp = nextUp,
+                nextUp = shownNextUp,
                 watched = watched,
                 failed = failed,
                 onRetry = { attempt++ },
@@ -426,7 +430,7 @@ fun MoviesLayer(
                         is LibraryPage.Cast -> PersonPage(page.person, watched, active, hidden, onOpen = nav::open, onBack = nav::back)
                         is LibraryPage.Title -> {
                             val title = page.movie
-                            val saved = resume.firstOrNull { it.title == title.titleId } ?: nextUp.firstOrNull { it.show.titleId == title.titleId }?.place()
+                            val saved = shownResume.firstOrNull { it.title == title.titleId } ?: shownNextUp.firstOrNull { it.show.titleId == title.titleId }?.place()
                             if (!title.titleId.isShow) FilmPage(
                                 film = title,
                                 openVersions = page.versions,
@@ -474,6 +478,15 @@ fun MoviesLayer(
         }
     }
 }
+
+/** [value], or while [hold] the one it had when [hold] began. */
+@Composable
+private fun <T> heldWhile(hold: Boolean, value: T): T {
+    val held = remember { Held(value) }
+    if (!hold) held.value = value
+    return held.value
+}
+private class Held<T>(var value: T)
 
 /** A row of the library: one group's titles. [progress] is every saved place, by title id. */
 private const val CONTINUE_ROW = "h|continue"

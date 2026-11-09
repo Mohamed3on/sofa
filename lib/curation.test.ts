@@ -1,8 +1,11 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
+import { rm } from 'node:fs/promises'
 import {
   KEEP,
   autoIncluded,
   bucketForCategory,
+  byPicture,
+  channelPicture,
   buildEventEpg,
   oneSchedule,
   chanKey,
@@ -352,5 +355,28 @@ describe('competition groups', () => {
     expect(saneFps(100)).toBe(50)
     expect(saneFps(50)).toBe(50)
     expect(saneFps(120)).toBe(0)
+  })
+})
+
+describe('effective picture', () => {
+  const env = { ...process.env }
+  const dir = `${import.meta.dir}/../.cache/test-picture`
+  afterEach(async () => {
+    process.env = { ...env }
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  // The app's Live now compares exactly this (AppChannel.pic), so its order and the 🏆 groups' are one.
+  test('MOBILE feeds cap at 720p25, event feeds keep their marker, q2 counts as 540, 50 fps beats 25', async () => {
+    const read = (h: number, fps: number) => ({ w: h * 16 / 9, h, fps, codec: 'h264', name: '' })
+    process.env.QUALITY_FILE = `${dir}/quality.json`
+    await Bun.write(process.env.QUALITY_FILE, JSON.stringify({ 1: read(1080, 50), 2: read(1080, 50), 3: read(540, 25), 4: read(1080, 25) }))
+    const pic = (streamId: number, name: string, q: number, isEventSlot = false) => channelPicture({ streamId, name, q, isEventSlot })
+    expect(pic(1, 'UK: TNT SPORTS 1 (MOBILE)', 4)).toMatchObject({ h: 720, fps: 25 })
+    expect(pic(3, 'AR: BEIN 4K (EVENT ONLY)', 5)).toMatchObject({ h: 2160, fps: 0 })
+    expect(pic(9, 'UK: SKY SPORTS', 2)).toMatchObject({ h: 540, fps: 0 })
+    expect(pic(9, 'UK: SKY SPORTS 4K', 5)).toMatchObject({ h: 1080, fps: 0 })
+    const order = [pic(4, 'B', 4), pic(2, 'A', 4), pic(1, 'C (MOBILE)', 4)].toSorted(byPicture).map((p) => [p.h, p.fps])
+    expect(order).toEqual([[1080, 50], [1080, 25], [720, 25]])
   })
 })

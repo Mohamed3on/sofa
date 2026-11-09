@@ -1,10 +1,10 @@
 // Builders for the Fire TV app's own feeds (/api/app/*). They read the same curated
 // channels and guide as the TiviMate feeds, so both apps always show the same thing.
 import { Database } from 'bun:sqlite'
-import { chanKey, COMPS, isAbroad, couldBeLiveMatch, curatedGuide, learnedCompetitions, replayAirings, teamWords, saneFps, unxml, type Channel } from './curation.js'
+import { chanKey, channelPicture, COMPS, isAbroad, couldBeLiveMatch, curatedGuide, learnedCompetitions, replayAirings, teamWords, saneFps, unxml, type Channel, type Picture } from './curation.js'
 import { VPN_HOST, type BackupConfig, type XtreamConfig } from './provider.js'
 import type { TitleMatch } from './crests.js'
-import { detailRank, medianMbps, qualityOf } from './quality.js'
+import { medianMbps, qualityOf } from './quality.js'
 import { flakyRank } from './flaky.js'
 
 export interface AppChannel {
@@ -20,17 +20,15 @@ export interface AppChannel {
   family: string
   /** Position in the family, best feed first (server quality order). */
   rank: number
-  /** Probed video height, null when never measured. */
+  /** Probed video height, null when never measured (the app's step down to a lighter feed reads it). */
   h: number | null
-  /** Name-marker quality tier (qualityScore). */
-  q: number
+  /** The effective picture (channelPicture), the order the server's groups use: the app ranks feeds by it instead of working one out. */
+  pic: Picture
   /** Event slot whose current name reads as a fixture. */
   fixture?: true
   badges: string[]
   /** The feed's bitrate in Mbps, measured while the app played it; absent when never measured. */
   mbps?: number
-  /** The picture detail its bitrate leaves room for (detailRank): 0 thin, 2 rich; absent for 1 (in between or never measured). */
-  detail?: number
   /** The provider keeps letting this feed down (flakyRank); absent when it doesn't. */
   flaky?: true
   /** From outside the preferred regions (a hidden 🌍 bucket): Live now lists it only when its picture holds up. */
@@ -103,11 +101,10 @@ export function buildAppFeed(cfg: XtreamConfig, channels: Channel[], backup?: Ba
         family,
         rank: members.get(family)!.indexOf(c.streamId),
         h: qualityOf(c.streamId)?.h ?? null,
-        q: c.q ?? 2,
+        pic: channelPicture(c),
         ...(c.isEventSlot && couldBeLiveMatch(c.name) ? { fixture: true as const } : {}),
         badges: badges(c.streamId),
         mbps: medianMbps(qualityOf(c.streamId)),
-        ...(detailRank(qualityOf(c.streamId)) !== 1 && { detail: detailRank(qualityOf(c.streamId)) }),
         ...(flakyRank(c.streamId) && { flaky: true as const }),
         ...(isAbroad(c.home ?? c.group) && { abroad: true as const }),
       }
