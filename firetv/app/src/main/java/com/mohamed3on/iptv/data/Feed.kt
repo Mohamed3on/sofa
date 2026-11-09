@@ -125,14 +125,16 @@ private val FEED_WORDS = setOf(
 private val ACRONYMS = setOf("DAZN", "ESPN", "UEFA", "FIFA", "MUTV", "LFCTV", "NBCSN")
 /** Short all-caps words that are words, not acronyms. */
 private val SHORT_WORDS = setOf("SKY", "ONE", "TWO", "TEN", "MAX", "MIX", "THE", "AND")
+/** Joining words of Spanish, French and Italian names, lower case after the first word ("LIGA DE CAMPEONES" → "Liga de Campeones"). */
+private val JOINING_WORDS = setOf("DE", "DEL", "LA", "LAS", "LOS", "EL", "LE", "LES", "DES", "DU", "DI", "DA")
 private val SPACES = Regex("\\s+")
 private val BALL_AS_O = Regex("(?<=[A-Z])⚽|⚽(?=[A-Z])")
 private val FPS_WORD = Regex("(?i)\\d+fps")
 private val CONNECTOR = Regex("^[&+/|·:-]+$")
 /** An event slot's name is fields between bars: "Next | Lorient - Brest | Ligue 1 | 2026-11-01 | 20:00 (GMT) | 8K EXCLUSIVE | GB: DAZN PPV 58". */
 private val SLOT_FIELDS = Regex("""\s+\|\s+""")
-/** Fields that say when or where rather than what: a date, a time, a quality pitch, the provider's own channel code. */
-private val SLOT_NOISE = Regex("""^(\d{4}-\d{2}-\d{2}|\d{1,2}:\d{2}\b.*|.*\bEXCLUSIVE\b.*|[A-Z]{2,3}:\s.*)$""")
+/** Fields that say when, where or for whom rather than what: a date (either way round), a time, a quality pitch, the provider's own channel code, "all". */
+private val SLOT_NOISE = Regex("""^(\d{4}-\d{2}-\d{2}|\d{2}-\d{2}-\d{4}|all|\d{1,2}:\d{2}\b.*|.*\bEXCLUSIVE\b.*|[A-Z]{2,3}:\s.*)$""")
 /** Names are cleaned once each: rows, tiles and the banner ask for the same few hundred over and over. */
 private val displayNames = java.util.concurrent.ConcurrentHashMap<String, String>()
 
@@ -154,15 +156,17 @@ private fun cleanName(raw: String): String {
     val fields = raw.split(SLOT_FIELDS)
     if (fields.size >= 3) fields.filterNot { SLOT_NOISE.matches(it.trim()) }.joinToString(" · ").takeIf { it.isNotBlank() }?.let { return it }
     val unsuper = { w: String -> w.map { c -> SUP_FROM.indexOf(c).let { if (it >= 0) SUP_TO[it] else c } }.joinToString("") }
-    val words = raw.replace(FEED_PREFIX, "").split(SPACES).mapNotNull { token ->
+    val words = raw.replace(FEED_PREFIX, "").split(SPACES).mapIndexedNotNull { i, token ->
         // a word spelled in superscript ("ᴬʳᵉⁿᵃ") arrives as "Arena"; markers ("ᴿᴬᵂ", "³⁸⁴⁰ᴾ") are dropped below
         val spelled = token.isNotEmpty() && token.all { it in SUP_FROM }
         val w = unsuper(token).replace(BALL_AS_O, "O").replace("⚽", "o")
         val letters = w.filter { it.isLetter() }
         when {
             w.isEmpty() || w.lowercase().trimEnd('+') in FEED_WORDS || FPS_WORD.matches(w) -> null
-            letters.isNotEmpty() && letters.all { it in 'A'..'Z' } && w !in ACRONYMS && (letters.length >= 4 || w in SHORT_WORDS) ->
-                w.lowercase().replaceFirstChar(Char::uppercase)
+            i > 0 && w in JOINING_WORDS -> w.lowercase()
+            letters.isNotEmpty() && letters.all { it in 'A'..'Z' } && w !in ACRONYMS && (letters.length >= 4 || w in SHORT_WORDS || w in JOINING_WORDS) ->
+                // the first letter, not the first character: "(LIVE-EVENT)" → "(Live-event)"
+                w.lowercase().let { l -> l.indexOfFirst(Char::isLetter).let { at -> l.replaceRange(at, at + 1, l[at].uppercase()) } }
             spelled -> w.replaceFirstChar(Char::uppercase)
             else -> w
         }

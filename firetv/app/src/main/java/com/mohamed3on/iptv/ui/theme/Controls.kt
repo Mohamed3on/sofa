@@ -19,6 +19,7 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalDensity
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.FloatState
+import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -132,6 +134,7 @@ val LocalStill = compositionLocalOf { false }
 fun FitText(text: String, style: TextStyle, modifier: Modifier = Modifier, color: Color = Color.Unspecified, active: Boolean = LocalFocused.current) {
     val reduced = LocalReducedMotion.current
     val width = remember { mutableFloatStateOf(0f) }
+    if (remember(text) { readsRtl(text) }) return RtlLine(text, style, modifier, color, width, scrolling = active && !reduced && !LocalStill.current)
     Text(
         text,
         style = style,
@@ -159,6 +162,54 @@ fun FitText(text: AnnotatedString, style: TextStyle, modifier: Modifier = Modifi
         modifier = modifier
             .fadeEnd(width)
             .then(if (active && !reduced && !LocalStill.current) Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1000, velocity = 30.dp) else Modifier),
+    )
+}
+
+/** Whether [text] reads right to left: its first strongly directed character is Arabic or Hebrew. */
+private fun readsRtl(text: String): Boolean {
+    var i = 0
+    while (i < text.length) {
+        val cp = text.codePointAt(i)
+        when (Character.getDirectionality(cp)) {
+            Character.DIRECTIONALITY_RIGHT_TO_LEFT, Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC -> return true
+            Character.DIRECTIONALITY_LEFT_TO_RIGHT -> return false
+        }
+        i += Character.charCount(cp)
+    }
+    return false
+}
+
+/** How fast a line scrolls the rest of itself into view, as basicMarquee's default. */
+private val LINE_SPEED = 30.dp
+
+/**
+ * [FitText] for a right-to-left line (an Arabic title): it starts at its right end, so at rest that end shows and the
+ * cut is faded on the left; while [scrolling] it moves through the rest after a second's pause, then starts over.
+ * basicMarquee always starts at a line's left end, which for these is where they finish.
+ */
+@Composable
+private fun RtlLine(text: String, style: TextStyle, modifier: Modifier, color: Color, width: MutableFloatState, scrolling: Boolean) {
+    val scroll = rememberScrollState()
+    val pxPerMs = with(LocalDensity.current) { LINE_SPEED.toPx() } / 1000f
+    LaunchedEffect(text, scrolling) {
+        scroll.scrollTo(0)
+        while (scrolling) {
+            delay(1_000)
+            val end = scroll.maxValue.takeIf { it in 1 until Int.MAX_VALUE } ?: return@LaunchedEffect
+            scroll.animateScrollTo(end, tween((end / pxPerMs).toInt(), easing = LinearEasing))
+            delay(1_000)
+            scroll.scrollTo(0)
+        }
+    }
+    Text(
+        text,
+        style = style,
+        color = color,
+        maxLines = 1,
+        softWrap = false,
+        onTextLayout = { width.floatValue = it.multiParagraph.width },
+        // reversed: scroll 0 shows the right end
+        modifier = modifier.fadeEnd(width, atLeft = true).horizontalScroll(scroll, enabled = false, reverseScrolling = true),
     )
 }
 
@@ -214,12 +265,12 @@ private fun Modifier.fadeBottom(scroll: ScrollState): Modifier = graphicsLayer {
 }
 
 /** Fades the last [FADE] of a line whose text ([textWidth] wide) runs past it. */
-private fun Modifier.fadeEnd(textWidth: FloatState): Modifier = graphicsLayer {
+private fun Modifier.fadeEnd(textWidth: FloatState, atLeft: Boolean = false): Modifier = graphicsLayer {
     compositingStrategy = if (textWidth.floatValue > size.width) CompositingStrategy.Offscreen else CompositingStrategy.Auto
 }.drawWithCache {
     val fade = FADE.toPx().coerceAtMost(size.width)
-    val from = size.width - fade
-    val brush = Brush.horizontalGradient(0f to Color.Black, 1f to Color.Transparent, startX = from, endX = size.width)
+    val from = if (atLeft) 0f else size.width - fade
+    val brush = Brush.horizontalGradient(0f to Color.Black, 1f to Color.Transparent, startX = if (atLeft) fade else from, endX = if (atLeft) 0f else size.width)
     onDrawWithContent {
         drawContent()
         if (textWidth.floatValue > size.width) drawRect(brush, Offset(from, 0f), Size(fade, size.height), blendMode = BlendMode.DstIn)

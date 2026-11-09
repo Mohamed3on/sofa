@@ -91,21 +91,34 @@ val LocalCrests = staticCompositionLocalOf<Map<String, Crests>> { emptyMap() }
 fun MatchCrests(title: String?) {
     val crests = title?.let { LocalCrests.current[it] } ?: return
     Row(horizontalArrangement = Arrangement.spacedBy(CREST_GAP), verticalAlignment = Alignment.CenterVertically) {
-        Crest(crests.home)
-        Crest(crests.away)
+        Crest(crests.home, name = crests.homeName)
+        Crest(crests.away, name = crests.awayName)
     }
 }
 
-/** One crest, [size] on a faint chip [Space.xs] larger, so a dark crest still reads on the scrim. */
+/**
+ * One crest, [size] on a faint chip [Space.xs] larger, so a dark crest still reads on the scrim. With none (or one that
+ * fails to load) the chip shows the team's initials from [name], like a channel's monogram.
+ */
 @Composable
-internal fun Crest(url: String?, size: Dp = CREST, modifier: Modifier = Modifier) {
+internal fun Crest(url: String?, size: Dp = CREST, modifier: Modifier = Modifier, name: String? = null) {
     val context = LocalPlatformContext.current
     val density = LocalDensity.current
     val request = remember(url) { url?.let { with(density) { ImageRequest.Builder(context).data(it).size(size.roundToPx()).build() } } }
+    var failed by remember(url) { mutableStateOf(false) }
     Box(modifier.size(size + Space.xs).background(Palette.tile, RoundedCornerShape(Radius.chip)), contentAlignment = Alignment.Center) {
-        if (request != null) AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size))
+        if ((request == null || failed) && name != null) {
+            val style = remember(size, density) { Type.caption.copy(color = Palette.textSecondary, fontSize = with(density) { (size * 0.45f).toSp() }) }
+            Text(remember(name) { initials(name) }, style = style, maxLines = 1)
+        }
+        if (request != null) AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Fit, onError = { failed = true }, modifier = Modifier.size(size))
     }
 }
+
+/** A team's initials: the first letters of its first and last words ("Atlético Madrid" → "AM", "Arsenal" → "A"). */
+private fun initials(name: String): String =
+    name.split(' ').mapNotNull { word -> word.firstOrNull { it.isLetterOrDigit() } }
+        .let { if (it.size > 1) listOf(it.first(), it.last()) else it }.joinToString("") { it.uppercase() }
 
 /** Each 🏆 group's logo for dark grounds (Feed.compLogos); empty outside the live screen. */
 val LocalCompLogos = staticCompositionLocalOf<Map<String, String>> { emptyMap() }

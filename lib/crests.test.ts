@@ -15,6 +15,7 @@ test('a match title gives its two teams, home first, whatever the broadcaster wr
   expect(teams('Live Serie A Fiorentina v Juventus')).toEqual(['fiorentina', 'juventus'])
   expect(teams('Live: Bundesliga - SC Freiburg - 1. FC Union Berlin ᴸᶦᵛᵉ')).toEqual(['freiburg', 'union berlin'])
   expect(teams('Live PL: Ipswich Town - AFC Bournemouth, 10. Spieltag - Ipswich Town - Bournemouth')).toEqual(['ipswich town', 'bournemouth'])
+  expect(teams('UEFA Champions League -- Atlético Madrid vs Bayern')).toEqual(['atletico madrid', 'bayern munich'])
   expect(teams('Bundesliga Clubs - SC Freiburg')).toBeUndefined()
   expect(teams('PREMIER LEAGUE LIVE')).toBeUndefined()
 })

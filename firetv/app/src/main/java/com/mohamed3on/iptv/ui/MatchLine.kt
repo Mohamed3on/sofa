@@ -15,8 +15,8 @@ import androidx.compose.ui.platform.LocalDensity
 import kotlin.math.roundToInt
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Text
 import com.mohamed3on.iptv.data.Channel
@@ -69,24 +69,54 @@ private val scoreStyle = Type.display.tabular
 
 private fun MatchState.score() = "$hs–$away"
 
-/** "Man Utd 4–4 Aston Villa", home first; only the score in tabular figures, and "v" before kick-off. */
-private fun fixture(m: Match) = buildAnnotatedString {
-    append(m.crests.homeName.orEmpty())
-    append(' ')
-    if (m.state.state == "pre") append('v') else withStyle(scoreSpan) { append(m.state.score()) }
-    append(' ')
-    append(m.crests.awayName.orEmpty())
+/**
+ * "Man Utd 4–4 Aston Villa", home first: the score (or "v" before kick-off) in tabular figures, never cut. The names
+ * share what is left: each whole when both fit, else the longer gives way first, down to half each, faded where cut.
+ */
+@Composable
+private fun Fixture(match: Match, style: TextStyle, modifier: Modifier = Modifier) {
+    val middle = if (match.state.state == "pre") "v" else match.state.score()
+    val middleStyle = remember(style) { style.merge(scoreSpan) }
+    Layout(
+        contents = listOf(
+            { FitText(match.crests.homeName.orEmpty(), style) },
+            { Text(middle, style = middleStyle, maxLines = 1, softWrap = false) },
+            { FitText(match.crests.awayName.orEmpty(), style) },
+        ),
+        modifier = modifier,
+    ) { (home, mid, away), constraints ->
+        val gap = Space.xs.roundToPx()
+        val m = mid.first().measure(Constraints())
+        val hw = home.first().maxIntrinsicWidth(Constraints.Infinity)
+        val aw = away.first().maxIntrinsicWidth(Constraints.Infinity)
+        val room = if (constraints.hasBoundedWidth) (constraints.maxWidth - m.width - 2 * gap).coerceAtLeast(0) else hw + aw
+        val half = room / 2
+        val homeMax = when {
+            hw + aw <= room || hw <= half -> hw
+            aw <= half -> room - aw
+            else -> half
+        }
+        val h = home.first().measure(Constraints(maxWidth = homeMax))
+        val a = away.first().measure(Constraints(maxWidth = (room - h.width).coerceIn(0, aw)))
+        val height = maxOf(h.height, m.height, a.height)
+        layout(h.width + m.width + a.width + 2 * gap, height) {
+            var x = 0
+            for (p in listOf(h, m, a)) {
+                p.placeRelative(x, (height - p.height) / 2)
+                x += p.width + gap
+            }
+        }
+    }
 }
 
 /** A known match on one line, the same everywhere: [67'] (crest) Man Utd 4–4 Aston Villa (crest). */
 @Composable
 fun MatchLine(match: Match, style: TextStyle, modifier: Modifier = Modifier) {
-    val text = remember(match) { fixture(match) }
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
         MatchPill(match.state)
-        Crest(match.crests.home)
-        FitText(text, style, Modifier.weight(1f, fill = false))
-        Crest(match.crests.away)
+        Crest(match.crests.home, name = match.crests.homeName)
+        Fixture(match, style, Modifier.weight(1f, fill = false))
+        Crest(match.crests.away, name = match.crests.awayName)
     }
 }
 
@@ -103,7 +133,7 @@ fun Matchup(match: Match, comp: String?) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
             val centre = Modifier.alignBy { it.measuredHeight / 2 }
-            Crest(match.crests.home, MATCHUP_CREST, centre)
+            Crest(match.crests.home, MATCHUP_CREST, centre, match.crests.homeName)
             FitText(match.crests.homeName.orEmpty(), Type.title, centre)
             val scored = match.state.state != "pre"
             Column(
@@ -115,7 +145,7 @@ fun Matchup(match: Match, comp: String?) {
                 MatchPill(match.state)
             }
             FitText(match.crests.awayName.orEmpty(), Type.title, centre)
-            Crest(match.crests.away, MATCHUP_CREST, centre)
+            Crest(match.crests.away, MATCHUP_CREST, centre, match.crests.awayName)
         }
         if (comp != null) CompName(comp, Type.caption)
     }

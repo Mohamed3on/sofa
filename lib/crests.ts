@@ -122,7 +122,7 @@ export function fixtureTeams(title: string): [string, string] | null {
   const tail = t.slice(t.lastIndexOf(':') + 1).trim()
   if (t.includes(':') && (tail.includes(' - ') || VERSUS.test(tail))) t = tail
   // A part runs to its first comma ("AFC Bournemouth, 10. Spieltag"); one with a colon left in is no team.
-  const parts = t.split(/\s+[-–—]\s+/).map((p) => p.split(',')[0].trim()).filter(Boolean)
+  const parts = t.split(/\s+(?:--|[-–—])\s+/).map((p) => p.split(',')[0].trim()).filter(Boolean)
   const versus = parts.find((p) => VERSUS.test(p))
   const teams = (versus ? versus.split(VERSUS) : parts.filter((p) => !NOT_TEAM.test(p))).slice(0, 2)
   if (teams.length !== 2 || teams.some((p) => p.includes(':'))) return null

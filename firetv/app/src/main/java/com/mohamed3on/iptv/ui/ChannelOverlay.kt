@@ -146,6 +146,7 @@ fun rowLines(channel: Channel, guide: NowNext): RowLines {
     return RowLines(name, now, next?.takeUnless { it.synthetic }, noGuide = false)
 }
 
+private val NO_GUIDE = NowNext(null, null)
 private val GROUPS_WIDTH = 260.dp
 private val CHANNELS_WIDTH = 540.dp
 private val GROUP_ROW_HEIGHT = 44.dp
@@ -190,6 +191,10 @@ private class ChannelItem(val channel: Channel, under: String = "", val compact:
 /** A Live now match the scoreboards know, as the header of the channels showing it; never focused, pinned while they are. */
 private class MatchItem(val entry: LiveEntry) : Item {
     override val key = "mh|${entry.programme!!.start}|${entry.title}"
+}
+/** Where a [MatchItem]'s channels end: an empty pinned header that pushes the match's out, so it never sits over the next match. */
+private class MatchEnd(head: MatchItem) : Item {
+    override val key = "${head.key}|end"
 }
 private class LiveItem(val entry: LiveEntry) : Item {
     override val key = entry.programme?.let { "m|${it.start}|${entry.title}" } ?: "s|${entry.via.name}"
@@ -239,6 +244,7 @@ private fun MutableList<Item>.addMatch(match: LiveEntry, known: Set<String>) {
         add(head)
         add(ChannelItem(match.tune, under = "${head.key}>", compact = true, zap = true))
         match.alsoOn.mapTo(this) { c -> ChannelItem(c, under = "${head.key}>", compact = true, zap = true) }
+        add(MatchEnd(head))
         return
     }
     val row = LiveItem(match)
@@ -988,7 +994,7 @@ fun ChannelOverlay(
                                     )
                                 }
                                 NoMatches -> Text("No matches on right now", style = Type.body, modifier = Modifier.padding(horizontal = Space.m, vertical = Space.m))
-                                is MatchItem -> {}
+                                is MatchItem, is MatchEnd -> {}
                                 SlotsHeading -> SectionTitle("Event channels · not confirmed")
                                 LiveHeading -> SectionTitle("Live now")
                                 ChannelsHeading -> SectionTitle("Channels")
@@ -1174,7 +1180,8 @@ internal fun ChannelRow(
     badges: Boolean = true,
     moving: Boolean = false,
 ) {
-    val lines = remember(channel, guide) { guide?.let { rowLines(channel, it) } }
+    // A channel without a guide id never gets a lookup: it has no guide, rather than lines held empty for good.
+    val lines = remember(channel, guide) { (guide ?: NO_GUIDE.takeIf { channel.tvgId.isEmpty() })?.let { rowLines(channel, it) } }
     val name = remember(channel.name) { displayName(channel.name) }
     RowFrame(channel, focus, onFocused, onClick) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -1217,9 +1224,10 @@ private fun LazyListScope.rowsOf(list: List<Item>, header: @Composable LazyItemS
         if (to > start) items(to - start, key = { list[start + it].key }, contentType = { list[start + it]::class }) { row(start + it, list[start + it]) }
     }
     list.forEachIndexed { i, item ->
-        if (item !is MatchItem) return@forEachIndexed
+        if (item !is MatchItem && item !is MatchEnd) return@forEachIndexed
         run(i)
-        stickyHeader(key = item.key, contentType = MatchItem::class) { header(i, item) }
+        if (item is MatchItem) stickyHeader(key = item.key, contentType = MatchItem::class) { header(i, item) }
+        else stickyHeader(key = item.key, contentType = MatchEnd::class) {}
         from = i + 1
     }
     run(list.size)

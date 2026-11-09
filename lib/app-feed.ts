@@ -227,7 +227,7 @@ export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now
   const crest = db.prepare('INSERT OR IGNORE INTO crests VALUES (?, ?, ?, ?, ?, ?, ?)')
   db.transaction(() => {
     rows.forEach((r, i) => {
-      if (!(r.stop > cutoff)) return
+      if (!(r.stop > cutoff) || r.stop <= r.start) return // gone, or a zero-length entry that never airs
       const rerun = replays.has(i)
       const comp = comps[i]
       const match = !rerun && couldBeLiveMatch(r.title)
