@@ -17,6 +17,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Text
 import com.mohamed3on.iptv.data.Channel
@@ -70,43 +71,55 @@ private val scoreStyle = Type.display.tabular
 private fun MatchState.score() = "$hs–$away"
 
 /**
- * "Man Utd 4–4 Aston Villa", home first: the score (or "v" before kick-off) in tabular figures, never cut. The names
- * share what is left: each whole when both fit, else the longer gives way first, down to half each, faded where cut.
+ * A match's home side, middle (score, "v") and away side in a row: the middle at its full width, never cut; the sides
+ * share what is left, each whole when both fit, else the wider gives way first, down to half each. The sides centre on
+ * one line, and the middle sits on it at [middleCentre] of its height (a score whose pill hangs below, by the score).
  */
 @Composable
-private fun Fixture(match: Match, style: TextStyle, modifier: Modifier = Modifier) {
-    val middle = if (match.state.state == "pre") "v" else match.state.score()
-    val middleStyle = remember(style) { style.merge(scoreSpan) }
-    Layout(
-        contents = listOf(
-            { FitText(match.crests.homeName.orEmpty(), style) },
-            { Text(middle, style = middleStyle, maxLines = 1, softWrap = false) },
-            { FitText(match.crests.awayName.orEmpty(), style) },
-        ),
-        modifier = modifier,
-    ) { (home, mid, away), constraints ->
-        val gap = Space.xs.roundToPx()
-        val m = mid.first().measure(Constraints())
-        val hw = home.first().maxIntrinsicWidth(Constraints.Infinity)
-        val aw = away.first().maxIntrinsicWidth(Constraints.Infinity)
-        val room = if (constraints.hasBoundedWidth) (constraints.maxWidth - m.width - 2 * gap).coerceAtLeast(0) else hw + aw
+private fun Sides(
+    home: @Composable () -> Unit,
+    middle: @Composable () -> Unit,
+    away: @Composable () -> Unit,
+    gap: Dp,
+    modifier: Modifier = Modifier,
+    middleCentre: (height: Int) -> Int = { it / 2 },
+) {
+    Layout(contents = listOf(home, middle, away), modifier = modifier) { (homes, mids, aways), constraints ->
+        val g = gap.roundToPx()
+        val m = mids.first().measure(Constraints())
+        val hw = homes.first().maxIntrinsicWidth(Constraints.Infinity)
+        val aw = aways.first().maxIntrinsicWidth(Constraints.Infinity)
+        val room = if (constraints.hasBoundedWidth) (constraints.maxWidth - m.width - 2 * g).coerceAtLeast(0) else hw + aw
         val half = room / 2
         val homeMax = when {
             hw + aw <= room || hw <= half -> hw
             aw <= half -> room - aw
             else -> half
         }
-        val h = home.first().measure(Constraints(maxWidth = homeMax))
-        val a = away.first().measure(Constraints(maxWidth = (room - h.width).coerceIn(0, aw)))
-        val height = maxOf(h.height, m.height, a.height)
-        layout(h.width + m.width + a.width + 2 * gap, height) {
-            var x = 0
-            for (p in listOf(h, m, a)) {
-                p.placeRelative(x, (height - p.height) / 2)
-                x += p.width + gap
-            }
+        val h = homes.first().measure(Constraints(maxWidth = homeMax))
+        val a = aways.first().measure(Constraints(maxWidth = (room - h.width).coerceIn(0, aw)))
+        val mc = middleCentre(m.height)
+        val line = maxOf(h.height / 2, a.height / 2, mc)
+        val height = line + maxOf(h.height - h.height / 2, a.height - a.height / 2, m.height - mc)
+        layout(h.width + m.width + a.width + 2 * g, height) {
+            h.placeRelative(0, line - h.height / 2)
+            m.placeRelative(h.width + g, line - mc)
+            a.placeRelative(h.width + g + m.width + g, line - a.height / 2)
         }
     }
+}
+
+/** "Man Utd 4–4 Aston Villa", home first: the score (or "v" before kick-off) in tabular figures, never cut ([Sides]). */
+@Composable
+private fun Fixture(match: Match, style: TextStyle, modifier: Modifier = Modifier) {
+    val middleStyle = remember(style) { style.merge(scoreSpan) }
+    Sides(
+        home = { FitText(match.crests.homeName.orEmpty(), style) },
+        middle = { Text(if (match.state.state == "pre") "v" else match.state.score(), style = middleStyle, maxLines = 1, softWrap = false) },
+        away = { FitText(match.crests.awayName.orEmpty(), style) },
+        gap = Space.xs,
+        modifier = modifier,
+    )
 }
 
 /** A known match on one line, the same everywhere: [67'] (crest) Man Utd 4–4 Aston Villa (crest). */
@@ -124,29 +137,37 @@ private val MATCHUP_CREST = 32.dp
 
 /**
  * A known match as the banner's heading, as a scorebug reads: crests flanking the short names, the score between them at
- * display size, centred on the names' line, with the clock's pill hanging under it; then its 🏆 competition.
+ * display size, centred on the names' line, with the clock's pill hanging under it; then its 🏆 competition. Long names
+ * give way as in [Sides]; the crests, score and pill never do.
  */
 @Composable
 fun Matchup(match: Match, comp: String?) {
-    // Everything in the row centres on the names' line; the score's column on its score alone, so the pill hangs below.
     val scoreHalf = with(LocalDensity.current) { (scoreStyle.lineHeight.toPx() / 2).roundToInt() }
+    val scored = match.state.state != "pre"
     Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-            val centre = Modifier.alignBy { it.measuredHeight / 2 }
-            Crest(match.crests.home, MATCHUP_CREST, centre, match.crests.homeName)
-            FitText(match.crests.homeName.orEmpty(), Type.title, centre)
-            val scored = match.state.state != "pre"
-            Column(
-                if (scored) Modifier.alignBy { scoreHalf } else centre,
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(Space.xs),
-            ) {
-                if (scored) Text(match.state.score(), style = scoreStyle)
-                MatchPill(match.state)
-            }
-            FitText(match.crests.awayName.orEmpty(), Type.title, centre)
-            Crest(match.crests.away, MATCHUP_CREST, centre, match.crests.awayName)
-        }
+        Sides(
+            home = {
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
+                    Crest(match.crests.home, MATCHUP_CREST, name = match.crests.homeName)
+                    FitText(match.crests.homeName.orEmpty(), Type.title, Modifier.weight(1f, fill = false))
+                }
+            },
+            middle = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    if (scored) Text(match.state.score(), style = scoreStyle)
+                    MatchPill(match.state)
+                }
+            },
+            away = {
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
+                    FitText(match.crests.awayName.orEmpty(), Type.title, Modifier.weight(1f, fill = false))
+                    Crest(match.crests.away, MATCHUP_CREST, name = match.crests.awayName)
+                }
+            },
+            gap = Space.m,
+            // the score's own line on the names' line, so the pill hangs below it
+            middleCentre = { if (scored) scoreHalf else it / 2 },
+        )
         if (comp != null) CompName(comp, Type.caption)
     }
 }
