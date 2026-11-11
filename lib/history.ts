@@ -327,8 +327,11 @@ export async function watchlistRuntimes(h: Kept): Promise<Record<string, number>
   }))
 }
 
-/** [ids] shortest runtime first ([Kept.runtimes]); unknown ones last, in their order. */
-const byRuntime = (h: Kept | null, ids: string[]) => ids.slice().sort((a, b) => (h?.runtimes?.[a] || 1e9) - (h?.runtimes?.[b] || 1e9))
+/** [ids] shortest runtime first ([Kept.runtimes], else the library's for titles added since the nightly kept theirs); unknown ones last, in their order. */
+const byRuntime = (h: Kept | null, k: Known, ids: string[]) => {
+  const rt = (id: string) => h?.runtimes?.[id] || k.titles.get(id)?.rt || k.rt?.(id) || 1e9
+  return ids.slice().sort((a, b) => rt(a) - rt(b))
+}
 
 /** [h] with [title] put on the Watchlist first ([on], its runtime kept so the row, shortest first, places it at once) or taken off. */
 export const withWatchlist = (h: Kept, title: string, on: boolean, runtime?: number): Kept =>
@@ -382,7 +385,7 @@ export async function historyAnswer(h: Kept | null, local: string[], k: Known) {
   })
   const list = async (ids: string[]) => (await pool(ids, 8, title)).filter((t): t is LibTitle => !!t)
   const [watchlist, shows] = await Promise.all([
-    list(byRuntime(h, watchlistOf(h)).slice(0, ROW_CAP * 2)),
+    list(byRuntime(h, k, watchlistOf(h)).slice(0, ROW_CAP * 2)),
     pool(next, 8, (n) => title(n.show)),
   ])
   return {
