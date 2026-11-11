@@ -55,6 +55,7 @@ for (const url of (process.env.EPG_URLS ?? '').split(',').map((s) => s.trim()).f
 const COUNTRIES: Record<string, string[]> = {
   '🏴 Sky Sports & UK Sports': ['uk', 'ie'], '🇩🇪 German Sports': ['de', 'at', 'ch'], '🇪🇸 Spanish Sports': ['es'],
   '🇮🇹 Italian Sports': ['it'], '🇫🇷 French Sports': ['fr'], '🇷🇺 Russian Channels': ['ru'],
+  '🇩🇪 German Channels': ['de'],
 }
 // Shortlist: same channel numbers (and country), then guide channels listing our name as an
 // alias, then the closest names by letter trigrams.

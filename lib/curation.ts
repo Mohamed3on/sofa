@@ -132,6 +132,8 @@ export const KEEP: number[] = [
   1954, // FR| LIGUE1+ ◉
   // Russian channels (general entertainment, isolated in their own group)
   6,    // RU| RUSSIAN HD/4K
+  // German channels (ARD, ZDF, RTL, Sat.1… general entertainment, their own group)
+  186,  // DE| GENERAL HD/4K
   // Kids (live) — one provider category per language. There's no dedicated RU kids
   // category, so Russian kids are pulled by name out of category 6 (see RU_KIDS).
   304,  // UK| KIDS HD/RAW (English)
@@ -164,6 +166,7 @@ const B = {
   plAbroad: '🌍 Premier League abroad',
   fbReplay: '📼 Football — Replays',
   ru: '🇷🇺 Russian Channels',
+  deTv: '🇩🇪 German Channels',
   // Every language's kids channels in one group, by language (English, Arabic, then the rest)
   kids: '🧒 Kids',
   kids247: '📺 24/7 Cartoons & Kids',
@@ -190,7 +193,7 @@ const CAT_BUCKET: Record<number, string> = {
   1952: B.fr, 1954: B.fr,
   1429: B.tennis, 1096: B.tennis, 1927: B.tennis,
   1139: B.ufc, 929: B.ufc, 903: B.ufc, 380: B.ufc,
-  6: B.ru,
+  6: B.ru, 186: B.deTv,
   304: B.kids, 490: B.kids, 105: B.kids, 42: B.kids, 334: B.kids,
   2063: B.kids247, 2064: B.kids247,
 }
