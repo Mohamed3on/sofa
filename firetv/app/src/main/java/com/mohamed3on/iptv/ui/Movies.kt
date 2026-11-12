@@ -211,6 +211,7 @@ import com.mohamed3on.iptv.ui.theme.TileScrim
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -394,7 +395,7 @@ fun MoviesLayer(
         val id = target.substringAfter(':').substringBefore('@')
         // play:<titleId>@<copyId> pins that copy first, as choosing it in Versions does.
         target.substringAfter('@', "").ifEmpty { null }?.let { copy -> graph.copyChoices.pin(id, copy).also { graph.films.rerank(id) } }
-        nav.reopen(verb, lib.find(id) ?: Movie(id = -1, name = id, group = "", titleId = id))
+        nav.reopen(verb, knownTitle(id, lib, resume, nextUp) ?: Movie(id = -1, name = id, group = "", titleId = id))
     }
 
     CompositionLocalProvider(LocalLibrary provides LibraryKind.Movies) {
@@ -2478,6 +2479,11 @@ private fun ShowPage(
         failed = false
         // Fresh on opening, so a new episode shows; the kept copy (if any) is on screen meanwhile.
         sync.showOf(show, fresh = true).onSuccess { data = it }.onFailure { if (data == null) failed = true }
+        // Asked with no network (a wake from sleep, a Wi-Fi drop): asked again once it is back, not left on the error.
+        if (data == null && !graph.network.online.value) {
+            graph.network.online.first { it }
+            attempt++
+        }
     }
     val episodes = data?.episodes
     val lines = remember(episodes) {

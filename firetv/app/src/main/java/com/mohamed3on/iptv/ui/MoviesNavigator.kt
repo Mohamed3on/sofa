@@ -227,11 +227,22 @@ internal fun upNextOf(library: Catalog?, resume: List<Resume>, nextUp: List<Next
     if (library == null) return emptyList<Pair<Movie, Resume>>() to emptyList()
     val since = now - RECENT_DAYS * 86_400_000L
     val sinceDay = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate().minusDays(RECENT_DAYS).toString()
-    val all = resume.map { r ->
-        val lib = library.find(r.title)
-        Triple(r.iptv?.let { if (lib != null) it.copy(lib = lib.lib, group = lib.group) else it } ?: lib ?: placeTitle(r), r, r.at >= since)
-    } + nextUp.map { n -> Triple(library.find(n.show.titleId) ?: n.show, n.place(), n.air >= sinceDay) }
+    val all = resume.map { r -> Triple(placeMovie(r, library), r, r.at >= since) } +
+        nextUp.map { n -> Triple(library.find(n.show.titleId) ?: n.show, n.place(), n.air >= sinceDay) }
     return all.filter { it.third }.map { it.first to it.second } to all.filterNot { it.third }.map { it.first }
+}
+
+/**
+ * [id] as Up next shows it, for a screen reopened by id (a launch's last screen): its saved place's title, else the
+ * library's, else a followed show's; null when the stick knows nothing of it. A title outside the library still has its name.
+ */
+internal fun knownTitle(id: TitleId, library: Catalog, resume: List<Resume>, nextUp: List<NextEpisode>): Movie? =
+    resume.firstOrNull { it.title == id }?.let { placeMovie(it, library) } ?: library.find(id) ?: nextUp.firstOrNull { it.show.titleId == id }?.show
+
+/** A saved place's title as last played (its provider id, for its episodes and IPTV copy) and as the library has it now; one played only from a debrid from its own name and poster (R21). */
+private fun placeMovie(r: Resume, library: Catalog): Movie {
+    val lib = library.find(r.title)
+    return r.iptv?.let { if (lib != null) it.copy(lib = lib.lib, group = lib.group) else it } ?: lib ?: placeTitle(r)
 }
 
 /** A title the provider doesn't carry, as its saved place names it: no provider id (negative, never asked about), so only its copies play it. */

@@ -52,9 +52,17 @@ class SofaServer(private val http: OkHttpClient, private val baseUrl: String, pr
 
     private fun request(path: String) = Request.Builder().url("$baseUrl/api/app/$path${if ('?' in path) '&' else '?'}t=$token")
 
+    /** A GET that got no response is asked once more a second later: a blip (Wi-Fi, the tunnel) otherwise strands a page on its error. */
     private fun <T> call(request: Request.Builder, notModified: T? = null, read: (Response) -> T): Result<T> {
+        val built = request.build()
+        return once(built, notModified, read).let {
+            if (it.exceptionOrNull() != SyncError.Offline || built.method != "GET") it else { Thread.sleep(1_000); once(built, notModified, read) }
+        }
+    }
+
+    private fun <T> once(request: Request, notModified: T?, read: (Response) -> T): Result<T> {
         val error = try {
-            http.newCall(request.build()).execute().use { res ->
+            http.newCall(request).execute().use { res ->
                 when {
                     res.code == 304 && notModified != null -> return Result.success(notModified)
                     !res.isSuccessful -> SyncError.Rejected(res.code)

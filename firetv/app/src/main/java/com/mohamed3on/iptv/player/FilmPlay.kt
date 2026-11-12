@@ -210,11 +210,12 @@ fun openFilmPlay(
     }
     // The display follows the copy playing: it keeps its mode while the next copy opens, and goes back once the play ends.
     val playback = session.state.map {
-        when (it.phase) {
+        val playback = when (it.phase) {
             FilmPhase.Playing -> Playback.Playing
             FilmPhase.Loading, FilmPhase.Starting -> Playback.Waiting
             FilmPhase.Stopped, FilmPhase.Ended, FilmPhase.Unavailable -> Playback.Stopped
         }
+        Showing(playback, it.copy?.id)
     }.distinctUntilChanged()
     val surface = PlaybackSurface(exo, window, playback, scope)
     val subtitles = SubtitleTracks(exo)

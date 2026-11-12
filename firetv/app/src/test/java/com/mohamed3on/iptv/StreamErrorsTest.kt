@@ -30,7 +30,7 @@ class StreamErrorsTest {
     @Test fun notFoundTimeoutsAndUnplayableBodiesMoveToTheNextFeed() {
         assertEquals(Recovery.NextFeed, http(404))
         assertEquals(Recovery.NextFeed, recovery(StreamFailure.Timeout))
-        assertEquals(Recovery.NextFeed, recovery(StreamFailure.Unplayable))
+        assertEquals(Recovery.NextFeed, recovery(StreamFailure.Unplayable("")))
     }
 
     // An unreachable host is the network, not the channel: no other feed would do better.
@@ -52,6 +52,6 @@ class StreamErrorsTest {
         assertEquals(StreamFailure.Timeout, StreamErrors.failureOf(source(IOException(), PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT)))
         assertEquals(StreamFailure.Unreachable, StreamErrors.failureOf(source(IOException(), PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED)))
         val garbled = ParserException.createForMalformedContainer(null, null)
-        assertEquals(StreamFailure.Unplayable, StreamErrors.failureOf(source(garbled, PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED)))
+        assertEquals(StreamFailure.Unplayable("ERROR_CODE_PARSING_CONTAINER_MALFORMED: ParserException"), StreamErrors.failureOf(source(garbled, PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED)))
     }
 }

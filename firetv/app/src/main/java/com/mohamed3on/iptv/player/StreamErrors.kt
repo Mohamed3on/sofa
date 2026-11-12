@@ -12,8 +12,12 @@ sealed interface StreamFailure {
     data object Timeout : StreamFailure
     /** No connection to the host at all: the network is down or DNS fails. */
     data object Unreachable : StreamFailure
-    /** Anything else: an empty or garbled body, a decoder failure. */
-    data object Unplayable : StreamFailure
+    /**
+     * Anything else: an empty or garbled body, a decoder failure. [why] is the player's error code and the classes of
+     * its causes ("ERROR_CODE_IO_UNSPECIFIED: HttpDataSourceException ← SocketException"), so the event log tells them
+     * apart; never their messages, which can hold the URL.
+     */
+    data class Unplayable(val why: String) : StreamFailure
     /** This file can't play here at all: an unsupported container or format, no playable audio, Dolby Vision profile 7. Permanent (KTD7). */
     data object Unsupported : StreamFailure
     /** No audio track of this file can play here; [audio] names the tracks' formats as the ranker does ("dts", "truehd"). Permanent too. */
@@ -33,7 +37,7 @@ object StreamErrors {
             in 500..599 -> Recovery.Backoff
             else -> Recovery.NextFeed
         }
-        StreamFailure.Timeout, StreamFailure.Unplayable, StreamFailure.Unsupported, is StreamFailure.NoAudio, StreamFailure.NoLanguage -> Recovery.NextFeed
+        StreamFailure.Timeout, is StreamFailure.Unplayable, StreamFailure.Unsupported, is StreamFailure.NoAudio, StreamFailure.NoLanguage -> Recovery.NextFeed
         // The network, not the channel: another feed would fail the same way. Retrying lets
         // playback come back by itself when the network does.
         StreamFailure.Unreachable -> Recovery.Backoff
@@ -52,7 +56,7 @@ object StreamErrors {
             error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> StreamFailure.Timeout
             error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED -> StreamFailure.Unreachable
             error.errorCode in UNSUPPORTED -> StreamFailure.Unsupported
-            else -> StreamFailure.Unplayable
+            else -> StreamFailure.Unplayable(generateSequence(error.cause) { it.cause }.joinToString(" ← ", prefix = "${error.errorCodeName}: ") { it.javaClass.simpleName })
         }
     }
 

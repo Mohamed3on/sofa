@@ -79,22 +79,26 @@ val Channel.isBackup get() = id >= BACKUP_ID
 fun Feed.streamUrl(kind: RouteKind, channel: Channel): String =
     backup?.takeIf { channel.isBackup }?.streamUrl(kind, channel.id - BACKUP_ID) ?: route.streamUrl(kind, channel.id)
 
-/** Whether the stick's default network is a VPN, kept current by a network callback. */
-class VpnMonitor(context: Context) {
+/** The stick's default network, kept current by a network callback: whether there is one ([online]) and whether it is a VPN ([vpn]). */
+class NetworkMonitor(context: Context) {
     private val cm = context.getSystemService(ConnectivityManager::class.java)
-    private val _active = MutableStateFlow(
-        cm.getNetworkCapabilities(cm.activeNetwork)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
-    )
-    val active: StateFlow<Boolean> = _active
+    private val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+    private val _vpn = MutableStateFlow(caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true)
+    private val _online = MutableStateFlow(caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true)
+    val vpn: StateFlow<Boolean> = _vpn
+    /** False from a network's loss (Wi-Fi dropping, the stick asleep) until the next one comes up. */
+    val online: StateFlow<Boolean> = _online
 
     init {
         cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
             override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
-                _active.value = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                _vpn.value = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                _online.value = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             }
 
             override fun onLost(network: Network) {
-                _active.value = false
+                _vpn.value = false
+                _online.value = false
             }
         })
     }

@@ -66,6 +66,7 @@ import androidx.media3.common.Player
 import kotlinx.coroutines.flow.map
 import com.mohamed3on.iptv.player.AudioTracks
 import com.mohamed3on.iptv.player.Playback
+import com.mohamed3on.iptv.player.Showing
 import com.mohamed3on.iptv.player.PlaybackSurface
 import com.mohamed3on.iptv.player.LiveQuality
 import com.mohamed3on.iptv.player.liveQuality
@@ -151,11 +152,12 @@ class MainActivity : ComponentActivity() {
                 val s = StreamSession(player, graph.route, this, SystemClock::elapsedRealtime)
                 // A zap, a reconnect or a problem keeps the display's mode; only a stopped session gives it back.
                 val signal = s.state.map {
-                    when (it.phase) {
+                    val playback = when (it.phase) {
                         Phase.Playing -> Playback.Playing
                         Phase.Stopped -> Playback.Stopped
                         else -> Playback.Waiting
                     }
+                    Showing(playback, it.feed?.id)
                 }
                 val shown = PlaybackSurface(player.exo, window, signal, this)
                 // What the stream really is, once its frame rate is measured: the banner shows it, and

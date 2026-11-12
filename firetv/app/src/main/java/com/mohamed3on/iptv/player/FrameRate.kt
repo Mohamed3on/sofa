@@ -57,19 +57,21 @@ private fun snapFps(fps: Float): Float? =
  * zap burst), the window asks for the display mode matching the stream's frame rate, e.g. 50Hz
  * for European sports. The TS streams don't declare a frame rate, so it's measured from the
  * frames as they render. Media3 already passes its own estimate to `Surface.setFrameRate`, the
- * secondary hint. While the picture is [Playback.Waiting] the mode stays; the preference is dropped
- * when playback is [Playback.Stopped] and on [detach].
+ * secondary hint. The rate is learnt once per stream ([Showing.stream]): a reconnect, reopen or
+ * seek of the same one doesn't learn it again, as a second reading 0.1% off the first (23.976 vs
+ * 24) switched the TV again and blanked it. While the picture is [Playback.Waiting] the mode
+ * stays; the preference is dropped when playback is [Playback.Stopped] and on [detach].
  */
 class FrameRate(
     private val window: Window,
     private val exo: ExoPlayer,
-    playback: Flow<Playback>,
+    showing: Flow<Showing>,
     scope: CoroutineScope,
 ) {
-    /** Presentation times of the current feed's frames; written on the playback thread. */
+    /** Presentation times of the current stream's frames; written on the playback thread. */
     private val samples = ArrayList<Long>()
     private val fps = MutableStateFlow<Float?>(null)
-    /** The current feed's frame rate as measured from its frames; null until measured. */
+    /** The current stream's frame rate as measured from its frames; null until measured. */
     val measured: StateFlow<Float?> get() = fps
 
     private val frames = VideoFrameMetadataListener { presentationTimeUs, _, format, _ ->
@@ -77,26 +79,34 @@ class FrameRate(
         val declared = format.frameRate.takeIf { it > 0 }?.let(::snapFps)
         if (declared != null) {
             fps.value = declared
+            Log.i(TAG, "learnt ${declared}fps, declared ${format.frameRate} (${format.sampleMimeType})")
             return@VideoFrameMetadataListener
         }
         synchronized(samples) {
             samples += presentationTimeUs
             if (samples.size >= SAMPLES) {
                 fps.value = measuredFps(samples)
+                Log.i(TAG, "learnt ${fps.value}fps, measured over ${samples.size} frames (${format.sampleMimeType})")
                 samples.clear()
             }
         }
     }
 
     private val job = scope.launch {
-        playback.collectLatest { state ->
-            if (state != Playback.Playing) {
+        var stream: Any? = null
+        showing.collectLatest { now ->
+            if (now.stream != stream) {
+                stream = now.stream
                 reset()
-                if (state == Playback.Stopped) prefer(0)
-                return@collectLatest
             }
-            delay(SETTLE_MS)
-            match(fps.filterNotNull().first())
+            when (now.playback) {
+                Playback.Stopped -> prefer(0)
+                Playback.Waiting -> {}
+                Playback.Playing -> {
+                    delay(SETTLE_MS)
+                    match(fps.filterNotNull().first())
+                }
+            }
         }
     }
 

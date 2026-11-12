@@ -19,7 +19,7 @@ import com.mohamed3on.iptv.data.RecentSearches
 import com.mohamed3on.iptv.data.ResumeStore
 import com.mohamed3on.iptv.data.TitleMigration
 import com.mohamed3on.iptv.data.TraktSync
-import com.mohamed3on.iptv.data.VpnMonitor
+import com.mohamed3on.iptv.data.NetworkMonitor
 import com.mohamed3on.iptv.data.WatchedStore
 import com.mohamed3on.iptv.data.Watchlist
 import com.mohamed3on.iptv.data.Marks
@@ -85,8 +85,8 @@ class AppGraph(context: Context) {
     /** The one HTTP client: feed sync now, Media3's OkHttp data source later. */
     val http = OkHttpClient()
     val prefs = PrefsStore(context.getSharedPreferences("iptv", Context.MODE_PRIVATE))
-    private val vpnActive = VpnMonitor(context).active
-    val route = Route(prefs, vpnActive, scope)
+    val network = NetworkMonitor(context)
+    val route = Route(prefs, network.vpn, scope)
     val history = WatchHistory(prefs)
     /** Favourites and each group's own channel order. */
     val lineup = Lineup(prefs)
@@ -104,7 +104,7 @@ class AppGraph(context: Context) {
     /** Carries the marks saved under provider ids over to title ids, once. */
     val migration = TitleMigration(prefs, resume, showResume, watchedMovies, watchedEpisodes)
     /** Typical film bandwidth per source, hour band and route (VPN on or off). */
-    val capacity = Capacity(prefs, vpn = { vpnActive.value })
+    val capacity = Capacity(prefs, vpn = { network.vpn.value })
     /** The Trakt watchlist with the owner's own changes applied at once (title page button, ☰ on a card). */
     val watchlist by lazy { Watchlist(titles, scope) }
     /** Watched marks and ratings, the owner's changes shown at once and written to Trakt (☰ on title pages and episodes). */
@@ -141,7 +141,7 @@ class AppGraph(context: Context) {
     /** "<service> premium has ended" shows once an app session, once both debrids are down. */
     val premiumEndedShown = java.util.concurrent.atomic.AtomicBoolean()
     /** Each title's copies, ranked and checked ahead of Play. Touch [setup] on the main thread first. */
-    val films by lazy { FilmCopies(titles::copies, debrid, copyChoices, capacity, { setup.profile.value }, scope, ip = { vpnActive.value }, linked = filmHeads::fetch) }
+    val films by lazy { FilmCopies(titles::copies, debrid, copyChoices, capacity, { setup.profile.value }, scope, ip = { network.vpn.value }, linked = filmHeads::fetch) }
     /** The head and index of a Real-Debrid file whose link was fetched ahead, served to the film player from memory. */
     val filmHeads by lazy { FilmHeads(http) }
 

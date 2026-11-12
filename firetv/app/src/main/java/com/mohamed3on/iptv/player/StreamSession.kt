@@ -95,7 +95,7 @@ class StreamSession(
         player.setListener(object : StreamPlayer.Listener {
             override fun onPlaying() = playing()
             override fun onEnded() {
-                if (attempt) if (_state.value.phase == Phase.Playing) stalled() else failed(StreamFailure.Unplayable)
+                if (attempt) if (_state.value.phase == Phase.Playing) stalled() else failed(StreamFailure.Unplayable("ended before playing"))
             }
             override fun onError(failure: StreamFailure) {
                 if (attempt) failed(failure)

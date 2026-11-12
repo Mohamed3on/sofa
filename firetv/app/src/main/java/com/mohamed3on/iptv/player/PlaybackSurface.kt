@@ -20,16 +20,22 @@ enum class Playback {
 }
 
 /**
+ * A player's [playback] of [stream] (a live feed's id, a film copy's id): a reconnect, reopen or seek of the same
+ * stream keeps what was learnt about it (its frame rate), a new stream learns its own.
+ */
+data class Showing(val playback: Playback, val stream: Any?)
+
+/**
  * Where a player meets the screen, the same for live TV and a film: the picture's [aspect], refresh-rate
- * switching ([FrameRate], following [playback]) and the [audio] tracks. Without a [window] the display
+ * switching ([FrameRate], following [showing]) and the [audio] tracks. Without a [window] the display
  * keeps its mode. Main thread only; [release] before the player goes.
  */
-class PlaybackSurface(private val exo: ExoPlayer, window: Window?, playback: Flow<Playback>, scope: CoroutineScope) {
+class PlaybackSurface(private val exo: ExoPlayer, window: Window?, showing: Flow<Showing>, scope: CoroutineScope) {
     private val shape = MutableStateFlow(0f)
     /** The picture's shape (width / height, pixel aspect included); 0 until known. */
     val aspect: StateFlow<Float> = shape
     val audio = AudioTracks(exo)
-    private val frameRate = window?.let { FrameRate(it, exo, playback, scope) }
+    private val frameRate = window?.let { FrameRate(it, exo, showing, scope) }
     /** The frame rate measured from the frames; null until measured. */
     val fps: StateFlow<Float?> = frameRate?.measured ?: MutableStateFlow(null)
 
