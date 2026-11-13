@@ -46,9 +46,11 @@ import java.util.concurrent.atomic.AtomicLong
  * HEVC seek decoding up to an exact frame takes seconds on the stick, and a step is ±10s anyway.
  * Its owner releases it. [onFileSize] hears the file's full size in bytes, from the first response that says.
  */
-fun moviePlayer(context: Context, http: OkHttpClient, heads: FilmHeads, load: FilmLoad = FilmLoad(), onFileSize: (Long) -> Unit = {}): ExoPlayer =
+fun moviePlayer(
+    context: Context, http: OkHttpClient, heads: FilmHeads, tvDolbyVision: () -> Boolean, load: FilmLoad = FilmLoad(), onFileSize: (Long) -> Unit = {},
+): ExoPlayer =
     ExoPlayer.Builder(context, FixedAudioCapabilities(context))
-        .setMediaSourceFactory(DefaultMediaSourceFactory(HeadSource.Factory(OkHttpDataSource.Factory(http).setTransferListener(FileSize(load.bytes, onFileSize)), heads), Dv7AsHevc()))
+        .setMediaSourceFactory(DefaultMediaSourceFactory(HeadSource.Factory(OkHttpDataSource.Factory(http).setTransferListener(FileSize(load.bytes, onFileSize)), heads), DvAsBase(tvDolbyVision)))
         .setLoadControl(
             DefaultLoadControl.Builder()
                 .setAllocator(load.allocator)
@@ -78,12 +80,25 @@ private class FixedAudioCapabilities(context: Context) : DefaultRenderersFactory
 }
 
 /**
- * Every container Media3 reads, with a Dolby Vision profile 7 track (UHD Blu-ray's dual layer) read as the HEVC
- * it is underneath: the stick's Dolby Vision decoder takes no profile 7 and shows black, while its HEVC
- * decoder plays the HDR10 base layer and skips the enhancement layer. Other profiles stay Dolby Vision (5 has no
- * HDR10 layer). Setters return this factory, not [base], so the wrapping survives DefaultMediaSourceFactory's set-up.
+ * How a video track is decoded: a Dolby Vision track as the HEVC it is underneath when the Dolby Vision decoder can't
+ * do it justice. Profile 7 (UHD Blu-ray's dual layer) always: the stick's Dolby Vision decoder takes none and shows
+ * black, while its HEVC decoder plays the HDR10 base layer and skips the enhancement layer. Profile 8 when the TV
+ * doesn't take Dolby Vision ([tvDolbyVision]): the decoder then converts every frame to HDR10 with per-frame
+ * metadata, and the whole picture flickered now and then (The Pitt S2's web copies), where the HDR10 (or HLG) base
+ * layer plays steadily and the TV maps it itself. Profile 5 stays Dolby Vision: it has no base layer to fall back to.
  */
-private class Dv7AsHevc(private val base: ExtractorsFactory = DefaultExtractorsFactory()) : ExtractorsFactory {
+fun decodedAs(format: Format, tvDolbyVision: Boolean): Format {
+    if (format.sampleMimeType != MimeTypes.VIDEO_DOLBY_VISION) return format
+    val profile = dolbyVisionProfile(format)
+    return if (profile == 7 || profile == 8 && !tvDolbyVision) format.buildUpon().setSampleMimeType(MimeTypes.VIDEO_H265).setCodecs(null).build()
+    else format
+}
+
+/**
+ * Every container Media3 reads, with each video track [decodedAs] the TV ([tvDolbyVision]) takes it. Setters return
+ * this factory, not [base], so the wrapping survives DefaultMediaSourceFactory's set-up.
+ */
+private class DvAsBase(private val tvDolbyVision: () -> Boolean, private val base: ExtractorsFactory = DefaultExtractorsFactory()) : ExtractorsFactory {
     override fun createExtractors() = wrap(base.createExtractors())
     override fun createExtractors(uri: Uri, responseHeaders: Map<String, List<String>>) = wrap(base.createExtractors(uri, responseHeaders))
     override fun setSubtitleParserFactory(subtitleParserFactory: SubtitleParser.Factory) = apply { base.setSubtitleParserFactory(subtitleParserFactory) }
@@ -102,11 +117,7 @@ private class Dv7AsHevc(private val base: ExtractorsFactory = DefaultExtractorsF
                 override fun track(id: Int, type: Int): TrackOutput {
                     val track = super.track(id, type)
                     return object : ForwardingTrackOutput(track) {
-                        override fun format(format: Format) = super.format(
-                            if (format.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION && dolbyVisionProfile(format) == 7) {
-                                format.buildUpon().setSampleMimeType(MimeTypes.VIDEO_H265).setCodecs(null).build()
-                            } else format,
-                        )
+                        override fun format(format: Format) = super.format(decodedAs(format, tvDolbyVision()))
                     }
                 }
             })
