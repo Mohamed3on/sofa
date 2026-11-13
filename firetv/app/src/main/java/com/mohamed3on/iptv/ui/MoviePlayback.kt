@@ -512,15 +512,15 @@ internal fun MoviePlayback(
                     buffered = { buffered.longValue },
                     seeking = target != null,
                     seekFrom = { seekFrom[0] },
-                    modifier = Modifier.onSizeChanged { controlsHeight.intValue = it.height }.slideFade({ words.value }, Edge.Bottom, reduced).padding(Space.safe),
+                    modifier = Modifier.onSizeChanged { controlsHeight.intValue = it.height }.slideFade({ words.value }, Edge.Bottom, reduced || asleep).padding(Space.safe),
                 )
             }
         }
 
         AnimatedVisibility(visible = asleep && !error && !panel, enter = EnterTransition.None, exit = ExitTransition.None, modifier = Modifier.fillMaxSize()) {
-            val ink = sleepReveal(asleep, reduced)
-            val words = sleepReveal(asleep, reduced, PAUSE_FADE_MS - PAUSE_WORDS_OUT_MS, delayMs = PAUSE_WORDS_OUT_MS)
-            PauseScreen(heading, plot, { ink.value }, { words.value }, reduced)
+            val ink = sleepReveal(asleep, reduced, quickExit = true)
+            val words = sleepReveal(asleep, reduced, PAUSE_FADE_MS - PAUSE_WORDS_OUT_MS, delayMs = PAUSE_WORDS_OUT_MS, quickExit = true)
+            PauseScreen(heading, plot, { ink.value }, { words.value })
         }
 
         // The corner: the next episode's card or a Skip button, above the controls while they show (on the panel spring).
@@ -719,19 +719,29 @@ private fun SkipButton(label: String, modifier: Modifier = Modifier) {
 /** A film paused this long without a key shows the pause screen. */
 private const val PAUSE_SCREEN_MS = 8_000L
 /** The controls hand over to the pause screen over this long, as one crossfade: a strong ease-out, moving at once and settling soft. */
-private const val PAUSE_FADE_MS = 450
+private const val PAUSE_FADE_MS = 300
 private val PAUSE_EASE = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
 /** The controls' words (and a paused subtitle line) leave in the handover's first this-long; the pause screen's arrive in the rest, so they never cross. */
-private const val PAUSE_WORDS_OUT_MS = 150
+private const val PAUSE_WORDS_OUT_MS = 100
+/** A key sends the pause screen off this fast: the press gets its answer at once. */
+private const val PAUSE_WAKE_MS = 200
 
 /**
  * [reveal], but going to sleep ([slow]) the controls leave and the pause screen arrives on one ease, timed in
  * milliseconds ([ms] after [delayMs]) so each layer keeps its own share of the handover: the ink deepens without a beat
- * of bright, the words take turns. A key still sends the pause screen off on the panel spring.
+ * of bright, the words take turns. With [quickExit] (the pause screen) a key sends it off in [PAUSE_WAKE_MS]. Nothing in
+ * the handover slides: a film holds the TV at its own 24 Hz, where movement steps and a fade stays smooth.
  */
 @Composable
-private fun AnimatedVisibilityScope.sleepReveal(slow: Boolean, reduced: Boolean, ms: Int = PAUSE_FADE_MS, delayMs: Int = 0): State<Float> = transition.animateFloat(
-    transitionSpec = { if (slow && !reduced) tween(ms, delayMs, PAUSE_EASE) else Motion.panel(reduced) },
+private fun AnimatedVisibilityScope.sleepReveal(slow: Boolean, reduced: Boolean, ms: Int = PAUSE_FADE_MS, delayMs: Int = 0, quickExit: Boolean = false): State<Float> = transition.animateFloat(
+    transitionSpec = {
+        when {
+            reduced -> Motion.panel(true)
+            slow -> tween(ms, delayMs, PAUSE_EASE)
+            quickExit && targetState == EnterExitState.PostExit -> tween(PAUSE_WAKE_MS, easing = PAUSE_EASE)
+            else -> Motion.panel()
+        }
+    },
     label = "sleep",
 ) { if (it == EnterExitState.Visible) 1f else 0f }
 
@@ -744,7 +754,7 @@ private val PAUSE_FOOT = Brush.verticalGradient(0.35f to Color.Transparent, 1f t
  * three lines of plot, over ink that darkens the paused picture; [ink] and [words] 0 → 1 bring each in, read while drawing.
  */
 @Composable
-private fun PauseScreen(heading: Heading, plot: String?, ink: () -> Float, words: () -> Float, reduced: Boolean) {
+private fun PauseScreen(heading: Heading, plot: String?, ink: () -> Float, words: () -> Float) {
     Box(Modifier.fillMaxSize().drawBehind {
         val a = ink().coerceIn(0f, 1f)
         drawRect(PAUSE_LEFT, alpha = a)
@@ -752,11 +762,9 @@ private fun PauseScreen(heading: Heading, plot: String?, ink: () -> Float, words
     }) {
         Column(
             Modifier.align(Alignment.BottomStart).padding(Space.safe).padding(bottom = Space.xxl).width(PROSE_WIDTH).graphicsLayer {
-                // A short rise, not a slide by its own height: a tall column travelling far reads slow at any speed.
-                val p = words().coerceIn(0f, 1f)
-                alpha = p
+                // A fade, no rise: a film holds the TV at its own 24 Hz, where movement steps and a fade stays smooth.
+                alpha = words().coerceIn(0f, 1f)
                 compositingStrategy = CompositingStrategy.ModulateAlpha
-                if (!reduced) translationY = (1f - p) * Space.xl.toPx()
             },
             verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
