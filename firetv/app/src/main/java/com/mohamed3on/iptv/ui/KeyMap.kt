@@ -158,7 +158,7 @@ data class FilmKeys(
     val skip: Boolean = false,
     /** The next episode's card shows over the credits: OK plays it, Back keeps the credits. */
     val card: Boolean = false,
-    /** The pause screen shows: any key only wakes the controls. */
+    /** The pause screen shows: OK and Play/Pause play, any other key only wakes the controls. */
     val asleep: Boolean = false,
 )
 
@@ -185,7 +185,7 @@ sealed interface FilmAction {
     data object NextEpisode : FilmAction
     /** Back on the next episode's card: keeps watching the credits. */
     data object DismissCard : FilmAction
-    /** A key on the pause screen: back to the controls, the key spent. */
+    /** A key on the pause screen other than OK or Play/Pause: back to the controls, the key spent. */
     data object Wake : FilmAction
     /** The player's key, nothing to do (a key's release, a held repeat). */
     data object Swallow : FilmAction
@@ -204,15 +204,20 @@ private const val FILM_REPEAT_MS = 100L
  * The film player's keys as a pure function: [held] is how long the key has been down, [sinceStep] the time since the
  * last step. Back peels one layer a press: the Unavailable card, a panel, a pending seek, the next episode's card, a
  * trial or notice, the controls, then the film. OK and Play/Pause seek a pending step, else pause and play; OK presses
- * the next episode's card or a Skip button while one shows. On the pause screen any key only wakes the controls.
+ * the next episode's card or a Skip button while one shows. On the pause screen OK and Play/Pause play, any other
+ * key only wakes the controls.
  */
 fun filmKey(code: Int, down: Boolean, repeat: Int, held: Long, sinceStep: Long, s: FilmKeys): FilmAction {
     val back = code == KeyEvent.KEYCODE_BACK
     if (back && s.error) return if (down) FilmAction.Leave else FilmAction.Swallow
     if (s.panel) return if (!back && code != KeyEvent.KEYCODE_MENU) FilmAction.Pass else if (down) FilmAction.ClosePanel else FilmAction.Swallow
     if (s.error) return FilmAction.Pass
-    if (s.asleep) return if (down && repeat == 0) FilmAction.Wake else FilmAction.Swallow
     val ok = code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER
+    if (s.asleep) return when {
+        !down || repeat > 0 -> FilmAction.Swallow
+        ok || code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_MEDIA_PLAY -> FilmAction.Play
+        else -> FilmAction.Wake
+    }
     val action = when (code) {
         KeyEvent.KEYCODE_BACK -> when {
             s.seeking -> FilmAction.DropSeek

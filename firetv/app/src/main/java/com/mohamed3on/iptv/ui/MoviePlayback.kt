@@ -15,14 +15,15 @@ import com.mohamed3on.iptv.player.SubtitleState
 import com.mohamed3on.iptv.player.at
 import com.mohamed3on.iptv.player.qualityLabels
 import androidx.activity.compose.LocalActivity
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
@@ -227,6 +228,19 @@ internal fun MoviePlayback(
     }
     // Paused is the session's answer (#21), whatever the player is doing.
     LaunchedEffect(Unit) { session.state.map { it.paused }.distinctUntilChanged().collect { ui.paused = it } }
+    // Each pause and play answers at the centre: the new state's mark, big, held a moment, then fading as it grows.
+    val flash = remember { Animatable(0f) }
+    var flashPaused by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        session.state.map { it.paused }.distinctUntilChanged().drop(1).collectLatest { p ->
+            flashPaused = p
+            flash.snapTo(1f)
+            delay(FLASH_HOLD_MS)
+            flash.animateTo(0f, Motion.panel(reduced))
+        }
+    }
+    // Paused, the picture dims at once, so the state reads from across the room before any mark does.
+    val dim by animateFloatAsState(if (ui.paused) 1f else 0f, Motion.panel(reduced), label = "dim")
     // firetv/check.sh (system/Check): each notice, and the subtitles that switch on (the copy's own or fetched).
     LaunchedEffect(Unit) {
         launch { session.state.map { it.notice }.distinctUntilChanged().collect { n -> n?.let { Check.log("notice", "kind" to it.toString().substringBefore('(')) } } }
@@ -419,6 +433,7 @@ internal fun MoviePlayback(
             factory = { SurfaceView(it).apply { keepScreenOn = true }.also(exo::setVideoSurfaceView) },
             modifier = Modifier.align(Alignment.Center).then(if (aspect > 0f) Modifier.aspectRatio(aspect) else Modifier.fillMaxSize()),
         )
+        Box(Modifier.fillMaxSize().drawBehind { if (dim > 0f) drawRect(Palette.ink, alpha = PAUSED_DIM * dim) })
         // A fetched file's line at the player's place, ten times a second; a new timing applies at once.
         val fetchedState by fetched.state.collectAsState()
         var line by remember { mutableStateOf<String?>(null) }
@@ -455,6 +470,19 @@ internal fun MoviePlayback(
         }
         val spin by animateFloatAsState(if (spinner) 1f else 0f, Motion.panel(), label = "buffering")
         if (spin > 0f) ActivityLine(Modifier.align(Alignment.Center).graphicsLayer { alpha = spin })
+
+        if (!panel && !error) Box(
+            Modifier
+                .align(Alignment.Center)
+                .graphicsLayer {
+                    alpha = flash.value
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
+                    if (!reduced) (1f + (1f - flash.value) * FLASH_GROW).let { scaleX = it; scaleY = it }
+                }
+                .size(FLASH_SIZE)
+                .background(Palette.ink.copy(alpha = 0.6f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) { StateMark({ if (flashPaused) 1f else 0f }, Modifier.size(FLASH_MARK)) }
 
         AnimatedVisibility(
             visible = controls && !error,
@@ -586,14 +614,9 @@ private fun Controls(
         if (quality.isNotEmpty()) FormatChips(quality)
         if (note != null) Text(note, style = Type.body)
         Row(horizontalArrangement = Arrangement.spacedBy(Space.l), verticalAlignment = Alignment.CenterVertically) {
-            // The pause mark stands where the time stopped, not alone at the title row's end.
-            AnimatedContent(
-                targetState = paused,
-                transitionSpec = { fadeIn(Motion.focus()) togetherWith fadeOut(Motion.focus()) },
-                label = "paused",
-            ) { p ->
-                if (p) PauseMark()
-            }
+            // The state's mark stands where the time runs or stopped, in a slot of its own size so nothing beside it moves.
+            val mark by animateFloatAsState(if (paused) 1f else 0f, Motion.focus(), label = "paused")
+            StateMark({ mark }, Modifier.size(INLINE_MARK))
             Text(elapsed, style = TIME_STYLE.copy(color = Palette.textPrimary))
             SeekBar(position, duration, buffered, seeking, seekFrom, Modifier.weight(1f))
             Text(left, style = TIME_STYLE)
@@ -794,11 +817,38 @@ private fun CountdownButton(label: String, drain: () -> Float, modifier: Modifie
     )
 }
 
+/** How dark the paused picture goes. */
+private const val PAUSED_DIM = 0.4f
+/** The centre mark holds this long before it fades, growing by [FLASH_GROW]. */
+private const val FLASH_HOLD_MS = 450L
+private const val FLASH_GROW = 0.25f
+private val FLASH_SIZE = 112.dp
+private val FLASH_MARK = DpSize(40.dp, 46.dp)
+private val INLINE_MARK = DpSize(20.dp, 24.dp)
+
+/** The state as a mark: a triangle while it plays, two bars while paused ([paused] 0 → 1 crossfades). */
 @Composable
-private fun PauseMark() {
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        repeat(2) { Box(Modifier.size(5.dp, 18.dp).background(Palette.textPrimary, androidx.compose.foundation.shape.RoundedCornerShape(1.dp))) }
-    }
+private fun StateMark(paused: () -> Float, modifier: Modifier) {
+    Box(modifier.drawWithCache {
+        val w = size.width
+        val h = size.height
+        val bar = Size(w * 0.32f, h)
+        val r = CornerRadius(w * 0.06f)
+        val triangle = Path().apply {
+            moveTo(w * 0.1f, 0f)
+            lineTo(w, h / 2)
+            lineTo(w * 0.1f, h)
+            close()
+        }
+        onDrawBehind {
+            val p = paused().coerceIn(0f, 1f)
+            if (p > 0f) {
+                drawRoundRect(Palette.textPrimary, size = bar, cornerRadius = r, alpha = p)
+                drawRoundRect(Palette.textPrimary, Offset(w - bar.width, 0f), bar, r, alpha = p)
+            }
+            if (p < 1f) drawPath(triangle, Palette.textPrimary, alpha = 1f - p)
+        }
+    })
 }
 
 private enum class PanelPage { Main, Version, Audio, Subtitles }

@@ -39,9 +39,10 @@ class FilmKeysTest {
         assertEquals("Back on the card keeps the credits", FilmAction.DismissCard, press(KeyEvent.KEYCODE_BACK, FilmKeys(card = true, controls = true)))
     }
 
-    @Test fun `on the pause screen any key only wakes the controls`() {
+    @Test fun `on the pause screen OK and Play-Pause play, any other key only wakes the controls`() {
         val asleep = FilmKeys(asleep = true, playing = false)
-        for (code in listOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_MENU)) assertEquals(FilmAction.Wake, press(code, asleep))
+        for (code in listOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)) assertEquals(FilmAction.Play, press(code, asleep))
+        for (code in listOf(KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_MENU)) assertEquals(FilmAction.Wake, press(code, asleep))
         assertEquals(FilmAction.Swallow, filmKey(KeyEvent.KEYCODE_DPAD_CENTER, false, 0, 0, 0, asleep))
     }
 }
