@@ -200,9 +200,9 @@ fun openFilmPlay(
     // Its loading bursts teach the typical bandwidth; every film is an IPTV copy until a debrid one plays.
     val load = FilmLoad()
     val meter = BandwidthMeter(graph.capacity)
-    val setup = graph.setup
-    val exo = moviePlayer(context, graph.http, graph.filmHeads, { Hdr.DolbyVision in setup.profile.value.hdr }, load) { fileBytes.compareAndSet(0, it) }
+    val exo = moviePlayer(context, graph.http, graph.filmHeads, load) { fileBytes.compareAndSet(0, it) }
     val film = ExoFilmPlayer(exo)
+    val setup = graph.setup
     val plan = graph.films.plan(title)
     val session = FilmSession(title, plan, film, graph.copyChoices, { setup.profile.value }, meter, iptvUrl, scope, System::currentTimeMillis, graph.telemetry::film)
     val fetched = SubtitleFetch(exo, graph.http, graph.titles, scope, { plan.state.value.answer?.copies?.originalLanguage }) {

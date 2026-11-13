@@ -168,7 +168,7 @@ fun audioFamily(audio: String): Correction? = when (audio) {
 }
 
 private fun judge(c: Copy, p: SetupProfile, mark: Mark?, language: String?, speaksWanted: Boolean?, typical: Float?, pinned: Boolean, learnt: Map<Correction, Long>): Ranked {
-    // Profile 7 plays as its HDR10 base layer (MoviePlayer's decodedAs): the stick decodes no profile 7 Dolby Vision.
+    // Profile 7 plays as its HDR10 base layer (MoviePlayer's Dv7AsHevc): the stick decodes no profile 7 Dolby Vision.
     val dv = "DV" in c.hdr && c.dvProfile != 7
     val hdr10 = "HDR10" in c.hdr || "HDR10+" in c.hdr || c.dvProfile == 7
     val shown = when {
