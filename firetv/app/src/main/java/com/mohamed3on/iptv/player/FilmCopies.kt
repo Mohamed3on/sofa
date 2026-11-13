@@ -187,6 +187,8 @@ class CopyPlan(
         val torrents = p.answer?.copies?.debrid ?: return null
         val ids = p.ranking?.copies.orEmpty()
             .filter { it.copy.id in torrents && it.copy.id !in p.debrid && (it.support != Support.Wont || it.pinned || it.copy.id == also) }.map { it.copy.id }
+            // [also] first: each debrid stops at the first ready copy, so a chosen copy lower down got no answer and couldn't start.
+            .sortedByDescending { it == also }
         if (ids.isEmpty()) {
             if (!p.debridChecked) _state.update { it.copy(debridChecked = true).settled() }
             return null

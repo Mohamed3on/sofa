@@ -88,4 +88,25 @@ class FilmCopiesTest {
         t += 2 * 60_000L
         assertNotSame(plan, films.plan("movie:1"))
     }
+
+    // The FLUX copy of The Pitt S2E9, chosen in Versions below copies not asked about yet, "can't start now" though TorBox held it.
+    @Test
+    fun `a chosen copy is asked about first, so one below a ready copy can start`() = runTest {
+        // Like Real-Debrid and TorBox: answers in order, stopping at the first ready copy.
+        val firstReady = object : Debrid {
+            override val status = MutableStateFlow(com.mohamed3on.iptv.data.DebridStatus("Fake"))
+            override suspend fun check(candidates: List<DebridCandidate>) = candidates.take(1).associateWith { DebridCheck.Ready(it.hash, "h/${it.hash}") }
+            override suspend fun link(ready: DebridCheck.Ready) = "https://rd.test/${ready.torrentId}"
+        }
+        val films = FilmCopies(
+            fetch = { Result.success(CopiesAnswer("movie:1", "en", copies = listOf(rd4k, rd4k.copy(hash = "bb", kbps = 6_000.0), rd4k.copy(hash = "cc", kbps = 4_000.0)))) },
+            debrid = firstReady, choices = CopyChoices(MapStore()), capacity = Capacity(MapStore()), setup = { tv }, scope = backgroundScope,
+        )
+        val plan = films.plan("movie:1")
+        advanceTimeBy(3_000)
+        runCurrent()
+        val chosen = plan.state.value.ranking!!.copies.map { it.copy }.last()
+        assertEquals("rd:cc:2", chosen.id)
+        assertEquals(DebridCheck.Ready("cc", "h/cc"), plan.check(chosen))
+    }
 }
