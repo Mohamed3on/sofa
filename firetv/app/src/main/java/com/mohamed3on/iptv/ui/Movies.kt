@@ -60,6 +60,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -123,6 +124,10 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.mohamed3on.iptv.data.Episode
 import com.mohamed3on.iptv.data.Feed
+import com.mohamed3on.iptv.data.Channel
+import com.mohamed3on.iptv.data.fixtureOf
+import com.mohamed3on.iptv.data.search
+import com.mohamed3on.iptv.data.searchNorm
 import com.mohamed3on.iptv.data.episodeUrl
 import com.mohamed3on.iptv.data.Movie
 import com.mohamed3on.iptv.data.MovieInfo
@@ -272,6 +277,8 @@ internal val LocalLibrary = staticCompositionLocalOf { LibraryKind.Movies }
 private const val WARM_REST_MS = 400L
 /** Search asks once typing pauses this long. */
 private const val SEARCH_DEBOUNCE_MS = 250L
+/** Live channels shown over a search's titles. */
+private const val LIVE_CAP = 12
 
 /**
  * Movies & Shows: one title-first library of films and shows over the still-playing live channel, which
@@ -293,6 +300,10 @@ fun MoviesLayer(
     onClose: () -> Unit,
     /** Live TV, full screen (the browsing screen's Live TV button). */
     onLive: () -> Unit,
+    /** The title the channel list's Search asked for, as it found it: one outside the library is known only there. */
+    asked: Movie?,
+    /** Tunes a channel Search found, leaving for live TV. */
+    onTune: (Channel) -> Unit,
 ) {
     val graph = LocalContext.current.graph
     val sync = graph.titles.library
@@ -398,7 +409,7 @@ fun MoviesLayer(
         val id = target.substringAfter(':').substringBefore('@')
         // play:<titleId>@<copyId> pins that copy first, as choosing it in Versions does.
         target.substringAfter('@', "").ifEmpty { null }?.let { copy -> graph.copyChoices.pin(id, copy).also { graph.films.rerank(id) } }
-        nav.reopen(verb, knownTitle(id, lib, resume, nextUp) ?: Movie(id = -1, name = id, group = "", titleId = id))
+        nav.reopen(verb, knownTitle(id, lib, resume, nextUp) ?: asked?.takeIf { it.titleId == id } ?: Movie(id = -1, name = id, group = "", titleId = id))
     }
 
     CompositionLocalProvider(LocalLibrary provides LibraryKind.Movies) {
@@ -424,6 +435,8 @@ fun MoviesLayer(
                 onStartOver = { nav.resume(it, fromStart = true) },
                 onBack = ::leave,
                 onLive = onLive,
+                feed = feed,
+                onTune = onTune,
             )
             pages.forEachIndexed { i, page ->
                 key(i, page) {
@@ -572,6 +585,8 @@ private fun MoviesBrowse(
     onStartOver: (Movie) -> Unit,
     onBack: () -> Unit,
     onLive: () -> Unit,
+    feed: Feed,
+    onTune: (Channel) -> Unit,
 ) {
     val reduced = LocalReducedMotion.current
     val prefs = LocalContext.current.graph.prefs
@@ -739,7 +754,8 @@ private fun MoviesBrowse(
                         )
                         if (search) Box(Modifier.onFocusChanged { if (it.hasFocus) at = FocusAt.Search }) {
                             SearchGrid(
-                                library!!, query, { query = it }, results, keys, rowNamed, onFocused = { focused.value = it },
+                                library!!, feed, query, { query = it }, results, keys, rowNamed, onFocused = { focused.value = it },
+                                onTune = onTune,
                                 back = openedResult?.let { it to resultBack },
                                 stray = { !hasFocus },
                                 // Coming back to a result is no arrival at Search: the Fire TV keyboard stays shut.
@@ -1755,12 +1771,14 @@ private fun monogram(title: String): String =
 
 /**
  * Search: the app's keyboard over a grid of matching posters: titles from TMDB and the provider's whole
- * catalogue, or a genre's or language's ("comedy", "arabic"). Back leaves it. [focus] restores the result
+ * catalogue, or a genre's or language's ("comedy", "arabic"); over them, the live channels of that name and
+ * what is on now by that name ([onTune] tunes one). Back leaves it. [focus] restores the result
  * last focused, else the keyboard ([keys]).
  */
 @Composable
 private fun SearchGrid(
     library: Catalog,
+    feed: Feed,
     query: String,
     onQuery: (String) -> Unit,
     focus: FocusRequester,
@@ -1772,9 +1790,27 @@ private fun SearchGrid(
     arrive: () -> Boolean,
     onPlay: (Movie) -> Unit,
     onMenu: (Movie) -> Unit,
+    onTune: (Channel) -> Unit,
 ) {
     var found by remember { mutableStateOf<List<Movie>?>(null) }
     val graph = LocalContext.current.graph
+    // Live TV's own search: channels by name, then what is on now; each channel once.
+    val guide by graph.sync.guide.collectAsState()
+    var live by remember { mutableStateOf<List<Pair<Channel, String?>>>(emptyList()) }
+    LaunchedEffect(query, feed, guide) {
+        if (searchNorm(query).trim().length < 2) {
+            live = emptyList()
+            return@LaunchedEffect
+        }
+        delay(SEARCH_DEBOUNCE_MS)
+        live = withContext(Dispatchers.IO) {
+            val now = System.currentTimeMillis() / 1000
+            runCatching { feed.search(guide, query, now) }.getOrNull()?.let { r ->
+                (r.channels.map { it to null } + r.hits.filter { it.programme.start <= now }.map { it.tune to fixtureOf(it.programme.title) })
+                    .distinctBy { it.first.family }.take(LIVE_CAP)
+            }.orEmpty()
+        }
+    }
     val sync = graph.titles
     val recent by graph.recentSearches.all.collectAsState()
     // Runs once typing pauses (the box keeps each answer, and so does the app); the last results stay
@@ -1822,6 +1858,14 @@ private fun SearchGrid(
                 )
             }
         }
+        if (live.isNotEmpty()) item(key = "live", span = { GridItemSpan(maxLineSpan) }) {
+            // Padded, and shifted back by as much, so the focused card's lift isn't cut at the row's edge.
+            LazyRow(Modifier.offset(x = -Space.s).focusGroup(), contentPadding = PaddingValues(Space.s), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                itemsIndexed(live, key = { _, c -> c.first.family }) { i, (channel, on) ->
+                    ChannelCard(channel, on, if (i == 0) Modifier.focusRequester(first) else Modifier) { onTune(channel) }
+                }
+            }
+        }
         val list = found
         when {
             query.isBlank() && recent.isNotEmpty() -> item(key = "recent", span = { GridItemSpan(maxLineSpan) }) {
@@ -1834,7 +1878,7 @@ private fun SearchGrid(
             list == null -> {}
             list.isEmpty() -> item(key = "none", span = { GridItemSpan(maxLineSpan) }) { HintLine("No ${LocalLibrary.current.noun} match “${query.trim()}”") }
             else -> itemsIndexed(list, key = { _, m -> m.key }) { i, movie ->
-                PosterCard(movie, null, focus = if (i == 0) first else null, back = back?.takeIf { it.first == movie.id }?.second, onFocused = { onFocused(movie) }, onClick = { graph.recentSearches.add(query); onPlay(movie) }, onMenu = { onMenu(movie) })
+                PosterCard(movie, null, focus = if (i == 0 && live.isEmpty()) first else null, back = back?.takeIf { it.first == movie.id }?.second, onFocused = { onFocused(movie) }, onClick = { graph.recentSearches.add(query); onPlay(movie) }, onMenu = { onMenu(movie) })
             }
         }
     }

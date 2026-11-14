@@ -18,6 +18,11 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
+import com.mohamed3on.iptv.data.Movie
+import com.mohamed3on.iptv.data.isShow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -221,12 +226,19 @@ private data object LiveHeading : Item {
 private data object ProgrammesHeading : Item {
     override val key = "programmes"
 }
+/** A film or show the search found: OK opens its page in Movies & Shows. */
+private class TitleItem(val movie: Movie) : Item {
+    override val key = "t|${movie.key}"
+}
+private data object TitlesHeading : Item {
+    override val key = "titles"
+}
 private data class Note(val title: String, val hint: String? = null) : Item {
     override val key get() = "note"
 }
 
 private val Item.height get() = if (this is ChannelItem && compact) FEED_ROW_HEIGHT else ROW_HEIGHT
-private val Item.focusable get() = this is ChannelItem || this is LiveItem || this is HitItem
+private val Item.focusable get() = this is ChannelItem || this is LiveItem || this is HitItem || this is TitleItem
 private val Item.target get() = when (this) {
     is ChannelItem -> channel
     is LiveItem -> entry.tune
@@ -254,16 +266,16 @@ private fun MutableList<Item>.addMatch(match: LiveEntry, known: Set<String>) {
 
 /**
  * Null while Live now is still loading. Search shows a hint until 2 characters are [typed], then
- * what was [found] (nothing more while the first search runs): channels by name, then programmes,
- * each under its title only when it has rows.
+ * what was [found] (nothing more while the first search runs): channels by name, then programmes, then the
+ * [films] and shows of that name, each under its title only when it has rows.
  */
-private fun itemsOf(source: Source, feed: Feed, live: LiveNow?, typed: Boolean, found: SearchResults?, known: Set<String>): List<Item>? = when (source) {
+private fun itemsOf(source: Source, feed: Feed, live: LiveNow?, typed: Boolean, found: SearchResults?, films: List<Movie>, known: Set<String>): List<Item>? = when (source) {
     SearchSource -> buildList {
         add(SearchBoxItem)
         when {
             !typed -> add(Note("Type a channel, team, player or event"))
             found == null -> {}
-            found.count == 0 -> add(Note("No matches for “${found.query.trim()}”", "Try part of a channel, team or player name."))
+            found.count == 0 && films.isEmpty() -> add(Note("No matches for “${found.query.trim()}”", "Try part of a channel, team or player name."))
             else -> {
                 // Matches on now that the search names come first, laid out as in Live now (every channel
                 // showing each); their airings then leave Programmes.
@@ -284,6 +296,10 @@ private fun itemsOf(source: Source, feed: Feed, live: LiveNow?, typed: Boolean, 
                 if (hits.isNotEmpty()) {
                     add(ProgrammesHeading)
                     hits.mapTo(this, ::HitItem)
+                }
+                if (films.isNotEmpty()) {
+                    add(TitlesHeading)
+                    films.mapTo(this, ::TitleItem)
                 }
             }
         }
@@ -314,6 +330,8 @@ internal class Searched(private val query: String, private val feed: Feed, priva
 class ListMemory {
     internal var query by mutableStateOf("")
     internal var found by mutableStateOf<SearchResults?>(null)
+    /** The films and shows of that name, from Movies & Shows' search; they land after [found]. */
+    internal var films by mutableStateOf<List<Movie>>(emptyList())
     internal var searching by mutableStateOf(false)
     internal var searched: Searched? = null
     /** The search result last focused; null when the keyboard was. */
@@ -322,6 +340,9 @@ class ListMemory {
 }
 
 private const val SEARCH_TAG = "IptvSearch"
+/** Typing pauses this long before the box is asked for films, as in Movies & Shows' search. */
+private const val FILMS_DEBOUNCE_MS = 250L
+private const val FILMS_CAP = 8
 /** About half a second of frames for a row to be composed and placed before focus gives up on it. */
 private const val FOCUS_FRAMES = 30
 
@@ -363,6 +384,8 @@ fun ChannelOverlay(
     updateRow: LazyListScope.() -> Unit = {},
     entrance: () -> Float = { 1f },
     onLibrary: (() -> Unit)? = null,
+    /** Opens a film or show Search found; null leaves them out of Search (picking a tile). */
+    onTitle: ((Movie) -> Unit)? = null,
     /** In pick mode (no [onPreview]), what OK does with the focused row's channel, said in its last line. */
     pickHint: ((Channel) -> String?)? = null,
 ) {
@@ -468,6 +491,17 @@ fun ChannelOverlay(
         }
     }
     val found = memory.found
+    // Films and shows of that name, as Movies & Shows' own search finds them (the box, else the library on disk).
+    val titles = LocalContext.current.graph.titles
+    LaunchedEffect(query, onTitle != null) {
+        if (!typed || onTitle == null) {
+            memory.films = emptyList()
+            return@LaunchedEffect
+        }
+        delay(FILMS_DEBOUNCE_MS)
+        memory.films = (titles.search(query).getOrNull() ?: withContext(Dispatchers.Default) { titles.library.items.value?.search(query) }).orEmpty().take(FILMS_CAP)
+    }
+    val films = memory.films
     // Live now's matches the scoreboards know (by programme title): each heads its channels. Changes only when that set does.
     val crests = LocalCrests.current
     val scores = LocalScores.current
@@ -476,8 +510,8 @@ fun ChannelOverlay(
             live?.matches.orEmpty().mapNotNullTo(HashSet()) { m -> m.programme?.title?.takeIf { crests[it].stateIn(scores.value) != null } }
         }
     }
-    val items = remember(source, feed, live.takeIf { source == LiveSource || source == SearchSource }, typed, found.takeIf { source == SearchSource }, known) {
-        itemsOf(source, feed, live, typed, found, known)
+    val items = remember(source, feed, live.takeIf { source == LiveSource || source == SearchSource }, typed, found.takeIf { source == SearchSource }, films.takeIf { source == SearchSource }, known) {
+        itemsOf(source, feed, live, typed, found, films, known)
     }
 
     // Now/next for the whole shown group in one query, off the main thread, again each minute; then
@@ -999,6 +1033,8 @@ fun ChannelOverlay(
                                 LiveHeading -> SectionTitle("Live now")
                                 ChannelsHeading -> SectionTitle("Channels")
                                 ProgrammesHeading -> SectionTitle("Programmes")
+                                TitlesHeading -> SectionTitle("Films & shows")
+                                is TitleItem -> TitleRow(item.movie, focus, onFocused) { onTitle?.invoke(item.movie) }
                                 // Typing is not a row: a refresh while on the keyboard leaves focus there.
                                 SearchBoxItem -> SearchBox(
                                     query, busy = memory.searching, onQuery = { memory.query = it }, entry = keyFocus,
@@ -1136,8 +1172,13 @@ fun GroupRow(label: String, marked: Boolean, focus: FocusRequester?, onFocused: 
 internal val LocalHeld = compositionLocalOf { false }
 
 @Composable
+internal fun RowFrame(tile: Channel, focus: FocusRequester?, onFocused: () -> Unit, onClick: () -> Unit, height: Dp = ROW_HEIGHT, lines: @Composable ColumnScope.() -> Unit) =
+    RowFrame({ LogoTile(tile, TILE) }, focus, onFocused, onClick, height, lines)
+
+/** A row of the channel column: what [lead]s it (a logo, a poster), then its [lines]. */
+@Composable
 internal fun RowFrame(
-    tile: Channel,
+    lead: @Composable () -> Unit,
     focus: FocusRequester?,
     onFocused: () -> Unit,
     onClick: () -> Unit,
@@ -1157,8 +1198,24 @@ internal fun RowFrame(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.l),
     ) {
-        LogoTile(tile, TILE)
+        lead()
         Column(Modifier.weight(1f)) { CompositionLocalProvider(LocalFocused provides focused) { lines() } }
+    }
+}
+
+/** A film or show found by search: its poster where a channel's logo sits, its name, then year and kind. */
+@Composable
+private fun TitleRow(movie: Movie, focus: FocusRequester?, onFocused: () -> Unit, onClick: () -> Unit) {
+    RowFrame(
+        {
+            Box(Modifier.size(TILE), contentAlignment = Alignment.Center) {
+                AsyncImage(movie.poster, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxHeight().aspectRatio(2f / 3f).clip(RoundedCornerShape(Radius.chip)))
+            }
+        },
+        focus, onFocused, onClick,
+    ) {
+        FitText(movie.title.title, style = Type.headline)
+        FitText(listOfNotNull(movie.title.year, if (movie.titleId.isShow) "Show" else "Film").joinToString(" · "), style = Type.body)
     }
 }
 

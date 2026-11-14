@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Text
 import com.mohamed3on.iptv.data.displayName
+import com.mohamed3on.iptv.data.Channel
 import com.mohamed3on.iptv.ui.theme.ActivityLine
 import com.mohamed3on.iptv.ui.theme.LiveMark
 import com.mohamed3on.iptv.ui.theme.Motion
@@ -281,6 +282,31 @@ private fun KeyboardKey(label: String, style: TextStyle, modifier: Modifier, foc
         Text(label, style = style, color = if (focused) Palette.textPrimary else Palette.textSecondary, maxLines = 1)
     }
 }
+
+/** A live channel in Movies & Shows' search: its logo and name, and what is [on] it when that is what matched. OK tunes it. */
+@Composable
+internal fun ChannelCard(channel: Channel, on: String?, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    Row(
+        modifier
+            .size(CHANNEL_CARD)
+            .focusLift(focused, Radius.chip)
+            .background(Palette.tile, RoundedCornerShape(Radius.chip))
+            .clickable(interaction, indication = null, onClick = onClick)
+            .padding(horizontal = Space.m),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.m),
+    ) {
+        LogoTile(channel, CHANNEL_LOGO)
+        Column(Modifier.weight(1f)) {
+            FitText(displayName(channel.name), style = Type.body, color = Palette.textPrimary, active = focused)
+            if (on != null) FitText(on, style = Type.caption, active = focused)
+        }
+    }
+}
+private val CHANNEL_CARD = DpSize(320.dp, 72.dp)
+private val CHANNEL_LOGO = DpSize(96.dp, 48.dp)
 
 /**
  * A programme found by search: its title, then the channel (with progress when live, else when it

@@ -70,6 +70,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.tv.material3.Text
 import com.mohamed3on.iptv.data.Channel
+import com.mohamed3on.iptv.data.Movie
 import com.mohamed3on.iptv.system.Check
 import com.mohamed3on.iptv.data.ChannelIdentity
 import com.mohamed3on.iptv.data.Feed
@@ -397,6 +398,8 @@ private fun PlayerChrome(
         layer = Layer.None
         left = from
     }
+    // A film or show picked in the channel list's Search: Movies & Shows opens on its page.
+    var askedTitle by remember { mutableStateOf<Movie?>(null) }
     fun toMovies() {
         info = false
         left?.let(Check::request) ?: run { movies = true }
@@ -600,6 +603,7 @@ private fun PlayerChrome(
                     entrance = { shown.value },
                     // Watching, not picking a tile: Movies & Shows is among the list's groups.
                     onLibrary = if (pick == null && !multiView) ({ movies = true }) else null,
+                    onTitle = if (pick == null && !multiView) ({ askedTitle = it; Check.request("title:${it.titleId}") }) else null,
                     pickHint = pick?.let { purpose ->
                         val onScreen = if (multiView) grid.tiles.map { it.channel.family } else listOfNotNull(state.requested?.family)
                         val hint: (Channel) -> String? = { channel ->
@@ -625,6 +629,14 @@ private fun PlayerChrome(
             onPlaying = onMovie,
             onClose = { movies = false },
             onLive = { toLive(null) },
+            asked = askedTitle,
+            // A channel picked in Movies & Shows' search: tuned, full screen.
+            onTune = {
+                zapContext = null
+                down = null
+                session.zap(it, feed)
+                toLive(null)
+            },
         )
 
         SlidePanel(Unit.takeIf { layer == Layer.Recent }, Modifier.onFocusChanged { layerFocused = it.hasFocus }) { _, _, m ->
