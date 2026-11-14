@@ -176,7 +176,7 @@ private fun judge(c: Copy, p: SetupProfile, mark: Mark?, language: String?, spea
         "HDR10+" in c.hdr && Hdr.Hdr10Plus in p.hdr -> 4
         hdr10 && Hdr.Hdr10 in p.hdr -> 3
         "HLG" in c.hdr && Hdr.Hlg in p.hdr -> 2
-        dv -> 1 // no named fallback layer: the stick converts it (a profile 5 file plays on today's HDR10 TV)
+        dv -> 1 // no named fallback layer: the stick converts it (a profile 5 file plays on an HDR10-only TV)
         else -> 0
     }
     val mime = MIMES[c.codec]

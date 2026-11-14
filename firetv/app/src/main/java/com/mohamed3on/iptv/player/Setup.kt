@@ -56,6 +56,19 @@ data class SetupProfile(
     val isBlank: Boolean get() = hdr.isEmpty() && passthrough.isEmpty()
 }
 
+/**
+ * [audio] without DTS-HD and DTS:X while plain DTS passes, so Media3 sends such a track's DTS core instead. A TV can take
+ * DTS-HD over eARC and hand it to a soundbar that plays only DTS, which stays silent (a TCL Q7C with a Sonos Beam); every
+ * DTS-HD and DTS:X stream carries a DTS core, so the cost is only a receiver's lossless decode.
+ */
+fun dtsAsCore(audio: AudioCapabilities): AudioCapabilities {
+    if (!audio.supportsEncoding(C.ENCODING_DTS)) return audio
+    val kept = Passthrough.entries.map { it.encoding }
+        .filter { audio.supportsEncoding(it) && it != C.ENCODING_DTS_HD && it != C.ENCODING_DTS_UHD_P2 }
+    @Suppress("DEPRECATION") // the encoding-list constructor is the only public one
+    return AudioCapabilities((listOf(C.ENCODING_PCM_16BIT) + kept).toIntArray(), audio.maxChannelCount)
+}
+
 /** The profile from raw readings: [hdrTypes] from the display, [audio] from Media3. */
 fun setupProfile(
     displayName: String,
@@ -108,7 +121,7 @@ class Setup(context: Context) {
         val display = displays.getDisplay(Display.DEFAULT_DISPLAY)
         @Suppress("DEPRECATION") // Display.Mode.getSupportedHdrTypes is API 34; the stick is API 30.
         val hdrTypes = display?.hdrCapabilities?.supportedHdrTypes ?: IntArray(0)
-        return setupProfile(display?.name.orEmpty(), hdrTypes, dolbyVisionProfiles, videoCodecs, audio)
+        return setupProfile(display?.name.orEmpty(), hdrTypes, dolbyVisionProfiles, videoCodecs, dtsAsCore(audio))
     }
 
     private fun update() {

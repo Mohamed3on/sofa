@@ -71,7 +71,7 @@ private class FixedAudioCapabilities(context: Context) : DefaultRenderersFactory
     @Suppress("DEPRECATION") // the context-free builder is the one that takes fixed capabilities
     override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink =
         DefaultAudioSink.Builder()
-            .setAudioCapabilities(AudioCapabilities.getCapabilities(context))
+            .setAudioCapabilities(dtsAsCore(AudioCapabilities.getCapabilities(context)))
             .setEnableFloatOutput(enableFloatOutput)
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
             .build()
