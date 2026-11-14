@@ -291,11 +291,13 @@ internal fun MoviePlayback(
     val controlsLift = animateFloatAsState(if (controls && !error) controlsHeight.intValue.toFloat() else 0f, Motion.panel(reduced), label = "lift")
 
     // Post-play: an episode with one after it shows that one's card over its end credits (else its last 20 s);
-    // OK or the 10 s countdown plays it, Back keeps the credits (the file's end then moves on as before).
+    // OK or the 10 s countdown plays it, Back keeps the credits (the file's end then moves on as before). The
+    // countdown runs only over known credits: a guessed last 20 s may still be the story, so it plays out.
     val nextUp = remember(of) { nextUpOf(graph.titles, of) }
     val credits by remember { opened.plan.state.map { it.answer?.copies?.credits }.distinctUntilChanged() }.collectAsState(null)
     var card by remember { mutableStateOf(false) }
     var dismissed by remember { mutableStateOf(false) }
+    var counts by remember { mutableStateOf(false) }
     val drain = remember { Animatable(0f) }
     LaunchedEffect(onNext != null && nextUp != null, credits, dismissed) {
         card = false
@@ -303,7 +305,9 @@ internal fun MoviePlayback(
         while (true) {
             val dur = exo.duration
             val at = exo.currentPosition
-            card = dur > 0 && at >= creditsStart(credits, dur) && at < dur
+            val known = knownCredits(credits, dur)
+            counts = known != null
+            card = dur > 0 && at >= (known ?: (dur - CREDITS_FALLBACK_MS)) && at < dur
             delay(500)
         }
     }
@@ -335,8 +339,8 @@ internal fun MoviePlayback(
         dismissed = true
         onNext?.let { next -> play.next(next, done = true) }
     }
-    LaunchedEffect(card, ui.playing) {
-        if (!card) return@LaunchedEffect drain.snapTo(0f)
+    LaunchedEffect(card, counts, ui.playing) {
+        if (!card || !counts) return@LaunchedEffect drain.snapTo(0f)
         if (!ui.playing) return@LaunchedEffect
         // Reduced motion: the fill steps once a second instead of gliding.
         if (reduced) while (drain.value < 1f) {
@@ -795,11 +799,11 @@ private val STILL_SHAPE = RoundedCornerShape(Radius.row)
 private val GENERIC_EPISODE = Regex("""(?i)episode\s*\d+""")
 
 /**
- * Where the card comes: the end credits' start when it falls in this file's last 30% (the box's times are for the
- * episode, and a different cut can move them), else 20 s before the end.
+ * The end credits' start, trusted only when it falls in this file's last 30% (the box's times are for the episode,
+ * and a different cut can move them). Without it the card comes 20 s before the end and doesn't count down.
  */
-private fun creditsStart(credits: Long?, duration: Long): Long =
-    credits?.takeIf { it in (duration * 7 / 10) until duration } ?: (duration - CREDITS_FALLBACK_MS)
+private fun knownCredits(credits: Long?, duration: Long): Long? =
+    credits?.takeIf { it in (duration * 7 / 10) until duration }
 
 /** The episode after the one playing, as its card shows it. */
 private class NextUp(val episode: Episode, val line: String, val caption: String?, val still: String?)
