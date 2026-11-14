@@ -232,8 +232,11 @@ private val CARD_TOP = ROW_TITLE + Space.s + Space.m
 private val KEYBOARD_WIDTH = 620.dp
 /** Rows slide under the hero through a short fade, never a hard edge; the focused row sits just below it. */
 private val FADE = Space.l
-/** Focus rests this long before the hero changes, so holding a key never churns it. */
-private const val HERO_REST_MS = 90L
+/**
+ * Focus rests this long before the hero changes, so holding a key never churns it and the swap (a new hero and backdrop)
+ * doesn't land while the rows are still scrolling from the press: at 90 ms it did, and a TCL Q7C dropped frames there.
+ */
+private const val HERO_REST_MS = 400L
 private const val FOCUS_FRAMES = 30
 /** Title pages and Up next set the name larger than anywhere else: the title is the screen's subject. */
 /** Up next's and a film page's text column: to 84% of the screen, where the backdrop's dense scrim reaches, so meta lines and plots rarely scroll. */
