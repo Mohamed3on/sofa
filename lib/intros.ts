@@ -39,11 +39,17 @@ function credits(spans: (Span | null | undefined)[]): Intro | undefined {
   return s ? [Math.round(s.start_ms!), Math.round(s.end_ms ?? 0)] : undefined
 }
 
+/**
+ * TheIntroDB's measured times are exact to the ms; a credits start on a whole second is a filled-in guess (Bluey
+ * s2e3–e9 all say 405000, 6–19 s before the real credits), and the card counting down from it cuts the ending.
+ */
+const measured = (s: Span) => s.start_ms == null || s.start_ms % 1000 !== 0
+
 /** Both answers merged, TheIntroDB's first. */
 export function segmentsOf(tidb: TheIntroDb | null, idb: IntroDb | null): Segments {
   const intro = windowOf([...(tidb?.intro ?? []), idb?.intro])
   const recap = windowOf([...(tidb?.recap ?? []), idb?.recap])
-  const end = credits([...(tidb?.credits ?? []), idb?.outro])
+  const end = credits([...(tidb?.credits ?? []).filter(measured), idb?.outro])
   return { ...(intro && { intro }), ...(recap && { recap }), ...(end && { credits: end }) }
 }
 
