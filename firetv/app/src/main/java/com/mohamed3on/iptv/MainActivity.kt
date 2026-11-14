@@ -79,6 +79,7 @@ import com.mohamed3on.iptv.player.StreamSession
 import com.mohamed3on.iptv.ui.LocalIdleWatch
 import com.mohamed3on.iptv.player.MultiView
 import com.mohamed3on.iptv.ui.PlayerScreen
+import com.mohamed3on.iptv.ui.videoSurface
 import com.mohamed3on.iptv.ui.theme.IptvTheme
 import com.mohamed3on.iptv.ui.theme.Motion
 import com.mohamed3on.iptv.ui.theme.Palette
@@ -96,7 +97,7 @@ import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
 
 class MainActivity : ComponentActivity() {
-    private val surface by lazy { SurfaceView(this).apply { keepScreenOn = true } }
+    private val surface by lazy { videoSurface(this) }
     private val session = MutableStateFlow<StreamSession?>(null)
     /** The main player's playback surface: its audio tracks and picture shape. */
     private val playback = MutableStateFlow<PlaybackSurface?>(null)

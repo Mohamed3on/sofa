@@ -1,6 +1,5 @@
 package com.mohamed3on.iptv.ui
 
-import android.view.SurfaceView
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.foundation.background
@@ -94,7 +93,7 @@ fun MultiViewTiles(state: MultiViewState<ExoStreamPlayer>, guide: GuideDb?, cloc
                 // unclipped, each tile's punch wiped the captions of the tiles drawn before it.
                 Box(Modifier.offset(o.x, o.y).size(w, h).clipToBounds(), contentAlignment = Alignment.Center) {
                     AndroidView(
-                        factory = { SurfaceView(it).apply { keepScreenOn = true }.also(tile.player.exo::setVideoSurfaceView) },
+                        factory = { videoSurface(it).also(tile.player.exo::setVideoSurfaceView) },
                         modifier = Modifier.fillMaxSize(),
                     )
                     TileStatus(tile.session)

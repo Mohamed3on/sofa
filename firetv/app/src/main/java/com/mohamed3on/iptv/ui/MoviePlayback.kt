@@ -1,6 +1,5 @@
 package com.mohamed3on.iptv.ui
 
-import android.view.SurfaceView
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.graphics.asImageBitmap
@@ -439,7 +438,7 @@ internal fun MoviePlayback(
             .focusable(),
     ) {
         AndroidView(
-            factory = { SurfaceView(it).apply { keepScreenOn = true }.also(exo::setVideoSurfaceView) },
+            factory = { videoSurface(it).also(exo::setVideoSurfaceView) },
             modifier = Modifier.align(Alignment.Center).then(if (aspect > 0f) Modifier.aspectRatio(aspect) else Modifier.fillMaxSize()),
         )
         Box(Modifier.fillMaxSize().drawBehind { if (dim > 0f) drawRect(Palette.ink, alpha = PAUSED_DIM * dim) })

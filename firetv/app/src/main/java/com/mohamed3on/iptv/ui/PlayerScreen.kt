@@ -1,5 +1,7 @@
 package com.mohamed3on.iptv.ui
 
+import android.content.Context
+import android.graphics.PixelFormat
 import android.view.SurfaceView
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.animation.AnimatedContent
@@ -161,6 +163,16 @@ private const val RECEDE = 0.85f
 /** How long the corner says why before only its dot stays. */
 private const val HEALTH_TEXT_MS = 6_000L
 private const val REFRESHING = "Refreshing…"
+
+/**
+ * A surface for video. Not opaque, so Android adds no black "Background for SurfaceView" layer under it: a TV whose
+ * display hardware can't take a solid-colour layer (a TCL Q7C's MediaTek) then composes the whole screen on the GPU
+ * every frame, and the menus wait on it.
+ */
+fun videoSurface(context: Context) = SurfaceView(context).apply {
+    keepScreenOn = true
+    holder.setFormat(PixelFormat.TRANSLUCENT)
+}
 
 /**
  * The full-screen player (R10, R14): the video, with chrome only when asked for. The channel
