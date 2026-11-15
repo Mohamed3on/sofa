@@ -192,34 +192,52 @@ export function fixtureVerdict(
 
 /**
  * The fixture an event slot's name announces, its nearest to [now] (s): "UEFA | 02 - Latvia vs Armenia 2:00pm",
- * "Live | Spanien - England | UEFA Nations League | 8K EXCLUSIVE | DE: DAZN PPV 14". Only a name whose two teams are both
- * known and play each other names one; a club's channel ("UK: LA LIGA - ALAVES") or another sport's slot never does.
- * "stale" for a name of two teams that play only in leagues we read, with no fixture of them from yesterday to tomorrow
- * (last weekend's "Live Football 09 : Manchester United vs Crystal Palace 12:45 pm"): its match can't be on. A club's
- * channel named for our competition ("UK: LA LIGA - ALAVES", "UK: SERIE A - INTER MILAN 4K") is its club's fixture nearest
- * to [now], and stale when the club has none then (or isn't one ESPN lists for our leagues, as Almería out of La Liga).
+ * "Live | Spanien - England | UEFA Nations League | 8K EXCLUSIVE | DE: DAZN PPV 14". "stale" when the name's match can't be
+ * one of ours on now, undefined when the fixtures can't tell (the slot stays as it was). By the name's fixture:
+ * - both teams known: their fixture; none from yesterday to tomorrow is stale when both play only in leagues we read
+ *   (last weekend's "Live Football 09 : Manchester United vs Crystal Palace 12:45 pm");
+ * - one known ("Lille v KÍ Klaksvík"): its one fixture then; none is stale when it plays only in leagues we read;
+ * - neither, the name naming our competition ("Potters Tigers FC vs. Green City FC | Antigua Premier League"): stale, as
+ *   ESPN lists every team of a league we read.
+ * A name without a fixture that names our competition: a club's channel ("UK: LA LIGA - ALAVES") is its club's fixture
+ * nearest, stale with none; anything else ("La Dazoneta 24 Horas | LALIGA EA SPORTS") is stale while the competition has
+ * no fixture from yesterday to tomorrow. A club or team name ESPN doesn't list never hides a slot.
  */
 export function slotFixture(
   fx: Fixtures, name: string, now = Date.now() / 1000, teamKey = espnTeamKey, teamLeagues = espnTeamLeagues,
 ): Fixture | 'stale' | undefined {
+  const near = fx.near(now - 2 * DAY_S, now + 2 * DAY_S)
+  const nearest = (found: Fixture[]) => found.sort((a, b) => Math.abs(a.kickoff - now) - Math.abs(b.kickoff - now))[0]
+  const onlyOurs = (team: string) => !!teamLeagues(team)?.every((l) => l in LEAGUE_COMP)
+  const comp = COMPS.find((c) => c.re.test(name) && !c.not?.test(name))?.key
   for (const part of name.split('|')) {
     const fixture = part.trim().replace(/^\d+\s*-\s*/, '').replace(/\s+\d{1,2}[:.]\d{2}\s*(?:[ap]m)?$/i, '')
     const teams = fixtureTeams(fixture)
-    const keys = teams?.map(teamKey)
-    if (!teams || !keys?.[0] || !keys[1] || keys[0] === keys[1]) continue
-    const found = fx.near(now - 2 * DAY_S, now + 2 * DAY_S).filter((f) => keys.includes(f.home.key) && keys.includes(f.away.key))
-    if (found.length) return found.sort((a, b) => Math.abs(a.kickoff - now) - Math.abs(b.kickoff - now))[0]
-    const ours = teams.every((t) => teamLeagues(t)?.every((l) => l in LEAGUE_COMP))
-    return ours && fx.covered(now) ? 'stale' : undefined
+    if (!teams) continue
+    const keys = teams.map(teamKey)
+    if (keys[0] && keys[1]) {
+      if (keys[0] === keys[1]) continue
+      const found = near.filter((f) => keys.includes(f.home.key) && keys.includes(f.away.key))
+      if (found.length) return nearest(found)
+      return teams.every(onlyOurs) && fx.covered(now) ? 'stale' : undefined
+    }
+    const i = keys.findIndex((k) => k)
+    if (i >= 0) {
+      const found = near.filter((f) => f.home.key === keys[i] || f.away.key === keys[i])
+      if (found.length === 1) return found[0]
+      return !found.length && onlyOurs(teams[i]) && fx.covered(now) ? 'stale' : undefined
+    }
+    return comp && fx.covered(now, comp) ? 'stale' : undefined
   }
-  const comp = COMPS.find((c) => c.re.test(name) && !c.not?.test(name))?.key
+  if (!comp || !fx.covered(now, comp)) return undefined
   const club = name.match(/\s[-–]\s([^-–|:]+)$/)?.[1].replace(/\s+(?:4K|UHD|FHD|HD|SD|HEVC|RAW)\b.*$/i, '').trim()
-  if (!comp || !club || !fx.covered(now, comp)) return undefined
-  // A club ESPN doesn't list for our leagues may be a name we can't read: the channel stays as it was.
-  const key = teamKey(club)
-  if (!key) return undefined
-  const found = fx.near(now - 2 * DAY_S, now + 2 * DAY_S).filter((f) => f.home.key === key || f.away.key === key)
-  return found.sort((a, b) => Math.abs(a.kickoff - now) - Math.abs(b.kickoff - now))[0] ?? 'stale'
+  if (club) {
+    // A club ESPN doesn't list for our leagues may be a name we can't read: the channel stays as it was.
+    const key = teamKey(club)
+    if (!key) return undefined
+    return nearest(near.filter((f) => f.home.key === key || f.away.key === key)) ?? 'stale'
+  }
+  return near.some((f) => f.comp === comp) ? undefined : 'stale'
 }
 
 /** A fixture's two teams as the app's crests table holds a match title's. */

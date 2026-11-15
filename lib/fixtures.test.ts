@@ -66,3 +66,18 @@ test('an event slot\'s name is its fixture when it names two teams that play; la
   expect(slot('UK: LA LIGA - VILLAREAL')).toBeUndefined() // a club name we can't read leaves the channel as it was
   expect(slot('IT: PRIM 1 4K [LIVE-EVENT]')).toBeUndefined()
 })
+
+test('a slot\'s name with unknown teams or no fixture: stale only when no match of ours can be on', () => {
+  const leagues: Record<string, string[]> = { france: ['uefa.nations'], lille: ['fra.1', 'uefa.europa.conf'] }
+  const KEYS3: Record<string, string> = { ...KEYS, lille: 'lille' }
+  const slot = (name: string, now = '2026-11-15T20:30:00Z') => slotFixture(fx(), name, at(now), (t) => KEYS3[t.toLowerCase()] ?? null, (t) => leagues[KEYS3[t.toLowerCase()]] ?? null)
+  // Antigua's Premier League names ours, but ESPN lists every team of a league we read.
+  expect(slot('Live | Potters Tigers FC vs. Green City FC | Antigua Premier League | 8K EXCLUSIVE | DE: DAZN PPV 9')).toBe('stale')
+  // Neither team known and no competition of ours named: another league's match, maybe live.
+  expect(slot('Live | Ureña SC vs. Barquisimeto SC | Segunda División - Venezuela | 8K EXCLUSIVE | ES: DAZN PPV 10')).toBeUndefined()
+  // One known team without a fixture then, playing only in leagues we read.
+  expect(slot('UEFA | 26 - Lille v KÍ Klaksvík 20.00')).toBe('stale')
+  // A show named for La Liga: stale while La Liga has no fixture near, left alone when it has.
+  expect(slot('Live | La Dazoneta 24 Horas | Parte 1 | LALIGA EA SPORTS | 8K EXCLUSIVE | ES: DAZN PPV 1', '2026-11-13T12:00:00Z')).toBe('stale')
+  expect(slot('Live | La Dazoneta 24 Horas | Parte 1 | LALIGA EA SPORTS | 8K EXCLUSIVE | ES: DAZN PPV 1')).toBeUndefined()
+})
