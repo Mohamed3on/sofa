@@ -2558,9 +2558,12 @@ private fun ShowPage(
     val targetRow = remember { FocusRequester() }
     val listFocus = remember { FocusRequester() }
     val list = rememberLazyListState()
-    // A switch between in order and best first starts the list from its top.
+    // Best first starts the list from its top; back in order, it returns to the episode up next, as on opening.
     var sorts by remember { mutableStateOf(0) }
-    LaunchedEffect(sorts) { if (sorts > 0) list.scrollToItem(0) }
+    LaunchedEffect(sorts) {
+        if (sorts == 0) return@LaunchedEffect
+        list.scrollToItem(if (bestFirst) 0 else (lines.indexOfFirst { it is EpisodeLine.Item && it.index == target } - 1).coerceAtLeast(0))
+    }
     // The episode focus is on, and the one ⏪/⏩ jump to: the first of the season before or after.
     var onRow by remember { mutableStateOf<Int?>(null) }
     var jumpTo by remember { mutableStateOf<Int?>(null) }
