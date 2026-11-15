@@ -282,8 +282,8 @@ private const val LIVE_CAP = 12
 
 /**
  * Movies & Shows: one title-first library of films and shows over the still-playing live channel, which
- * stops only once something plays (the account allows one stream) and resumes when the screen is left with
- * Back. It opens on Up next (what you were watching, Resume focused) when there is any, else on the
+ * stops only once something plays (the account allows one stream) and resumes when the screen is left for
+ * live TV. It opens on Up next (what you were watching, Resume focused) when there is any, else on the
  * library's rows. Any title opens its title page (a film's, or a show's with its episodes), whose cast and
  * More like this open further pages; the next episode plays when one ends. [shown] is its entrance (0 → 1);
  * [open] is false while it leaves. [onPlaying] says whether a film or episode is on screen, so the live
@@ -297,7 +297,8 @@ fun MoviesLayer(
     shown: () -> Float,
     open: Boolean,
     onPlaying: (Boolean) -> Unit,
-    onClose: () -> Unit,
+    /** Back on the browsing screen's first page: out of the app, which a launch then reopens here. */
+    onExit: () -> Unit,
     /** Live TV, full screen (the browsing screen's Live TV button). */
     onLive: () -> Unit,
     /** The title the channel list's Search asked for, as it found it: one outside the library is known only there. */
@@ -382,8 +383,6 @@ fun MoviesLayer(
     }
     LaunchedEffect(line, open) { nav.hold(line, open) }
 
-    fun leave() = onClose()
-
     /** An IPTV copy's stream: the container the play's plan names (#22), else the library's. */
     fun iptvUrl(p: Playing): (Copy, String?) -> String = { c, named ->
         val id = c.id.removePrefix("iptv:").toInt()
@@ -403,7 +402,7 @@ fun MoviesLayer(
     LaunchedEffect(check, library) {
         val target = check ?: return@LaunchedEffect
         val verb = target.substringBefore(':')
-        if (verb == "live") return@LaunchedEffect leave().also { Check.open.value = null }
+        if (verb == "live") return@LaunchedEffect onLive().also { Check.open.value = null }
         val lib = library ?: return@LaunchedEffect
         if (verb != "search") Check.open.value = null // MoviesBrowse takes a search
         val id = target.substringAfter(':').substringBefore('@')
@@ -433,7 +432,7 @@ fun MoviesLayer(
                 onOpen = nav::open,
                 onResume = { nav.resume(it, fromStart = false) },
                 onStartOver = { nav.resume(it, fromStart = true) },
-                onBack = ::leave,
+                onBack = onExit,
                 onLive = onLive,
                 feed = feed,
                 onTune = onTune,
@@ -695,6 +694,7 @@ private fun MoviesBrowse(
 
     val rested = rememberRested(focused)
     val heroInfo = rememberInfo(rested)
+    val backPress = remember { object { var down = -1L } }
     Box(
         Modifier
             .fillMaxSize()
@@ -703,12 +703,14 @@ private fun MoviesBrowse(
             .onFocusChanged { hasFocus = it.hasFocus }
             .onKeyEvent {
                 if (remoteKey(it.nativeKeyEvent.keyCode) != RemoteKey.Back) return@onKeyEvent false
+                val native = it.nativeKeyEvent
                 if (it.type == KeyEventType.KeyDown) when {
                     shownPage == BrowsePage.Search -> closeSearch()
                     shownPage == BrowsePage.Rows && upNext.isNotEmpty() -> page = BrowsePage.UpNext
-                    else -> onBack()
-                }
-                true // the key-up too, so Back never reaches the player or leaves the app
+                    // The first page: Back leaves the app, at its release (a hold switches to live TV instead).
+                    else -> backPress.down = native.downTime
+                } else if (native.downTime == backPress.down) onBack()
+                true // the key-up too, so Back never reaches the player
             }
             .focusGroup(),
     ) { CompositionLocalProvider(LocalStill provides hidden, LocalNewShows provides newShows) {

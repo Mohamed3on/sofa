@@ -627,7 +627,7 @@ private fun PlayerChrome(
             shown = { moviesShown.value },
             open = movies,
             onPlaying = onMovie,
-            onClose = { movies = false },
+            onExit = { exit?.onBackPressed() },
             onLive = { toLive(null) },
             asked = askedTitle,
             // A channel picked in Movies & Shows' search: tuned, full screen.
