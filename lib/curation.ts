@@ -507,7 +507,8 @@ const nameKey = (s: string): string =>
 // is near (FA Cup, EFL Cup, Coppa, Pokal) trail the block, so their
 // coming and going never shifts the groups everyone uses.
 /** [logo]: ESPN's league logo (a.espncdn.com/i/leaguelogos/soccer/<logo>.png), its dark-ground set's; Coppa Italia's has none, and its usual one is a white patch. */
-interface Competition { key: string; group: string; logo?: string; re: RegExp; not?: RegExp }
+/** [matchOnly]: a tournament that plays in windows; a channel joins only by a match of it (guide, or an event slot's current name), so its group exists only around its matches. */
+interface Competition { key: string; group: string; logo?: string; re: RegExp; not?: RegExp; matchOnly?: true }
 export const COMPS: Competition[] = [
   { key: 'pl', group: '🏆 Premier League', logo: '500-dark/23', re: /premier league|\bEPL\b|\bsky sports? pl\b|hub premier|now premier sports|الدوري الإنجليزي الممتاز/i, not: /scottish|welsh|irish|premier league 2\b|\bpl2\b|premier league\s*[-–—]\s*(?![^|]*\s(?:v|vs\.?)\s)[^|\d]+(?:\||$)/i },
   { key: 'ucl', group: '🏆 Champions League', logo: '500-dark/2', re: /champions league|liga de campeones|ligue des champions|دوري أبطال أوروبا|دوري الأبطال|\bUCL\b/i, not: /afc champions|caf champions|concacaf|asian champions|global champions|gulf club champions/i },
@@ -523,8 +524,10 @@ export const COMPS: Competition[] = [
   { key: 'eflcup', group: '🏆 EFL Cup', logo: '500-dark/41', re: /carabao|\bEFL Cup\b|\bleague cup\b|كأس الرابطة الإنجليزية|كأس كاراباو/i, not: /adib|\buae\b|scottish|welsh|irish|premier sports cup/i },
   { key: 'coppa', group: '🏆 Coppa Italia', logo: '500/2192', re: /coppa italia|كأس إيطاليا/i, not: /serie c|primavera/i },
   { key: 'pokal', group: '🏆 DFB-Pokal', logo: '500-dark/2061', re: /dfb[- ]?pokal|كأس ألمانيا/i },
-  { key: 'unl', group: '🏆 Nations League', logo: '500-dark/2395', re: /nations[- ]league|liga de naciones|liga das na[cç][õo]es|ligue des nations|دوري الأمم الأوروبية/i, not: /concacaf/i },
-  { key: 'afcon', group: '🏆 Africa Cup of Nations', logo: '500-dark/76', re: /africa cup of nations|\bAFCON\b|copa africana de naciones|coupe d'afrique des nations|كأس (?:ال)?أمم (?:ال)?[أا]فري[قي]ي?ا|كأس الأمم الأفريقية/i, not: /\bu-?\d{2}\b|wafcon/i },
+  { key: 'wc', group: '🏆 World Cup', logo: '500-dark/4', matchOnly: true, re: /fifa world cup|world cup qualif|\bWCQ\b|copa (?:mundial|del mundo) de la fifa|mundial de la fifa|(?:eliminatorias|clasificaci[oó]n) (?:al |para el |del )?mundial|eliminatorias sudamericanas|copa do mundo (?:da )?fifa|(?:eliminatórias|qualificação|apuramento) (?:para o |da copa do |do )?mundial|wm[- ]?quali|fu(?:ß|ss)ball[- ]wm|fifa[- ]wm\b|coupe du monde (?:de la )?fifa|(?:qualifications?|éliminatoires) (?:pour la |à la |de la )?coupe du monde|qualificazioni (?:ai )?mondiali|mondiali di calcio|coppa del mondo fifa|تصفيات كأس العالم|كأس العالم (?:لكرة القدم|فيفا|20\d\d)/i, not: /club|clubes|klub|للأندية|\bu-?\d{2}\b|sub-?\d{2}|futsal|beach|esport|fifae|للسيدات|للشباب|للناشئين/i },
+  { key: 'euro', group: '🏆 Euro', logo: '500-dark/74', matchOnly: true, re: /\buefa euro\b|\beuro 20\d\d\b|euro qualif|european qualifiers|european championship qualif|em[- ]?quali|fu(?:ß|ss)ball[- ]em\b|eurocopa|(?:clasificaci[oó]n|eliminatorias) (?:para la |de la )?euro\b|europei di calcio|qualificazioni (?:agli )?europei|championnat d'europe de football|(?:qualifications?|éliminatoires) (?:pour l'|à l'|de l')euro\b|(?:qualificação|apuramento) (?:para o )?euro\b|كأس أمم أوروبا|يورو 20\d\d|تصفيات (?:كأس )?أمم أوروبا|تصفيات يورو/i, not: /\bu-?\d{2}\b|sub-?\d{2}|futsal|beach|euro ?basket|eurovolley|euro ?hockey|floorball|euroleague|eurocup|darts/i },
+  { key: 'unl', group: '🏆 Nations League', logo: '500-dark/2395', matchOnly: true, re: /nations[- ]league|liga de naciones|liga das na[cç][õo]es|ligue des nations|دوري الأمم الأوروبية/i, not: /concacaf/i },
+  { key: 'afcon', group: '🏆 Africa Cup of Nations', logo: '500-dark/76', matchOnly: true, re: /africa cup of nations|\bAFCON\b|copa africana de naciones|coupe d'afrique des nations|كأس (?:ال)?أمم (?:ال)?[أا]فري[قي]ي?ا|كأس الأمم الأفريقية/i, not: /\bu-?\d{2}\b|wafcon/i },
 ]
 const UEFA_ALL = ['ucl', 'uel', 'uecl']
 // Shared vetoes: other sports and women's competitions that reuse league names, and
@@ -533,7 +536,7 @@ const UEFA_ALL = ['ucl', 'uel', 'uecl']
 const MATCH_MAX_MS = 3 * 3600_000
 const OTHER_SPORT = /basket|handball|pallamano|volley|superlega|hockey|rugby|darts|netball|cricket|snooker|golf|tennis|boxing|drone|horse|esport|virtual|vela\b/i
 const WOMEN = /women|femen|frauen|femminile|f[ée]minin|\bwsl\b|uwcl|سيدات|نساء/i
-const SHOW = /highlight|hoogtepunten|summary|resumo|\b[ei]n 60\b|tonight|review|\bshow\b|magazin|stories|\bbest\b|top goals|top \d+|goals? of|legend|classic|rewind|preview|previa|pre-?match|vorbericht|anteprima|analys|resumen|resúmen|zusammenfassung|replay|re-live|wiederholung|special|especial|feature|weekly|daily|\bnews\b|press conference|conferenza|rueda de prensa|pressekonferenz|weigh|goal rush|greatest|documentar|\bfilm\b|pel[ií]cula|countdown|build-?up|warm-?up|inside|kompakt|\bpur\b|retro|netbusters|full impact|\bicons?\b|league 100\b|\bep\.? ?\d|episode|folge/i
+const SHOW = /highlight|moments|hoogtepunten|summary|resumo|\b[ei]n 60\b|tonight|review|\bshow\b|magazin|stories|\bbest\b|top goals|top \d+|goals? of|legend|classic|rewind|preview|previa|pre-?match|vorbericht|anteprima|analys|resumen|resúmen|zusammenfassung|replay|re-live|wiederholung|special|especial|feature|weekly|daily|\bnews\b|press conference|conferenza|rueda de prensa|pressekonferenz|weigh|goal rush|greatest|documentar|\bfilm\b|pel[ií]cula|countdown|build-?up|warm-?up|inside|kompakt|\bpur\b|retro|netbusters|full impact|\bicons?\b|league 100\b|\bep\.? ?\d|episode|folge/i
 const vetoed = (text: string) => OTHER_SPORT.test(text) || WOMEN.test(text) || SHOW.test(text)
 // A programme that is a live match: a "live" tag or a fixture ("X v Y", "X - Y", "X vs Y", Arabic "X × Y").
 const LIVE = /\blive\b|ᴸᶦᵛᵉ|\ben directo\b|\ben vivo\b|\bdiretta\b|\ben direct\b|مباشر|прямая трансляция/i
@@ -542,11 +545,14 @@ const FIXTURE = /\S\s+(?:v|vs\.?|x|×|-|–|—|@)\s+\S|\S×\S/i
 const ANNOUNCED = /^\s*next\b/i
 
 /** Competitions a channel carries by its own name + provider category. A bare
- *  "UEFA" package (UK| UEFA PPV) can't tell UCL from UEL/UECL — it joins all three. */
-export function staticCompetitions(name: string, category: string): string[] {
+ *  "UEFA" package (UK| UEFA PPV) can't tell UCL from UEL/UECL — it joins all three.
+ *  A [matchOnly] tournament counts only by an event [slot]'s name (its current match). */
+export function staticCompetitions(name: string, category: string, slot = false): string[] {
   if (vetoed(name)) return []
-  const keys = COMPS.filter(
-    (c) => (c.re.test(name) || c.re.test(category)) && !c.not?.test(name) && !c.not?.test(category),
+  const keys = COMPS.filter((c) =>
+    c.matchOnly
+      ? slot && c.re.test(name) && !c.not?.test(name)
+      : (c.re.test(name) || c.re.test(category)) && !c.not?.test(name) && !c.not?.test(category),
   ).map((c) => c.key)
   return keys.length || !/\bUEFA\b/i.test(category) ? keys : UEFA_ALL
 }
@@ -836,7 +842,7 @@ async function pullCuratedChannels(cfg: XtreamConfig): Promise<Channel[]> {
           group: chBucket,
           isEventSlot,
           q,
-          comps: staticCompetitions(name, group),
+          comps: staticCompetitions(name, group, isEventSlot),
         },
       }
       const list = byBucket.get(chBucket)
