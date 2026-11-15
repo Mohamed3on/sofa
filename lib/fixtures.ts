@@ -199,9 +199,9 @@ export function fixtureVerdict(
  * - one known ("Lille v KÍ Klaksvík"): its one fixture then; none is stale when it plays only in leagues we read;
  * - neither, the name naming our competition ("Potters Tigers FC vs. Green City FC | Antigua Premier League"): stale, as
  *   ESPN lists every team of a league we read.
- * A name without a fixture that names our competition: a club's channel ("UK: LA LIGA - ALAVES") is its club's fixture
- * nearest, stale with none; anything else ("La Dazoneta 24 Horas | LALIGA EA SPORTS") is stale while the competition has
- * no fixture from yesterday to tomorrow. A club or team name ESPN doesn't list never hides a slot.
+ * A name without a fixture that names our competition: a club's channel ("UK: LA LIGA - ALAVES") is no match slot at all
+ * (stale; it stays in its 🏆 group, Live now doesn't list it); anything else ("La Dazoneta 24 Horas | LALIGA EA SPORTS")
+ * is stale while the competition has no fixture from yesterday to tomorrow. A team name ESPN doesn't list never hides a slot.
  */
 export function slotFixture(
   fx: Fixtures, name: string, now = Date.now() / 1000, teamKey = espnTeamKey, teamLeagues = espnTeamLeagues,
@@ -229,14 +229,10 @@ export function slotFixture(
     }
     return comp && fx.covered(now, comp) ? 'stale' : undefined
   }
-  if (!comp || !fx.covered(now, comp)) return undefined
-  const club = name.match(/\s[-–]\s([^-–|:]+)$/)?.[1].replace(/\s+(?:4K|UHD|FHD|HD|SD|HEVC|RAW)\b.*$/i, '').trim()
-  if (club) {
-    // A club ESPN doesn't list for our leagues may be a name we can't read: the channel stays as it was.
-    const key = teamKey(club)
-    if (!key) return undefined
-    return nearest(near.filter((f) => f.home.key === key || f.away.key === key)) ?? 'stale'
-  }
+  if (!comp) return undefined
+  // A club's channel names one club after its competition: never a match slot.
+  if (/\s[-–]\s[^-–|:]+$/.test(name) && /^[^|]*:/.test(name)) return 'stale'
+  if (!fx.covered(now, comp)) return undefined
   return near.some((f) => f.comp === comp) ? undefined : 'stale'
 }
 

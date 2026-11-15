@@ -60,10 +60,10 @@ test('an event slot\'s name is its fixture when it names two teams that play; la
   expect(slot('Live Football 09 : Manchester United vs Crystal Palace 12:45 pm')).toBe('stale')
   // Ajax plays in a league we don't read: its match may well be on.
   expect(slot('Live | Ajax vs. PSV | all | 8K EXCLUSIVE | DE: SOCCER PPV 16')).toBeUndefined()
-  // A club's channel: its club's match nearest; none then and it's stale.
-  expect(slot('UK: LA LIGA - BARCELONA')).toBe(barcaGetafe)
+  // A club's channel is never a match slot, its club playing or not, its name read or not.
+  expect(slot('UK: LA LIGA - BARCELONA')).toBe('stale')
   expect(slot('UK: LA LIGA - ALAVES')).toBe('stale')
-  expect(slot('UK: LA LIGA - VILLAREAL')).toBeUndefined() // a club name we can't read leaves the channel as it was
+  expect(slot('UK: SERIE A - SALERNITANA 4K')).toBe('stale')
   expect(slot('IT: PRIM 1 4K [LIVE-EVENT]')).toBeUndefined()
 })
 
