@@ -26,6 +26,7 @@ import { appendFile, mkdir, rename, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { buildAppFeed, buildAppGuide, guideUpcoming } from '../lib/app-feed.js'
 import { arabp2pSeasonDubs } from '../lib/arabp2p.js'
+import { withEpisodeScores } from '../lib/episode-scores.js'
 import { crestsReady, titleMatch } from '../lib/crests.js'
 import { liveMatches } from '../lib/live-matches.js'
 import { iptvCopies, markInfringing, titleCopies } from '../lib/copies.js'
@@ -185,12 +186,13 @@ export async function dubs(req: Request) {
   return arabp2pSeasonDubs(m[1])
 }
 
-// GET /api/app/episodes?t=TOKEN&id=SERIES_ID — a show's plot and episodes, in order.
+// GET /api/app/episodes?t=TOKEN&id=SERIES_ID — a show's plot and episodes, in order, each with its TrueScore (episode-scores.ts).
 export async function episodes(req: Request) {
   const id = Number(new URL(req.url).searchParams.get('id'))
   if (!Number.isInteger(id) || id <= 0) return new Response('Bad id', { status: 400 })
   const show = await showEpisodes(configFromEnv(), id)
-  return { ...show, ...(await tmdbFacts(show.titleId)) }
+  const facts = await tmdbFacts(show.titleId)
+  return { ...show, ...facts, episodes: await withEpisodeScores(show.episodes, facts.imdb) }
 }
 
 const libraryNow = () => currentLibrary(async () => watchedOf(await loadHistory()))

@@ -2,6 +2,7 @@
 // with More like this, cast and director (and a TMDB-only show's episodes, so Real-Debrid can play them),
 // search over titles and category words, and a person's titles. Every title comes in the library's shape
 // (titles.ts LibTitle) with the tier and score the library knows for it.
+import { withEpisodeScores } from './episode-scores.js'
 import type { XtreamConfig } from './provider.js'
 import { knownTitles } from './library.js'
 import { letterboxdFilms, scoreNow } from './ratings.js'
@@ -36,7 +37,7 @@ export async function titleDetails(cfg: XtreamConfig, id: string) {
   }
   const parts = t.collection ? (await tmdbCollection(t.collection.id)).filter((x) => String(x.id) !== tmdb) : []
   const series = kind === 'tv' ? (await showList(cfg).catch(() => null))?.movies.find((s) => s.titleId === id)?.id : undefined
-  const episodes = kind === 'tv' && !series ? await tmdbEpisodes(tmdb, t.seasons) : []
+  const episodes = kind === 'tv' && !series ? await withEpisodeScores(await tmdbEpisodes(tmdb, t.seasons), t.imdb || undefined) : []
   const people = new Map<number, { id: number; name: string; role: string }>()
   for (const d of t.directors) people.set(d.id, { id: d.id, name: d.name, role: kind === 'tv' ? 'Creator' : 'Director' })
   for (const c of t.cast) if (!people.has(c.id)) people.set(c.id, { id: c.id, name: c.name, role: c.character })
