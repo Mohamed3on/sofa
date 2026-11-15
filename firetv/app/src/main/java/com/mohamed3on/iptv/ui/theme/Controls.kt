@@ -388,7 +388,7 @@ fun KeyCap(label: String) {
 }
 
 /** The drawn marks a [PageButton] can carry, one stroke weight with the app's other marks (never typed glyphs). */
-enum class Glyph { Play, Search, Live, Restart, Versions, Trailer, Details, Episodes }
+enum class Glyph { Play, Search, Live, Restart, Versions, Trailer, Details, Episodes, Rank }
 
 /** A [PageButton]'s height; a [small] one's. */
 val PAGE_BUTTON_HEIGHT = 44.dp
@@ -513,5 +513,7 @@ private fun DrawScope.drawGlyph(glyph: Glyph, color: Color) {
             drawCircle(color, w * 0.06f, at(0.16f, y))
             drawLine(color, at(0.34f, y), at(0.86f, y), line.width, StrokeCap.Round)
         }
+        // Best first: lines shortening down the list.
+        Glyph.Rank -> for ((i, end) in listOf(0.86f, 0.64f, 0.42f).withIndex()) drawLine(color, at(0.14f, 0.26f + i * 0.24f), at(end, 0.26f + i * 0.24f), line.width, StrokeCap.Round)
     }
 }

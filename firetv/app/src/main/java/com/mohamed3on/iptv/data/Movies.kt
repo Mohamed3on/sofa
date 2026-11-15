@@ -194,6 +194,9 @@ data class Episode(val id: Int, val titleId: TitleId = "", val season: Int, val 
     val quality: List<String> = emptyList(),
     /** The picture in a word: Reference, Great, OK or Soft; "" when unknown. */
     val tier: String = "",
+    /** TrueScore from IMDb's votes on it, and its net-loved ratio (0–1); null under 50 votes or when IMDb doesn't list it. */
+    val ts: Int? = null,
+    val tr: Double? = null,
 ) {
     /** "S1 E3". */
     val code get() = "S$season E$episode"

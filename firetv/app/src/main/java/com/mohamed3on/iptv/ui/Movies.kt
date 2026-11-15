@@ -56,6 +56,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
@@ -2535,20 +2536,31 @@ private fun ShowPage(
         }
     }
     val episodes = data?.episodes
-    val lines = remember(episodes) {
+    // Best first: the episodes by TrueScore, the unscored after them in order, no season headings.
+    var bestFirst by remember { mutableStateOf(false) }
+    val lines = remember(episodes, bestFirst) {
         buildList {
-            episodes?.forEachIndexed { i, e ->
+            if (bestFirst && episodes != null) episodes.indices.sortedByDescending { episodes[it].ts ?: Int.MIN_VALUE }.forEach { add(EpisodeLine.Item(it, episodes[it])) }
+            else episodes?.forEachIndexed { i, e ->
                 if (i == 0 || episodes[i - 1].season != e.season) add(EpisodeLine.Season(e.season))
                 add(EpisodeLine.Item(i, e))
             }
         }
     }
+    val scored = remember(episodes) { episodes.orEmpty().count { it.ts != null } }
+    val seasonShare = remember(episodes) {
+        episodes.orEmpty().filter { it.tr != null }.groupBy { it.season }.filterValues { it.size >= 2 }.mapValues { (_, e) -> e.sumOf { it.tr!! } / e.size }
+    }
+    val standout = remember(episodes, seen) { episodes?.let { standout(it, seen) } }
     var lastPlayed by remember { mutableStateOf<Int?>(null) }
     val target = episodes?.takeIf { it.isNotEmpty() }?.let { lastPlayed ?: upNextIndex(it, resume, seen) }
     val primary = remember { FocusRequester() }
     val targetRow = remember { FocusRequester() }
     val listFocus = remember { FocusRequester() }
     val list = rememberLazyListState()
+    // A switch between in order and best first starts the list from its top.
+    var sorts by remember { mutableStateOf(0) }
+    LaunchedEffect(sorts) { if (sorts > 0) list.scrollToItem(0) }
     // The episode focus is on, and the one ⏪/⏩ jump to: the first of the season before or after.
     var onRow by remember { mutableStateOf<Int?>(null) }
     var jumpTo by remember { mutableStateOf<Int?>(null) }
@@ -2599,10 +2611,10 @@ private fun ShowPage(
             main = {
                 Row(
                     Modifier.fillMaxSize().padding(start = EDGE, end = EDGE)
-                        // ⏪/⏩ anywhere on the page: the episode list's season before or after the episode last focused there (else up next).
+                        // ⏪/⏩ anywhere on the page: the episode list's season before or after the episode last focused there (else up next); not best first, which has no seasons.
                         .onPreviewKeyEvent { e ->
                             val key = remoteKey(e.nativeKeyEvent.keyCode)
-                            if (key != RemoteKey.FastForward && key != RemoteKey.Rewind || episodes.isNullOrEmpty()) return@onPreviewKeyEvent false
+                            if (key != RemoteKey.FastForward && key != RemoteKey.Rewind || episodes.isNullOrEmpty() || bestFirst) return@onPreviewKeyEvent false
                             val at = onRow ?: target
                             if (e.type == KeyEventType.KeyDown && at != null) seasonStart(episodes, at, next = key == RemoteKey.FastForward)?.let { jumpTo = it }
                             true
@@ -2628,6 +2640,7 @@ private fun ShowPage(
                                     PageButton("${if (started) "Resume" else "Play"} ${next.code}", { onPlay(episodes, target, false) }, Modifier.focusRequester(primary).appear(), icon = Glyph.Play)
                                     if (started) PageButton("Start over", { onPlay(episodes, target, true) }, Modifier.appear(), icon = Glyph.Restart, iconOnly = true)
                                     TrailerButton(info?.trailer)
+                                    if (scored >= 4) PageButton("Best first", { bestFirst = !bestFirst; sorts++ }, Modifier.appear(), selected = bestFirst, icon = Glyph.Rank, iconOnly = true)
                                 }
                                 failed -> PageButton("Try again", { attempt++ }, Modifier.focusRequester(primary).appear())
                                 // Something holds focus meanwhile, so Back still answers.
@@ -2652,19 +2665,24 @@ private fun ShowPage(
                     ) {
                         items(lines, key = { if (it is EpisodeLine.Item) it.episode.id else "s${(it as EpisodeLine.Season).season}" }) { line ->
                             when (line) {
+                                // The season's average ratio sits over its episodes' column of them.
                                 is EpisodeLine.Season -> Row(
-                                    Modifier.padding(start = Space.m, top = Space.l, bottom = Space.xs),
+                                    Modifier.fillMaxWidth().padding(start = Space.m, end = Space.s, top = Space.l, bottom = Space.xs),
                                     horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text("Season ${line.season}", style = Type.headline)
                                     dubs[line.season]?.let { l -> FormatChips(listOf("${FLAGS[l]} ${audioName(l)}")) }
+                                    seasonShare[line.season]?.let { Spacer(Modifier.weight(1f)); EpisodeScore(it, null, standout = false) }
                                 }
                                 is EpisodeLine.Item -> Box(Modifier.onFocusChanged { if (it.hasFocus) onRow = line.index }) { EpisodeRow(
                                     line.episode,
                                     watched = line.episode.titleId in seen,
                                     rating = ratings[line.episode.titleId],
                                     progress = resume?.takeIf { it.episode == line.episode.titleId && it.dur > 0 && it.pos > 0 }?.let { it.pos.toFloat() / it.dur },
-                                    focus = if (line.index == target) targetRow else if (line.index == jumpTo) jumpRow else null,
+                                    standout = line.index == standout,
+                                    coded = bestFirst,
+                                    // Best first, Right enters the list at its top.
+                                    focus = if (if (bestFirst) line === lines.first() else line.index == target) targetRow else if (line.index == jumpTo) jumpRow else null,
                                     onClick = {
                                         lastPlayed = line.index
                                         onPlay(episodes, line.index, false)
@@ -2725,11 +2743,13 @@ private fun ShowPage(
 }
 
 /**
- * An episode: its still (else its number), title, length, how far it was watched, a check once seen;
- * the owner's rating; focused, the copy it plays on (prepared once focus rests there), and Menu opens its marks and Versions.
+ * An episode: its still (else its number), title ("S2 E4 · Title" when [coded], out of season order), length, how far it
+ * was watched, a check once seen; the owner's rating, and its TrueScore at the line's end ([standout]: the best still to
+ * watch); focused, the copy it plays on (prepared once focus rests there) on a line of its own, and Menu opens its marks and Versions.
+ * Text hangs from the still's top edge, so the focused line's arrival moves nothing.
  */
 @Composable
-private fun EpisodeRow(episode: Episode, watched: Boolean, rating: Int?, progress: Float?, focus: FocusRequester?, onClick: () -> Unit, onMenu: () -> Unit) {
+private fun EpisodeRow(episode: Episode, watched: Boolean, rating: Int?, progress: Float?, standout: Boolean, coded: Boolean, focus: FocusRequester?, onClick: () -> Unit, onMenu: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val context = LocalPlatformContext.current
     val density = LocalDensity.current
@@ -2759,15 +2779,75 @@ private fun EpisodeRow(episode: Episode, watched: Boolean, rating: Int?, progres
             if (progress != null) ProgressLine({ progress }, Modifier.align(Alignment.BottomCenter).padding(horizontal = Space.xs, vertical = Space.xs))
             if (watched) WatchedMark(Modifier.align(Alignment.TopEnd).padding(Space.xs))
         }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-            FitText(listOfNotNull("${episode.episode}", title).joinToString(". "), style = Type.headline, active = focused)
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
-                if (episode.secs > 0) Text("${(episode.secs + 30) / 60} min", style = Type.caption, maxLines = 1)
-                if (rating != null) Text(yoursLabel(rating), style = Type.caption.copy(color = Palette.outOf10(rating.toDouble())), maxLines = 1)
-                if (focused && episode.titleId.isNotEmpty()) EpisodePlays(episode.titleId)
+        Column(Modifier.weight(1f).height(STILL.height).padding(top = 2.dp), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            FitText(if (coded) listOfNotNull(episode.code, title).joinToString(" · ") else listOfNotNull("${episode.episode}", title).joinToString(". "), style = Type.headline, active = focused)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
+                    if (episode.secs > 0) Text("${(episode.secs + 30) / 60} min", style = Type.caption, maxLines = 1)
+                    if (rating != null) Text(yoursLabel(rating), style = Type.caption.copy(color = Palette.outOf10(rating.toDouble())), maxLines = 1)
+                }
+                episode.tr?.let { EpisodeScore(it, episode.ts, standout) }
             }
+            if (focused && episode.titleId.isNotEmpty()) EpisodePlays(episode.titleId)
         }
     }
+}
+
+/**
+ * The best episode by TrueScore not yet watched ([seen]), when it is in the show's top quarter (of four or more scored),
+ * so a show watched nearly through doesn't crown a weak leftover; null otherwise.
+ */
+private fun standout(episodes: List<Episode>, seen: Set<TitleId>): Int? {
+    val ranked = episodes.indices.filter { episodes[it].ts != null }.sortedByDescending { episodes[it].ts }
+    if (ranked.size < 4) return null
+    return ranked.take((ranked.size + 3) / 4).firstOrNull { episodes[it].titleId !in seen }
+}
+
+/**
+ * An episode's (or a season's average) net-loved [ratio] behind a drawn heart, in its colour on the score ramp, then its
+ * [score] in text-tertiary. The [standout] trades the heart for a drawn star on a 16% tint of the same colour.
+ */
+@Composable
+private fun EpisodeScore(ratio: Double, score: Int?, standout: Boolean) {
+    val share = pct(ratio)
+    val color = Palette.share(share)
+    Row(
+        if (standout) Modifier.background(color.copy(alpha = 0.16f), RoundedCornerShape(Radius.chip)).padding(horizontal = Space.xs + 2.dp, vertical = 1.dp) else Modifier,
+        horizontalArrangement = Arrangement.spacedBy(Space.xs), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(SCORE_MARK).drawWithCache {
+            val mark = if (standout) starPath(size.width) else heartPath(size.width)
+            onDrawBehind { drawPath(mark, color) }
+        })
+        Text("$share%", style = Type.caption.copy(color = color), maxLines = 1)
+        if (score != null) Text(if (score < 0) "−" + compactCount(-score) else compactCount(score), style = Type.caption.copy(color = Palette.textTertiary), maxLines = 1, modifier = Modifier.padding(start = Space.xs))
+    }
+}
+
+private val SCORE_MARK = 11.dp
+
+/** A heart filling a [w]-wide square. */
+private fun heartPath(w: Float) = Path().apply {
+    moveTo(w * 0.5f, w * 0.9f)
+    cubicTo(w * 0.12f, w * 0.64f, 0f, w * 0.42f, w * 0.04f, w * 0.27f)
+    cubicTo(w * 0.1f, w * 0.06f, w * 0.4f, w * 0.02f, w * 0.5f, w * 0.24f)
+    cubicTo(w * 0.6f, w * 0.02f, w * 0.9f, w * 0.06f, w * 0.96f, w * 0.27f)
+    cubicTo(w, w * 0.42f, w * 0.88f, w * 0.64f, w * 0.5f, w * 0.9f)
+    close()
+}
+
+/** A five-pointed star filling a [w]-wide square. */
+private fun starPath(w: Float) = Path().apply {
+    val c = w / 2
+    val cy = w * 0.54f
+    for (i in 0 until 10) {
+        val r = if (i % 2 == 0) w * 0.5f else w * 0.21f
+        val a = Math.toRadians(-90.0 + i * 36)
+        val x = c + r * kotlin.math.cos(a).toFloat()
+        val y = cy + r * kotlin.math.sin(a).toFloat()
+        if (i == 0) moveTo(x, y) else lineTo(x, y)
+    }
+    close()
 }
 
 /** A focused episode's copy, in its caption line ("4K · DTS-HD 5.1 · ☰ More"); asked for only once focus rests. */
