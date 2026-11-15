@@ -2640,7 +2640,6 @@ private fun ShowPage(
                                     PageButton("${if (started) "Resume" else "Play"} ${next.code}", { onPlay(episodes, target, false) }, Modifier.focusRequester(primary).appear(), icon = Glyph.Play)
                                     if (started) PageButton("Start over", { onPlay(episodes, target, true) }, Modifier.appear(), icon = Glyph.Restart, iconOnly = true)
                                     TrailerButton(info?.trailer)
-                                    if (scored >= 4) PageButton("Best first", { bestFirst = !bestFirst; sorts++ }, Modifier.appear(), selected = bestFirst, icon = Glyph.Rank, iconOnly = true)
                                 }
                                 failed -> PageButton("Try again", { attempt++ }, Modifier.focusRequester(primary).appear())
                                 // Something holds focus meanwhile, so Back still answers.
@@ -2648,10 +2647,14 @@ private fun ShowPage(
                                 else -> Text("No episodes yet", style = Type.body, modifier = Modifier.focusRequester(primary).focusable().appear())
                             }
                         }
-                        // The episode up next's audio languages; a choice holds for every episode.
-                        if (next != null) key(next.titleId) {
-                            val prepared by remember { graph.films.state(next.titleId) }.collectAsState()
-                            AudioChips(next.titleId, prepared, chooseFor = show.titleId)
+                        // The list's order (a chip, always labelled, so focusing it moves nothing: a fourth round button made the
+                        // buttons wrap as labels slid out), then the episode up next's audio languages; a choice holds for every episode.
+                        if (next != null) Row(horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
+                            if (scored >= 4) PageButton("Best first", { bestFirst = !bestFirst; sorts++ }, Modifier.appear(), selected = bestFirst, small = true, icon = Glyph.Rank)
+                            key(next.titleId) {
+                                val prepared by remember { graph.films.state(next.titleId) }.collectAsState()
+                                AudioChips(next.titleId, prepared, chooseFor = show.titleId)
+                            }
                         }
                         if (failed) Text("Episodes didn’t load. Check that the Fire TV is online.", style = Type.caption, modifier = Modifier.appear())
                     }
