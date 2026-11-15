@@ -4,7 +4,7 @@ import { Database } from 'bun:sqlite'
 import { chanKey, channelPicture, COMPS, isAbroad, couldBeLiveMatch, curatedGuide, learnedCompetitions, replayAirings, teamWords, saneFps, unxml, type Channel, type Picture } from './curation.js'
 import { VPN_HOST, type BackupConfig, type XtreamConfig } from './provider.js'
 import { fixtureTeams, type TitleMatch } from './crests.js'
-import { fixtureCrests, fixturesVersion, fixtureVerdict, judgeFixtures, keptFixtures, type Fixtures } from './fixtures.js'
+import { fixtureCrests, fixturesVersion, fixtureVerdict, judgeFixtures, keptFixtures, slotFixture, type Fixtures } from './fixtures.js'
 import { medianMbps, qualityOf } from './quality.js'
 import { flakyRank } from './flaky.js'
 
@@ -27,6 +27,9 @@ export interface AppChannel {
   pic: Picture
   /** Event slot whose current name reads as a fixture. */
   fixture?: true
+  /** The kick-off (s) of the real fixture an event slot's name announces, and its 🏆 group: the app lists the slot as that match while it's on, and not at all otherwise. */
+  kickoff?: number
+  comp?: string
   badges: string[]
   /** The feed's bitrate in Mbps, measured while the app played it; absent when never measured. */
   mbps?: number
@@ -69,7 +72,7 @@ function badges(streamId: number): string[] {
   return out
 }
 
-export function buildAppFeed(cfg: XtreamConfig, channels: Channel[], backup?: BackupConfig, realDebrid?: string, torbox?: string): AppFeed {
+export function buildAppFeed(cfg: XtreamConfig, channels: Channel[], backup?: BackupConfig, realDebrid?: string, torbox?: string, fx?: Fixtures): AppFeed {
   const live = channels.filter((c) => !c.vodExt)
   const home = new Map<number, string>()
   for (const c of live) if (!isComp(c.group) && !home.has(c.streamId)) home.set(c.streamId, c.group)
@@ -81,6 +84,16 @@ export function buildAppFeed(cfg: XtreamConfig, channels: Channel[], backup?: Ba
     const f = familyOf(c)
     const list = members.get(f) ?? members.set(f, []).get(f)!
     if (!list.includes(c.streamId)) list.push(c.streamId)
+  }
+  // An event slot named for a real fixture: when it plays, and in which 🏆 group; one named for a match that can't be on
+  // isn't a fixture slot at all. Once per name (🏆 copies repeat it).
+  const slots = new Map<string, { fixture?: true; kickoff?: number; comp?: string }>()
+  const slotMatch = (name: string) => {
+    if (!slots.has(name)) {
+      const f = fx && slotFixture(fx, name)
+      slots.set(name, f === 'stale' ? {} : f ? { fixture: true, kickoff: f.kickoff, comp: compGroup.get(f.comp)! } : { fixture: true })
+    }
+    return slots.get(name)!
   }
   return {
     groups: [...new Set(live.map((c) => c.group))],
@@ -103,7 +116,7 @@ export function buildAppFeed(cfg: XtreamConfig, channels: Channel[], backup?: Ba
         rank: members.get(family)!.indexOf(c.streamId),
         h: qualityOf(c.streamId)?.h ?? null,
         pic: channelPicture(c),
-        ...(c.isEventSlot && couldBeLiveMatch(c.name) ? { fixture: true as const } : {}),
+        ...(c.isEventSlot && couldBeLiveMatch(c.name) ? slotMatch(c.name) : {}),
         badges: badges(c.streamId),
         mbps: medianMbps(qualityOf(c.streamId)),
         ...(flakyRank(c.streamId) && { flaky: true as const }),
@@ -261,6 +274,11 @@ export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now
       if (found) crest.run(r.title, found.home, found.away, found.homeKey, found.awayKey, found.homeName, found.awayName)
     })
   })()
+  // An event slot named for a real fixture: its name's crests and team keys, so the app takes it for that match.
+  if (fx) for (const c of channels) {
+    const f = c.isEventSlot && couldBeLiveMatch(c.name) ? slotFixture(fx, c.name, now / 1000) : undefined
+    if (f && f !== 'stale') { const m = fixtureCrests(f); crest.run(c.name, m.home, m.away, m.homeKey, m.awayKey, m.homeName, m.awayName) }
+  }
   db.run('CREATE INDEX programmes_channel ON programmes (tvg_id, start)')
   db.run('CREATE INDEX programmes_start ON programmes (start)')
   const file = db.serialize()

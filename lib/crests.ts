@@ -26,8 +26,8 @@ const ESPN_MS = 7 * 864e5
 const espnFile = () => process.env.CRESTS_ESPN_FILE ?? fileURLToPath(new URL('../.cache/crests-espn.json', import.meta.url))
 export interface EspnTeam { displayName?: string; shortDisplayName?: string; name?: string; location?: string; logos?: { href?: string }[] }
 
-/** An ESPN team: its small crest, short name ("Man Utd") and the one key every name of it maps to (its full name's). */
-type EspnEntry = [crest: string, short: string, key: string]
+/** An ESPN team: its small crest, short name ("Man Utd"), the one key every name of it maps to (its full name's), and every league of ours it plays in. */
+type EspnEntry = [crest: string, short: string, key: string, leagues: string[]]
 /** Team key → its ESPN team, from ESPN's lists ([espnTeams] builds it); loaded from disk on first use, fetched again when a week old. */
 let espn: { at: number; teams: Record<string, EspnEntry>; leagues?: string } | null = null
 let espnLoading: Promise<void> | null = null
@@ -35,14 +35,18 @@ let espnLoading: Promise<void> | null = null
 /** ESPN's key for a team: its full name's, which its scoreboard rows carry too ([espnKey] of their team). */
 export const espnKey = (t: EspnTeam) => crestKey(t.displayName || t.name || t.location || '')
 
-/** Every name an ESPN team goes by, as a key, to its crest (small, 64 px) and names; the first league to name a key keeps it. */
-export function espnTeams(lists: EspnTeam[][]): Record<string, EspnEntry> {
+/** Every name an ESPN team goes by, as a key, to its crest (small, 64 px), names and leagues; the first league to name a key keeps it. */
+export function espnTeams(lists: [league: string, teams: EspnTeam[]][]): Record<string, EspnEntry> {
   const out: Record<string, EspnEntry> = {}
-  for (const teams of lists) for (const t of teams) {
+  const byTeam = new Map<string, EspnEntry>()
+  for (const [league, teams] of lists) for (const t of teams) {
     const href = t.logos?.[0]?.href
     if (!href) continue
-    const url = `https://a.espncdn.com/combiner/i?img=${new URL(href).pathname}&w=64&h=64`
-    const entry: EspnEntry = [url, t.shortDisplayName || t.displayName || '', espnKey(t)]
+    const key = espnKey(t)
+    let entry = byTeam.get(key)
+    if (entry) {
+      if (!entry[3].includes(league)) entry[3].push(league)
+    } else byTeam.set(key, (entry = [`https://a.espncdn.com/combiner/i?img=${new URL(href).pathname}&w=64&h=64`, t.shortDisplayName || t.displayName || '', key, [league]]))
     for (const n of [t.displayName, t.shortDisplayName, t.name, t.location]) {
       const k = n ? crestKey(n) : ''
       if (k && !(k in out)) out[k] = entry
@@ -57,18 +61,18 @@ function espnTeam(key: string): EspnEntry | null {
     // Lists kept before they had names (crests only) are read again now, as on a first start.
     if (typeof Object.values(espn!.teams)[0] === 'string') espn = { at: 0, teams: {} }
     // Lists kept from another set of leagues are read again now too, rather than a week later; the kept ones serve meanwhile.
-    if (espn!.leagues !== ESPN_LEAGUES.join()) espn!.at = 0
+    if (espn!.leagues !== ESPN_LEAGUES.join() || !Array.isArray(Object.values(espn!.teams)[0]?.[3])) espn!.at = 0
   }
   if (Date.now() - espn!.at > ESPN_MS && !espnLoading && process.env.NODE_ENV !== 'test') espnLoading = loadEspn().finally(() => (espnLoading = null))
   return espn!.teams[key] ?? null
 }
 
 async function loadEspn() {
-  const lists: EspnTeam[][] = []
+  const lists: [string, EspnTeam[]][] = []
   for (const league of ESPN_LEAGUES) {
     try {
       const res = await getJson<{ sports?: { leagues?: { teams?: { team: EspnTeam }[] }[] }[] }>(`https://site.api.espn.com/apis/site/v2/sports/soccer/${league}/teams`, { timeoutMs: 10_000, retries: 1 })
-      lists.push((res.sports?.[0]?.leagues?.[0]?.teams ?? []).map((t) => t.team))
+      lists.push([league, (res.sports?.[0]?.leagues?.[0]?.teams ?? []).map((t) => t.team)])
     } catch (e) {
       console.warn(`crests: ESPN ${league}: ${e instanceof Error ? e.message : e}`)
     }
@@ -232,6 +236,9 @@ function espnOf(team: string): EspnEntry | null {
 
 /** ESPN's key for the team named [team] (its fixtures carry the same), null for a team ESPN doesn't list. */
 export const espnTeamKey = (team: string): string | null => espnOf(team)?.[2] ?? null
+
+/** The leagues of ours (ESPN_LEAGUES) the team named [team] plays in, null for a team ESPN doesn't list. */
+export const espnTeamLeagues = (team: string): string[] | null => espnOf(team)?.[3] ?? null
 
 /**
  * A match title's teams, home first: an ESPN team by its crest, key and short name ("Man Utd"), another by its crest

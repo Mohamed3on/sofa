@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { airsLive, fixtureVerdict, type Fixture, type Fixtures } from './fixtures.js'
+import { airsLive, fixtureVerdict, slotFixture, type Fixture, type Fixtures } from './fixtures.js'
 
 // Tonight's (2026-11-15) Nations League evening and the re-runs that followed it, as the guide had them.
 const H = 3600
@@ -48,4 +48,16 @@ test('what the fixtures can\'t tell stays with the guide\'s rules until Jev plac
   expect(verdict(konferenz, '2026-11-15T19:15:00Z', 2.5, 'unl', { [asked]: 'unsure' })).toBeUndefined()
   // One team read, one fixture of it on: that fixture.
   expect(verdict('Francia - Türkiye U', '2026-11-15T19:30:00Z', 2.5)).toMatchObject({ live: true, fixture: franceTurkey })
+})
+
+test('an event slot\'s name is its fixture when it names two teams that play; last weekend\'s is stale; others say nothing', () => {
+  const leagues: Record<string, string[]> = { spain: ['uefa.nations'], england: ['uefa.nations'], 'manchester united': ['eng.1', 'eng.fa'], 'crystal palace': ['eng.1'], ajax: ['ned.1', 'uefa.champions'], psv: ['ned.1'] }
+  const KEYS2: Record<string, string> = { ...KEYS, spanien: 'spain', 'manchester united': 'manchester united', 'crystal palace': 'crystal palace', ajax: 'ajax', psv: 'psv' }
+  const slot = (name: string) => slotFixture(fx(), name, at('2026-11-15T20:30:00Z'), (t) => KEYS2[t.toLowerCase()] ?? null, (t) => leagues[KEYS2[t.toLowerCase()]] ?? null)
+  expect(slot('UEFA | 08 - Spain vs England 7:45pm')).toBe(spainEngland)
+  expect(slot('Live | Spanien - England | UEFA Nations League | 8K EXCLUSIVE | DE: DAZN PPV 14')).toBe(spainEngland)
+  expect(slot('Live Football 09 : Manchester United vs Crystal Palace 12:45 pm')).toBe('stale')
+  // Ajax plays in a league we don't read: its match may well be on.
+  expect(slot('Live | Ajax vs. PSV | all | 8K EXCLUSIVE | DE: SOCCER PPV 16')).toBeUndefined()
+  expect(slot('UK: LA LIGA - ALAVES')).toBeUndefined()
 })

@@ -31,9 +31,10 @@ class SameMatch(channels: List<Channel>) : List<Channel> by channels
  * Live now from the guide's [airing] matches: one row per (normalized title, start) on a channel in a
  * 🏆 group, by kick-off, each with its channels best first ([BEST_FIRST]), every one on its family's
  * top-ranked feed, abroad ones only when their picture holds up ([withinBar]). Then 🏆 event slots whose
- * name reads as a fixture, one per name. [crests] (the guide's, by title) tell titles in other languages apart.
+ * name reads as a fixture, one per name. [crests] (the guide's, by title) tell titles in other languages apart. An event
+ * slot the server placed on a real fixture ([Channel.kickoff]) is that match while it's on, at [nowSec], and isn't listed otherwise.
  */
-fun Feed.liveNow(airing: List<Airing>, crests: Map<String, Crests> = emptyMap()): LiveNow {
+fun Feed.liveNow(airing: List<Airing>, crests: Map<String, Crests> = emptyMap(), nowSec: Long = System.currentTimeMillis() / 1000): LiveNow {
     val byTvgId = airing.groupBy { it.tvgId }
     val trophy = channels.filter { it.group.startsWith(TROPHY) }
     // Once per channel: its 🏆 copies share the listing. Other channels with the same title join it in sameMatchOnce.
@@ -44,6 +45,10 @@ fun Feed.liveNow(airing: List<Airing>, crests: Map<String, Crests> = emptyMap())
             for (a in byTvgId[c.tvgId].orEmpty()) {
                 if (seen.add(Triple(c.family, a.norm, a.programme.start))) add(LiveEntry(a.programme.title, a.programme, c, bestOf(c), a.comp))
             }
+        }
+        // Its programme is the match's span; the guide's crests table holds its name's teams, so it joins the guide's rows of the match.
+        for (c in channels.filter { it.slot && it.kickoff?.let { k -> nowSec in k - SLOT_BEFORE..k + SLOT_AFTER } == true }.distinctBy { it.family }) {
+            add(LiveEntry(c.name, Programme(c.kickoff!!, c.kickoff + SLOT_AFTER, c.name, "", false, true), c, bestOf(c), c.comp))
         }
     }
     // An event channel named for a confirmed match, in any group ("Live | Atlético Madrid vs. Barcelona | … | DE: SOCCER PPV
@@ -64,9 +69,15 @@ fun Feed.liveNow(airing: List<Airing>, crests: Map<String, Crests> = emptyMap())
         val all = withinBar((listOf(m.tune) + m.alsoOn).sortedWith(BEST_FIRST))
         m.copy(tune = all.first(), alsoOn = all.drop(1))
     }.sortedBy { it.programme!!.start }
-    val slots = trophy.filter { it.slot && it.fixture && it.family !in folded }.distinctBy { it.name }.map { LiveEntry(it.name, null, it, bestOf(it)) }
+    val listed = confirmed.flatMapTo(HashSet()) { m -> (listOf(m.tune) + m.alsoOn).map { it.family } }
+    val slots = trophy.filter { it.slot && it.fixture && it.kickoff == null && it.family !in folded && it.family !in listed }
+        .distinctBy { it.name }.map { LiveEntry(it.name, null, it, bestOf(it)) }
     return LiveNow(confirmed, slots)
 }
+
+/** A slot placed on a fixture is that match from a quarter-hour before kick-off to the end of its extra time. */
+private const val SLOT_BEFORE = 15 * 60L
+private const val SLOT_AFTER = 135 * 60L
 
 /**
  * A match's channels as its 🏆 group orders them: always-on channels before event slots (an idle slot's marker
@@ -123,7 +134,8 @@ private fun sameMatchOnce(matches: List<LiveEntry>, crests: Map<String, Crests>)
         if (group != null) group += m else groups += mutableListOf(m)
     }
     return groups.map { g ->
-        val title = g.map { it.title }.sortedWith(compareBy({ !VERSUS.containsMatchIn(it) }, { it.length })).first()
+        // A guide title before an event slot's name ("UEFA | 08 - Spain vs England 7:45pm").
+        val title = g.sortedWith(compareBy({ it.via.slot }, { !VERSUS.containsMatchIn(it.title) }, { it.title.length })).first().title
         val programme = g.firstOrNull { teams[it] != null }?.programme ?: g.first().programme
         g.first().copy(title = fixtureOf(title), programme = programme, alsoOn = g.drop(1).map { it.tune }.distinctBy { it.family }.filter { it.family != g.first().tune.family }) to
             g.map { it.programme!!.title }

@@ -26,6 +26,9 @@ data class Channel(
     /** The server's effective picture: the one quality order its 🏆 groups and Live now share. */
     val pic: Picture = Picture(),
     val fixture: Boolean = false,
+    /** The kick-off (epoch s) of the real fixture an event slot's name announces, and that match's 🏆 group: Live now lists the slot as the match while it's on. */
+    val kickoff: Long? = null,
+    val comp: String? = null,
     val badges: List<String> = emptyList(),
     /** The feed's bitrate in Mbps, measured while watching it; null when never measured. */
     val mbps: Float? = null,

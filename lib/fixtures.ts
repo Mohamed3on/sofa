@@ -5,7 +5,7 @@
 // programmes go by the guide's own rules as before.
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { espnKey, espnTeamKey, fixtureTeams, type EspnTeam, type TitleMatch } from './crests.js'
+import { espnKey, espnTeamKey, espnTeamLeagues, fixtureTeams, type EspnTeam, type TitleMatch } from './crests.js'
 import { YOUTH } from './curation.js'
 import { askJev, type JevQuestion } from './jev.js'
 import { writeAtomic, jsonFile } from './fs.js'
@@ -188,6 +188,29 @@ export function fixtureVerdict(
   }
   if (answer === 'unsure') return undefined
   return of(candidates.find((f) => f.id === answer))
+}
+
+/**
+ * The fixture an event slot's name announces, its nearest to [now] (s): "UEFA | 02 - Latvia vs Armenia 2:00pm",
+ * "Live | Spanien - England | UEFA Nations League | 8K EXCLUSIVE | DE: DAZN PPV 14". Only a name whose two teams are both
+ * known and play each other names one; a club's channel ("UK: LA LIGA - ALAVES") or another sport's slot never does.
+ * "stale" for a name of two teams that play only in leagues we read, with no fixture of them from yesterday to tomorrow
+ * (last weekend's "Live Football 09 : Manchester United vs Crystal Palace 12:45 pm"): its match can't be on.
+ */
+export function slotFixture(
+  fx: Fixtures, name: string, now = Date.now() / 1000, teamKey = espnTeamKey, teamLeagues = espnTeamLeagues,
+): Fixture | 'stale' | undefined {
+  for (const part of name.split('|')) {
+    const fixture = part.trim().replace(/^\d+\s*-\s*/, '').replace(/\s+\d{1,2}[:.]\d{2}\s*(?:[ap]m)?$/i, '')
+    const teams = fixtureTeams(fixture)
+    const keys = teams?.map(teamKey)
+    if (!teams || !keys?.[0] || !keys[1] || keys[0] === keys[1]) continue
+    const found = fx.near(now - 2 * DAY_S, now + 2 * DAY_S).filter((f) => keys.includes(f.home.key) && keys.includes(f.away.key))
+    if (found.length) return found.sort((a, b) => Math.abs(a.kickoff - now) - Math.abs(b.kickoff - now))[0]
+    const ours = teams.every((t) => teamLeagues(t)?.every((l) => l in LEAGUE_COMP))
+    return ours && fx.covered(now) ? 'stale' : undefined
+  }
+  return undefined
 }
 
 /** A fixture's two teams as the app's crests table holds a match title's. */

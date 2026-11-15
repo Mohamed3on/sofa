@@ -49,8 +49,8 @@ import { logged, noteMark, pendingLogs, type Done } from '../lib/letterboxd-log.
 export async function channels() {
   const cfg = configFromEnv()
   const backup = backupConfigFromEnv()
-  const [curated, upcoming] = await Promise.all([fetchCuratedChannels(cfg, false), guideUpcoming()])
-  const feed = buildAppFeed(cfg, withCompetitionGroups(await withBackupFeeds(curated, backup), upcoming), backup, process.env.REAL_DEBRID_TOKEN, process.env.TORBOX_TOKEN)
+  const [curated, upcoming] = await Promise.all([fetchCuratedChannels(cfg, false), guideUpcoming(), crestsReady(), fixturesReady()])
+  const feed = buildAppFeed(cfg, withCompetitionGroups(await withBackupFeeds(curated, backup), upcoming), backup, process.env.REAL_DEBRID_TOKEN, process.env.TORBOX_TOKEN, keptFixtures())
   return feed
 }
 

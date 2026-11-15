@@ -109,6 +109,31 @@ class LiveNowTest {
         assertEquals(listOf(5), live.slots.map { it.tune.id })
     }
 
+    @Test fun anEventSlotOnARealFixtureIsThatMatchWhileItsOnAndGoneOtherwise() {
+        val unl = "🏆 Nations League"
+        val ucl = "🏆 Champions League"
+        val kickoff = 1_763_235_900L // 2026-11-15 19:45 UTC
+        val sky = Channel(id = 1, name = "Sky Calcio 1", group = unl, tvgId = "sky", family = "f1", rank = 0)
+        fun slot(id: Int, name: String, kickoff: Long?) =
+            Channel(id = id, name = name, group = ucl, slot = true, fixture = true, family = "f$id", rank = 0, kickoff = kickoff, comp = kickoff?.let { unl })
+        val spain = slot(2, "UEFA | 08 - Spain vs England 7:45pm", kickoff)
+        val latvia = slot(3, "UEFA | 02 - Latvia vs Armenia 2:00pm", kickoff - 5 * 3600 - 45 * 60)
+        val unplaced = slot(4, "UEFA | 26 - Lille v KÍ Klaksvík 20.00", null)
+        val feed = Feed(listOf(unl, ucl), ProviderRoute("http://p", "http://v", "u", "p"), listOf(sky, spain, latvia, unplaced))
+        val title = "Spagna - Inghilterra"
+        val live = feed.liveNow(
+            listOf(Airing("sky", title.lowercase(), Programme(kickoff - 600, kickoff + 11_100, title, "", false, true), unl)),
+            mapOf(title to Crests(null, null, "Spain", "England", "spain|england"), spain.name to Crests(null, null, "Spain", "England", "spain|england")),
+            nowSec = kickoff + 1800,
+        )
+
+        // Spain's slot joins the guide's Spain–England, under the guide's title; Latvia's match is over, so its slot is gone;
+        // the slot the server couldn't place stays unconfirmed.
+        assertEquals(listOf(setOf(1, 2)), live.matches.map { m -> (listOf(m.tune.id) + m.alsoOn.map { it.id }).toSet() })
+        assertEquals(title, live.matches.single().title)
+        assertEquals(listOf(4), live.slots.map { it.tune.id })
+    }
+
     @Test fun abroadChannelsAreListedOnlyWhenTheirPictureHoldsUp() {
         val pl = "🏆 Premier League"
         fun c(id: Int, h: Int, q: Int, abroad: Boolean = false) =
