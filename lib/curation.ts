@@ -534,9 +534,9 @@ const UEFA_ALL = ['ucl', 'uel', 'uecl']
 // non-match programming (a channel airing "Premier League Review" isn't showing it).
 // The longest a live match's listing runs, build-up and extra time included.
 const MATCH_MAX_MS = 3 * 3600_000
-const OTHER_SPORT = /basket|handball|pallamano|volley|superlega|hockey|rugby|darts|netball|cricket|snooker|golf|tennis|boxing|drone|horse|esport|virtual|vela\b/i
+const OTHER_SPORT = /basket|handball|\bEHF\b|pallamano|volley|superlega|hockey|rugby|darts|netball|cricket|snooker|golf|tennis|boxing|drone|horse|esport|virtual|vela\b/i
 const WOMEN = /women|femen|frauen|femminile|f[ée]minin|\bwsl\b|uwcl|سيدات|نساء/i
-const SHOW = /highlight|moments|h[øö]ydepunkt|h[øö]jdepunkt|h[öø]jdpunkt|oppsummering|sammendrag|hoogtepunten|summary|resumo|\b[ei]n 60\b|tonight|review|\bshow\b|magazin|stories|\bbest\b|top goals|top \d+|goals? of|legend|classic|rewind|preview|previa|pre-?match|vorbericht|anteprima|analys|resumen|resúmen|zusammenfassung|replay|re-live|wiederholung|special|especial|feature|weekly|daily|\bnews\b|press conference|conferenza|rueda de prensa|pressekonferenz|weigh|goal rush|greatest|documentar|\bfilm\b|pel[ií]cula|countdown|build-?up|warm-?up|inside|kompakt|\bpur\b|retro|netbusters|full impact|\bicons?\b|league 100\b|\bep\.? ?\d|episode|folge/i
+const SHOW = /highlight|moments|bedste|h[øö]ydepunkt|h[øö]jdepunkt|h[öø]jdpunkt|oppsummering|sammendrag|hoogtepunten|summary|resumo|\b[ei]n 60\b|tonight|review|\bshow\b|magazin|stories|\bbest\b|top goals|top \d+|goals? of|legend|classic|rewind|preview|previa|pre-?match|vorbericht|anteprima|analys|resumen|resúmen|zusammenfassung|replay|re-live|wiederholung|special|especial|feature|weekly|daily|\bnews\b|press conference|conferenza|rueda de prensa|pressekonferenz|weigh|goal rush|greatest|documentar|\bfilm\b|pel[ií]cula|countdown|build-?up|warm-?up|inside|kompakt|\bpur\b|retro|netbusters|full impact|\bicons?\b|league 100\b|\bep\.? ?\d|episode|folge/i
 const vetoed = (text: string) => OTHER_SPORT.test(text) || WOMEN.test(text) || SHOW.test(text)
 // A programme that is a live match: a "live" tag or a fixture ("X v Y", "X - Y", "X vs Y", Arabic "X × Y").
 const LIVE = /\blive\b|ᴸᶦᵛᵉ|\ben directo\b|\ben vivo\b|\bdiretta\b|\ben direct\b|مباشر|прямая трансляция/i
@@ -611,7 +611,7 @@ const FULL_MATCH_SEC = 90 * 60
 const LOOKBACK_SEC = 48 * 3600
 // The competitions a title names; two titles naming different ones are different matches (cup tie, then league game).
 // Youth sides play the same fixture the same day ("UEFA Youth League: AEK - Real Madrid" in the morning).
-const YOUTH = /youth league|\bU-?(?:17|19|21|23)\b|primavera|juvenil/i
+export const YOUTH = /youth league|\bU-?(?:17|19|21|23)\b|primavera|juvenil/i
 const compsOf = (title: string) => (YOUTH.test(title) ? ['youth'] : COMPS.filter((c) => c.re.test(title) && !c.not?.test(title)).map((c) => c.key))
 const sameComp = (a: string[], b: string[]) => !a.length || !b.length || a.some((k) => b.includes(k))
 

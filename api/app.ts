@@ -28,6 +28,7 @@ import { buildAppFeed, buildAppGuide, guideUpcoming } from '../lib/app-feed.js'
 import { arabp2pSeasonDubs } from '../lib/arabp2p.js'
 import { withEpisodeScores } from '../lib/episode-scores.js'
 import { crestsReady, titleMatch } from '../lib/crests.js'
+import { fixturesReady, judgeFixtures, keptFixtures } from '../lib/fixtures.js'
 import { liveMatches } from '../lib/live-matches.js'
 import { iptvCopies, markInfringing, titleCopies } from '../lib/copies.js'
 import { curatedGuide, fetchCuratedChannels, saneFps, vodChannels, withBackupFeeds, withCompetitionGroups } from '../lib/curation.js'
@@ -54,8 +55,10 @@ export async function channels() {
 }
 
 export async function guide() {
-  const [{ channels, xml }] = await Promise.all([curatedGuide(), crestsReady()])
-  return new Response(buildAppGuide(channels, xml, Date.now(), titleMatch), { headers: { 'Content-Type': 'application/gzip' } })
+  const [{ channels, xml }] = await Promise.all([curatedGuide(), crestsReady(), fixturesReady()])
+  const body = buildAppGuide(channels, xml, Date.now(), titleMatch, keptFixtures())
+  void judgeFixtures() // the titles this build couldn't place, for the next
+  return new Response(body, { headers: { 'Content-Type': 'application/gzip' } })
 }
 
 export const matches = () => liveMatches()

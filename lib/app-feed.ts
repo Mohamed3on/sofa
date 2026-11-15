@@ -4,6 +4,7 @@ import { Database } from 'bun:sqlite'
 import { chanKey, channelPicture, COMPS, isAbroad, couldBeLiveMatch, curatedGuide, learnedCompetitions, replayAirings, teamWords, saneFps, unxml, type Channel, type Picture } from './curation.js'
 import { VPN_HOST, type BackupConfig, type XtreamConfig } from './provider.js'
 import { fixtureTeams, type TitleMatch } from './crests.js'
+import { fixtureCrests, fixturesVersion, fixtureVerdict, judgeFixtures, keptFixtures, type Fixtures } from './fixtures.js'
 import { medianMbps, qualityOf } from './quality.js'
 import { flakyRank } from './flaky.js'
 
@@ -155,8 +156,9 @@ const compGroup = new Map(COMPS.map((c) => [c.key, c.group]))
  * Every programme of [xmltv] with the competition key of the live 🏆 match it is (comps, aligned with
  * rows; undefined for anything else), by the rules the 🏆 groups and the app's guide share. Programmes
  * that ended over 2h before [now] are tagged only from their own title (they still tell re-runs apart).
+ * With [fx], the real fixtures decide whatever they can (verdicts, aligned with rows).
  */
-export function guideCompetitions(channels: Channel[], xmltv: string, now = Date.now()) {
+export function guideCompetitions(channels: Channel[], xmltv: string, now = Date.now(), fx?: Fixtures) {
   // Name-as-title filler: ours (slots, uncovered channels) and the provider's own 2-hour blocks
   // named for the channel ("IT: DAZN DIRETTA GOL EUROPA LEAGUE" all day), never a programme.
   const filler = new Set(channels.map((c) => `${c.tvgId}\n${c.name.toLowerCase()}`))
@@ -192,12 +194,23 @@ export function guideCompetitions(channels: Channel[], xmltv: string, now = Date
     const found = new Set([...shared].filter(([, n]) => n === most).map(([j]) => comps[j]))
     if (most >= 2 && found.size === 1) comps[i] = [...found][0]
   })
-  return { rows, replays, comps, cutoff }
+  // The fixtures decide where they can (lib/fixtures.ts): a programme is a live match of ours only when it airs a real
+  // fixture from its kick-off, and one naming a fixture at another time is a re-run. What they can't tell (an uncovered
+  // day, a title Jev hasn't placed yet) keeps the guide's own rules above.
+  const verdicts = rows.map((r, i) =>
+    fx && !r.synthetic && r.stop > cutoff && couldBeLiveMatch(r.title) ? fixtureVerdict(fx, r.title, r.start, r.stop, comps[i] ?? learnedCompetitions(r.title)[0]) : undefined)
+  verdicts.forEach((v, i) => {
+    if (!v) return
+    comps[i] = v.live ? v.comp : undefined
+    if (v.live) replays.delete(i)
+    else if (v.rerun) replays.add(i)
+  })
+  return { rows, replays, comps, cutoff, verdicts }
 }
 
 /** Each channel's 🏆 competitions from [now] on (tvg-id -> competition key -> soonest start, s), from the guide. */
-export function upcomingCompetitions(channels: Channel[], xmltv: string, now = Date.now()): Map<string, Map<string, number>> {
-  const { rows, comps } = guideCompetitions(channels, xmltv, now)
+export function upcomingCompetitions(channels: Channel[], xmltv: string, now = Date.now(), fx?: Fixtures): Map<string, Map<string, number>> {
+  const { rows, comps } = guideCompetitions(channels, xmltv, now, fx)
   const out = new Map<string, Map<string, number>>()
   rows.forEach((r, i) => {
     const k = comps[i]
@@ -209,25 +222,28 @@ export function upcomingCompetitions(channels: Channel[], xmltv: string, now = D
 }
 
 // Worked out once per built guide: the playlist and the app's channel list both want it, and each pass parses all ~18 MB.
-let upcomingOf: { xml: string; upcoming: Map<string, Map<string, number>> } | undefined
+let upcomingOf: { xml: string; fixtures: number; upcoming: Map<string, Map<string, number>> } | undefined
 
 /** [upcomingCompetitions] of the current guide, for withCompetitionGroups; none (groups by name only) if it fails. */
 export async function guideUpcoming(): Promise<Map<string, Map<string, number>>> {
   try {
     const { channels, xml } = await curatedGuide()
-    if (upcomingOf?.xml !== xml) upcomingOf = { xml, upcoming: upcomingCompetitions(channels, xml) }
+    if (upcomingOf?.xml !== xml || upcomingOf.fixtures !== fixturesVersion) {
+      upcomingOf = { xml, fixtures: fixturesVersion, upcoming: upcomingCompetitions(channels, xml, Date.now(), keptFixtures()) }
+      void judgeFixtures() // the titles this pass couldn't place, for the next
+    }
     return upcomingOf.upcoming
   } catch {
     return new Map()
   }
 }
 
-export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now(), crests?: (title: string, onNow: boolean) => TitleMatch | null): Uint8Array {
+export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now(), crests?: (title: string, onNow: boolean) => TitleMatch | null, fx?: Fixtures): Uint8Array {
   const db = new Database(':memory:')
   db.run(`CREATE TABLE programmes (tvg_id TEXT NOT NULL, start INTEGER NOT NULL, stop INTEGER NOT NULL,
     title TEXT NOT NULL, norm TEXT NOT NULL, descr TEXT NOT NULL, synthetic INTEGER NOT NULL, match INTEGER NOT NULL, comp TEXT)`)
   const insert = db.prepare('INSERT INTO programmes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-  const { rows, replays, comps, cutoff } = guideCompetitions(channels, xmltv, now)
+  const { rows, replays, comps, cutoff, verdicts } = guideCompetitions(channels, xmltv, now, fx)
   db.run('CREATE TABLE crests (title TEXT PRIMARY KEY, home TEXT, away TEXT, home_key TEXT, away_key TEXT, home_name TEXT, away_name TEXT)')
   const crest = db.prepare('INSERT OR IGNORE INTO crests VALUES (?, ?, ?, ?, ?, ?, ?)')
   db.transaction(() => {
@@ -238,7 +254,10 @@ export function buildAppGuide(channels: Channel[], xmltv: string, now = Date.now
       const match = !rerun && couldBeLiveMatch(r.title)
       insert.run(r.tvgId, r.start, r.stop, r.title, searchNorm(r.title), r.descr,
         r.synthetic ? 1 : 0, match ? 1 : 0, comp ? compGroup.get(comp)! : null)
-      const found = comp && match ? crests?.(r.title, r.start <= now && r.stop > now) : null
+      // A programme placed on a fixture takes its teams (ESPN's keys, so every language's title of it is one match in the app).
+      const v = verdicts[i]
+      const fixture = v?.live ? v.fixture : undefined
+      const found = comp && match ? (fixture ? fixtureCrests(fixture) : crests?.(r.title, r.start <= now && r.stop > now)) : null
       if (found) crest.run(r.title, found.home, found.away, found.homeKey, found.awayKey, found.homeName, found.awayName)
     })
   })()

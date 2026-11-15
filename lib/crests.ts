@@ -230,6 +230,9 @@ function espnOf(team: string): EspnEntry | null {
   return nation ? espnTeam(nation) : null
 }
 
+/** ESPN's key for the team named [team] (its fixtures carry the same), null for a team ESPN doesn't list. */
+export const espnTeamKey = (team: string): string | null => espnOf(team)?.[2] ?? null
+
 /**
  * A match title's teams, home first: an ESPN team by its crest, key and short name ("Man Utd"), another by its crest
  * as kept and the name the title gives it. Null when neither has a crest. A match [onNow] is looked up before later ones.
