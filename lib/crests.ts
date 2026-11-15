@@ -110,7 +110,7 @@ const ALIASES: Record<string, string> = {
   inter: 'inter milan', internazionale: 'inter milan', milan: 'ac milan', barcellona: 'barcelona', nizza: 'nice', 'paris saint germain': 'paris sg', psg: 'paris sg',
   bayern: 'bayern munich', 'bayern munchen': 'bayern munich', 'bayern monaco': 'bayern munich', atletico: 'atletico madrid', 'atl madrid': 'atletico madrid',
   gladbach: 'borussia monchengladbach', monchengladbach: 'borussia monchengladbach', dortmund: 'borussia dortmund', 'bayer 04 leverkusen': 'bayer leverkusen',
-  '1899 hoffenheim': 'hoffenheim', athletic: 'athletic bilbao', celta: 'celta vigo', havre: 'le havre', sporting: 'sporting cp', cray: 'cray wanderers',
+  '1899 hoffenheim': 'hoffenheim', athletic: 'athletic bilbao', celta: 'celta vigo', villareal: 'villarreal', havre: 'le havre', sporting: 'sporting cp', cray: 'cray wanderers',
 }
 
 /** "Man Utd FC" → "manchester united": accents and club-form words gone, lower case, known short names expanded. */

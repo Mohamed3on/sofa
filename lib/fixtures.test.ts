@@ -8,7 +8,8 @@ const side = (key: string) => ({ key, crest: `${key}.png`, name: key })
 const fixture = (id: string, comp: string, kickoff: string, home: string, away: string): Fixture => ({ id, comp, kickoff: at(kickoff), home: side(home), away: side(away) })
 const spainEngland = fixture('1', 'unl', '2026-11-15T19:45:00Z', 'spain', 'england')
 const franceTurkey = fixture('2', 'unl', '2026-11-15T19:45:00Z', 'france', 'turkiye')
-const all = [spainEngland, franceTurkey]
+const barcaGetafe = fixture('3', 'laliga', '2026-11-16T15:00:00Z', 'barcelona', 'getafe')
+const all = [spainEngland, franceTurkey, barcaGetafe]
 const fx = (covered = true): Fixtures => ({
   near: (from, to, comp) => all.filter((f) => f.kickoff >= from && f.kickoff <= to && (!comp || f.comp === comp)),
   covered: () => covered,
@@ -52,12 +53,16 @@ test('what the fixtures can\'t tell stays with the guide\'s rules until Jev plac
 
 test('an event slot\'s name is its fixture when it names two teams that play; last weekend\'s is stale; others say nothing', () => {
   const leagues: Record<string, string[]> = { spain: ['uefa.nations'], england: ['uefa.nations'], 'manchester united': ['eng.1', 'eng.fa'], 'crystal palace': ['eng.1'], ajax: ['ned.1', 'uefa.champions'], psv: ['ned.1'] }
-  const KEYS2: Record<string, string> = { ...KEYS, spanien: 'spain', 'manchester united': 'manchester united', 'crystal palace': 'crystal palace', ajax: 'ajax', psv: 'psv' }
+  const KEYS2: Record<string, string> = { ...KEYS, spanien: 'spain', barcelona: 'barcelona', alaves: 'alaves', 'manchester united': 'manchester united', 'crystal palace': 'crystal palace', ajax: 'ajax', psv: 'psv' }
   const slot = (name: string) => slotFixture(fx(), name, at('2026-11-15T20:30:00Z'), (t) => KEYS2[t.toLowerCase()] ?? null, (t) => leagues[KEYS2[t.toLowerCase()]] ?? null)
   expect(slot('UEFA | 08 - Spain vs England 7:45pm')).toBe(spainEngland)
   expect(slot('Live | Spanien - England | UEFA Nations League | 8K EXCLUSIVE | DE: DAZN PPV 14')).toBe(spainEngland)
   expect(slot('Live Football 09 : Manchester United vs Crystal Palace 12:45 pm')).toBe('stale')
   // Ajax plays in a league we don't read: its match may well be on.
   expect(slot('Live | Ajax vs. PSV | all | 8K EXCLUSIVE | DE: SOCCER PPV 16')).toBeUndefined()
-  expect(slot('UK: LA LIGA - ALAVES')).toBeUndefined()
+  // A club's channel: its club's match nearest; none then and it's stale.
+  expect(slot('UK: LA LIGA - BARCELONA')).toBe(barcaGetafe)
+  expect(slot('UK: LA LIGA - ALAVES')).toBe('stale')
+  expect(slot('UK: LA LIGA - VILLAREAL')).toBeUndefined() // a club name we can't read leaves the channel as it was
+  expect(slot('IT: PRIM 1 4K [LIVE-EVENT]')).toBeUndefined()
 })

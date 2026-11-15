@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { espnKey, espnTeamKey, espnTeamLeagues, fixtureTeams, type EspnTeam, type TitleMatch } from './crests.js'
-import { YOUTH } from './curation.js'
+import { COMPS, YOUTH } from './curation.js'
 import { askJev, type JevQuestion } from './jev.js'
 import { writeAtomic, jsonFile } from './fs.js'
 import { getJson } from './http.js'
@@ -195,7 +195,9 @@ export function fixtureVerdict(
  * "Live | Spanien - England | UEFA Nations League | 8K EXCLUSIVE | DE: DAZN PPV 14". Only a name whose two teams are both
  * known and play each other names one; a club's channel ("UK: LA LIGA - ALAVES") or another sport's slot never does.
  * "stale" for a name of two teams that play only in leagues we read, with no fixture of them from yesterday to tomorrow
- * (last weekend's "Live Football 09 : Manchester United vs Crystal Palace 12:45 pm"): its match can't be on.
+ * (last weekend's "Live Football 09 : Manchester United vs Crystal Palace 12:45 pm"): its match can't be on. A club's
+ * channel named for our competition ("UK: LA LIGA - ALAVES", "UK: SERIE A - INTER MILAN 4K") is its club's fixture nearest
+ * to [now], and stale when the club has none then (or isn't one ESPN lists for our leagues, as Almería out of La Liga).
  */
 export function slotFixture(
   fx: Fixtures, name: string, now = Date.now() / 1000, teamKey = espnTeamKey, teamLeagues = espnTeamLeagues,
@@ -210,7 +212,14 @@ export function slotFixture(
     const ours = teams.every((t) => teamLeagues(t)?.every((l) => l in LEAGUE_COMP))
     return ours && fx.covered(now) ? 'stale' : undefined
   }
-  return undefined
+  const comp = COMPS.find((c) => c.re.test(name) && !c.not?.test(name))?.key
+  const club = name.match(/\s[-–]\s([^-–|:]+)$/)?.[1].replace(/\s+(?:4K|UHD|FHD|HD|SD|HEVC|RAW)\b.*$/i, '').trim()
+  if (!comp || !club || !fx.covered(now, comp)) return undefined
+  // A club ESPN doesn't list for our leagues may be a name we can't read: the channel stays as it was.
+  const key = teamKey(club)
+  if (!key) return undefined
+  const found = fx.near(now - 2 * DAY_S, now + 2 * DAY_S).filter((f) => f.home.key === key || f.away.key === key)
+  return found.sort((a, b) => Math.abs(a.kickoff - now) - Math.abs(b.kickoff - now))[0] ?? 'stale'
 }
 
 /** A fixture's two teams as the app's crests table holds a match title's. */
