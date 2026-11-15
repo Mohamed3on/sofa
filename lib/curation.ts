@@ -523,6 +523,8 @@ export const COMPS: Competition[] = [
   { key: 'eflcup', group: '🏆 EFL Cup', logo: '500-dark/41', re: /carabao|\bEFL Cup\b|\bleague cup\b|كأس الرابطة الإنجليزية|كأس كاراباو/i, not: /adib|\buae\b|scottish|welsh|irish|premier sports cup/i },
   { key: 'coppa', group: '🏆 Coppa Italia', logo: '500/2192', re: /coppa italia|كأس إيطاليا/i, not: /serie c|primavera/i },
   { key: 'pokal', group: '🏆 DFB-Pokal', logo: '500-dark/2061', re: /dfb[- ]?pokal|كأس ألمانيا/i },
+  { key: 'unl', group: '🏆 Nations League', logo: '500-dark/2395', re: /nations[- ]league|liga de naciones|liga das na[cç][õo]es|ligue des nations|دوري الأمم الأوروبية/i, not: /concacaf/i },
+  { key: 'afcon', group: '🏆 Africa Cup of Nations', logo: '500-dark/76', re: /africa cup of nations|\bAFCON\b|copa africana de naciones|coupe d'afrique des nations|كأس (?:ال)?أمم (?:ال)?[أا]فري[قي]ي?ا|كأس الأمم الأفريقية/i, not: /\bu-?\d{2}\b|wafcon/i },
 ]
 const UEFA_ALL = ['ucl', 'uel', 'uecl']
 // Shared vetoes: other sports and women's competitions that reuse league names, and
@@ -531,7 +533,7 @@ const UEFA_ALL = ['ucl', 'uel', 'uecl']
 const MATCH_MAX_MS = 3 * 3600_000
 const OTHER_SPORT = /basket|handball|pallamano|volley|superlega|hockey|rugby|darts|netball|cricket|snooker|golf|tennis|boxing|drone|horse|esport|virtual|vela\b/i
 const WOMEN = /women|femen|frauen|femminile|f[ée]minin|\bwsl\b|uwcl|سيدات|نساء/i
-const SHOW = /highlight|hoogtepunten|review|\bshow\b|magazin|stories|\bbest\b|top goals|top \d+|goals? of|legend|classic|rewind|preview|previa|pre-?match|vorbericht|anteprima|analys|resumen|resúmen|zusammenfassung|replay|re-live|wiederholung|special|especial|feature|weekly|daily|\bnews\b|press conference|conferenza|rueda de prensa|pressekonferenz|weigh|goal rush|greatest|documentar|\bfilm\b|pel[ií]cula|countdown|build-?up|warm-?up|inside|kompakt|\bpur\b|retro|netbusters|full impact|\bicons?\b|league 100\b|\bep\.? ?\d|episode|folge/i
+const SHOW = /highlight|hoogtepunten|summary|resumo|\b[ei]n 60\b|tonight|review|\bshow\b|magazin|stories|\bbest\b|top goals|top \d+|goals? of|legend|classic|rewind|preview|previa|pre-?match|vorbericht|anteprima|analys|resumen|resúmen|zusammenfassung|replay|re-live|wiederholung|special|especial|feature|weekly|daily|\bnews\b|press conference|conferenza|rueda de prensa|pressekonferenz|weigh|goal rush|greatest|documentar|\bfilm\b|pel[ií]cula|countdown|build-?up|warm-?up|inside|kompakt|\bpur\b|retro|netbusters|full impact|\bicons?\b|league 100\b|\bep\.? ?\d|episode|folge/i
 const vetoed = (text: string) => OTHER_SPORT.test(text) || WOMEN.test(text) || SHOW.test(text)
 // A programme that is a live match: a "live" tag or a fixture ("X v Y", "X - Y", "X vs Y", Arabic "X × Y").
 const LIVE = /\blive\b|ᴸᶦᵛᵉ|\ben directo\b|\ben vivo\b|\bdiretta\b|\ben direct\b|مباشر|прямая трансляция/i
@@ -575,7 +577,7 @@ export function learnedCompetitions(title: string, now = new Date()): string[] {
 // " - ", since templates like "Liga włoska - mecz: X - Y" put the teams last). Club words (Real, City,
 // United…) and competition words are skipped, so "Real Madrid v Real Betis" is madrid|betis.
 // After a match: words that only follow a played match.
-const AFTER = /highlight|hoogtepunten|resumen|resúmen|zusammenfassung|\breview\b|rewind|replay|re-live|wiederholung|shortcut|\bsintesi\b|\bresume\b|résumé|ملخص/i
+const AFTER = /highlight|hoogtepunten|summary|resumen|resúmen|zusammenfassung|\breview\b|rewind|replay|re-live|wiederholung|shortcut|\bsintesi\b|\bresume\b|résumé|ملخص/i
 const VERSUS = /\s(?:v|vs\.?|x|×|@)\s/i
 const DASH = /\s[-–—]\s/g
 const NOT_TEAM = new Set(('fc cf ac as sc sv ssc afc cd ud sd rc rcd vfb vfl tsg rb bc club de del la el le the of and real city united ' +
