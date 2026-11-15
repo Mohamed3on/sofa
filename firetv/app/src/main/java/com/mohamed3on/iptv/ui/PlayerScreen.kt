@@ -171,7 +171,6 @@ private const val REFRESHING = "Refreshing…"
  * every frame, and the menus wait on it.
  */
 fun videoSurface(context: Context) = SurfaceView(context).apply {
-    keepScreenOn = true
     holder.setFormat(PixelFormat.TRANSLUCENT)
 }
 

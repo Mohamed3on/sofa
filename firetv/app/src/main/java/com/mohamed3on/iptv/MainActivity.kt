@@ -112,6 +112,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The screen stays on while Sofa is open: a video is always on screen or under it. Set on the window, not
+        // as the video views' keepScreenOn: Compose can attach a view during the window's own first attach, and
+        // Android then counts its keepScreenOn without seeing a change, so the window never got the flag and a TCL Q7C
+        // dimmed and went to its screensaver and auto standby mid-episode.
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         // A launch reopens Movies & Shows (or the title page) it was closed on; a check target wins.
         Check.request(intent.getStringExtra("open") ?: graph.prefs.get(Check.LAST_SCREEN))
         val sync = graph.sync
