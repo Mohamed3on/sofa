@@ -89,7 +89,7 @@ async function readTrakt(access: string, prev: Kept | null, full: boolean): Prom
   if (!full && prev?.trakt === 'on' && acts && prev.acts === acts && prev.rated && prev.filmAt) return { ...traktOf(prev), trakt: 'on' }
   const [movies, shows, hidden, watchlist, ratings] = await Promise.all([
     get<{ movie: Ids; plays: number; last_watched_at: string }[]>('/sync/watched/movies'),
-    get<{ last_watched_at: string; show: Ids; seasons?: { number: number; episodes: { number: number; last_watched_at: string }[] }[] }[]>('/sync/watched/shows'),
+    get<{ last_watched_at: string; show: Ids; seasons?: { number: number; episodes: { number: number; last_watched_at: string }[] }[] }[]>('/sync/watched/shows?extended=progress'), // Trakt lists a show's seasons and episodes only when asked for its progress
     get<{ show?: Ids }[]>('/users/hidden/progress_watched?type=show&limit=1000'),
     get<{ type: string; movie?: Ids; show?: Ids }[]>('/sync/watchlist'),
     get<{ rating: number; type: string; movie?: Ids; show?: Ids; episode?: { season: number; number: number } }[]>('/sync/ratings'),
