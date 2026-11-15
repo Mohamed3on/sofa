@@ -1349,7 +1349,11 @@ private fun LiveRow(entry: LiveEntry, clock: State<Long>, playing: Boolean, watc
             FitText(title, style = Type.headline)
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            FitText(if (programme == null) "Not confirmed" else if (entry.alsoOn.isNotEmpty()) "$channel · +${entry.alsoOn.size} more" else channel, style = Type.body, modifier = Modifier.weight(1f))
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                FitText(if (programme == null) "Not confirmed" else if (entry.alsoOn.isNotEmpty()) "$channel · +${entry.alsoOn.size} more" else channel, style = Type.body, modifier = Modifier.weight(1f, fill = false))
+                // The picture OK tunes, as every channel row under it says its own.
+                Badges(entry.tune.badges)
+            }
             if (programme != null) Progress(programme, clock)
         }
         LastLine(watchHint) { LiveComp(entry) }

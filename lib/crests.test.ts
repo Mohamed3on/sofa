@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { crestKey, fixtureTeams, pickCrest } from './crests.js'
+import { crestKey, fixtureTeams, nationKey, pickCrest } from './crests.js'
 
 // Titles as the guide carries them (2026-11-08), each a broadcaster's own way of naming one match.
 test('a match title gives its two teams, home first, whatever the broadcaster wraps round them', () => {
@@ -29,4 +29,21 @@ test('a crest is taken only from a football team of that name, never a near miss
   expect(pickCrest('grimsby', [team('Grimsby Town', 'gt.png')])).toBe('gt.png')
   expect(pickCrest('arsenal', [team('Arsenal', 'w.png', { strGender: 'Female' }), team('Arsenal', 'a.png')])).toBe('a.png')
   expect(pickCrest('inter', [team('Intercity', 'ic.png')])).toBeNull()
+})
+
+// Tonight's guide (2026-11-15) titles the national teams in a dozen languages; ESPN lists them in English.
+test('a national team named in any language is its ESPN name, and a name two countries share is none', () => {
+  const nation = (t: string) => fixtureTeams(t)?.map(nationKey)
+  expect(nation('Spagna - Inghilterra')).toEqual(['spain', 'england'])
+  expect(nation('Futebol - UEFA Nations League  : Espanha x Inglaterra ᴸᶦᵛᵉ')).toEqual(['spain', 'england'])
+  expect(nation('Football: Nations League - match: Croatia - Czech Republic')).toEqual(['croatia', 'czechia'])
+  expect(nation('UEFA Nations League - Frankrijk - Turkije')).toEqual(['france', 'turkiye'])
+  expect(nation('Alemania vs Holanda - UEFA Nations League')).toEqual(['germany', 'netherlands'])
+  expect(nation('Hungría vs Irlanda del Norte - UEFA Nations League')).toEqual(['hungary', 'northern ireland'])
+  expect(nation('Suíça vs Escócia - UEFA Nations League')).toEqual(['switzerland', 'scotland'])
+  expect(nation('Sierra Leone vs D.R. Congo - Africa Cup of Nations')).toEqual(['sierra leone', 'congo dr'])
+  expect(nation('Gambia vs Costa de Marfil - Copa Africana de Naciones')).toEqual(['gambia', 'ivory coast'])
+  expect(nationKey('مصر')).toBe('egypt')
+  expect(nationKey('Kongo')).toBeNull() // Polish for Congo, Norwegian for DR Congo
+  expect(nationKey('Arsenal')).toBeNull()
 })

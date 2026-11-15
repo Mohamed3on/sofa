@@ -2,6 +2,7 @@ package com.mohamed3on.iptv
 
 import com.mohamed3on.iptv.data.Airing
 import com.mohamed3on.iptv.data.Channel
+import com.mohamed3on.iptv.data.Crests
 import com.mohamed3on.iptv.data.Feed
 import com.mohamed3on.iptv.data.Picture
 import com.mohamed3on.iptv.data.Programme
@@ -54,6 +55,29 @@ class LiveNowTest {
         // The earlier kick-off leads; English over Arabic at equal pictures, then the unmeasured "4K" name,
         // which the server counts as a 1080p feed of unknown fps.
         assertEquals(listOf(listOf(2, 1, 3), listOf(4)), live.matches.map { m -> listOf(m.tune.id) + m.alsoOn.map { it.id } })
+    }
+
+    @Test fun oneMatchTitledInSeveralLanguagesIsOneRow() {
+        val unl = "🏆 Nations League"
+        fun c(id: Int) = Channel(id = id, name = "C$id", group = unl, tvgId = "t$id", family = "f$id", rank = 0)
+        val feed = Feed(listOf(unl), ProviderRoute("http://p", "http://v", "u", "p"), (1..5).map(::c))
+        fun on(id: Int, title: String) = Airing("t$id", title.lowercase(), Programme(0, 7200, title, "", false, true), unl)
+        // Titles from tonight's guide; the server resolved the teams of all but the conference feed.
+        val crests = mapOf(
+            "Spanien - England" to Crests(null, null, key = "spain|england"),
+            "Spagna - Inghilterra" to Crests(null, null, key = "spain|england"),
+            "Futebol - UEFA Nations League  : Espanha x Inglaterra ᴸᶦᵛᵉ" to Crests("es.png", "en.png", key = "spain|england"),
+            "Frankreich - Türkei" to Crests(null, null, key = "france|turkiye"),
+        )
+        val live = feed.liveNow(listOf(
+            on(1, "Spanien - England"), on(2, "Spagna - Inghilterra"), on(3, "Frankreich - Türkei"),
+            on(4, "Futebol - UEFA Nations League  : Espanha x Inglaterra ᴸᶦᵛᵉ"), on(5, "UEFA Nations League Switch ᴸᶦᵛᵉ"),
+        ), crests)
+
+        // Same two teams in any language: one row. Another match at the same time, and a feed naming no teams, stay apart.
+        assertEquals(setOf(setOf(1, 2, 4), setOf(3), setOf(5)), live.matches.map { m -> (listOf(m.tune.id) + m.alsoOn.map { it.id }).toSet() }.toSet())
+        // Up/Down from any of them walks all three.
+        assertEquals(listOf(1, 2, 4), live.contextFor(c(2)).map { it.id }.sorted())
     }
 
     @Test fun abroadChannelsAreListedOnlyWhenTheirPictureHoldsUp() {

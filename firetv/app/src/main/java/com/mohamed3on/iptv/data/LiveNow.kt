@@ -31,9 +31,9 @@ class SameMatch(channels: List<Channel>) : List<Channel> by channels
  * Live now from the guide's [airing] matches: one row per (normalized title, start) on a channel in a
  * 🏆 group, by kick-off, each with its channels best first ([BEST_FIRST]), every one on its family's
  * top-ranked feed, abroad ones only when their picture holds up ([withinBar]). Then 🏆 event slots whose
- * name reads as a fixture, one per name.
+ * name reads as a fixture, one per name. [crests] (the guide's, by title) tell titles in other languages apart.
  */
-fun Feed.liveNow(airing: List<Airing>): LiveNow {
+fun Feed.liveNow(airing: List<Airing>, crests: Map<String, Crests> = emptyMap()): LiveNow {
     val byTvgId = airing.groupBy { it.tvgId }
     val trophy = channels.filter { it.group.startsWith(TROPHY) }
     // Once per channel: its 🏆 copies share the listing. Other channels with the same title join it in sameMatchOnce.
@@ -50,7 +50,7 @@ fun Feed.liveNow(airing: List<Airing>): LiveNow {
     // 104"), is listed under it: a team word from each side, so the club channel "LA LIGA - ATLETICO MADRID" is not.
     val named = channels.filter { it.slot && it.fixture }
     val folded = HashSet<String>()
-    val confirmed = sameMatchOnce(matches).map { m ->
+    val confirmed = sameMatchOnce(matches, crests).map { m ->
         val (home, away) = sidesOf(m.title) ?: return@map m
         val more = named.filter { s -> teamWords(s.name).let { w -> w.any { it in home } && w.any { it in away } } }
         folded += more.map { it.family }
@@ -99,24 +99,29 @@ private fun sidesOf(fixture: String): Pair<Set<String>, Set<String>>? {
 
 /**
  * Broadcasters title one match differently ("Live: LaLiga - Athletic Bilbao - Real Sociedad",
- * "Athletic Bilbao vs Real Sociedad - Spanish La Liga"), so rows are one match when they share the
- * competition, overlap in time and name two of the same teams' words. The first row (best channel)
- * is kept; it shows the clearest title of the group (a "v"/"vs" one, then the shortest).
+ * "Athletic Bilbao vs Real Sociedad - Spanish La Liga", "Spagna - Inghilterra"), so rows are one match when they share
+ * the competition, overlap in time and either name two of the same teams' words or, by the server's [crests], the same
+ * two teams in any language and order. The first row (best channel) is kept; it shows the clearest title of the group
+ * (a "v"/"vs" one, then the shortest) and the programme of the first row whose teams the server knows, so the match
+ * gets its crests and score.
  */
-private fun sameMatchOnce(matches: List<LiveEntry>): List<LiveEntry> {
+private fun sameMatchOnce(matches: List<LiveEntry>, crests: Map<String, Crests>): List<LiveEntry> {
+    val teams = matches.associateWith { m -> crests[m.programme!!.title]?.key?.split('|')?.filter { it.isNotEmpty() }?.toSet()?.takeIf { it.size == 2 } }
     val groups = mutableListOf<MutableList<LiveEntry>>()
     for (m in matches) {
         val words = teamWords(m.title)
+        val same = teams[m]
         val group = groups.firstOrNull { g ->
             val first = g.first()
             first.comp == m.comp && first.programme!!.start < m.programme!!.stop && m.programme.start < first.programme.stop &&
-                (teamWords(first.title) intersect words).size >= 2
+                ((teamWords(first.title) intersect words).size >= 2 || (same != null && g.any { teams[it] == same }))
         }
         if (group != null) group += m else groups += mutableListOf(m)
     }
     return groups.map { g ->
         val title = g.map { it.title }.sortedWith(compareBy({ !VERSUS.containsMatchIn(it) }, { it.length })).first()
-        g.first().copy(title = fixtureOf(title), alsoOn = g.drop(1).map { it.tune }.distinctBy { it.family }.filter { it.family != g.first().tune.family })
+        val programme = g.firstOrNull { teams[it] != null }?.programme ?: g.first().programme
+        g.first().copy(title = fixtureOf(title), programme = programme, alsoOn = g.drop(1).map { it.tune }.distinctBy { it.family }.filter { it.family != g.first().tune.family })
     }
 }
 

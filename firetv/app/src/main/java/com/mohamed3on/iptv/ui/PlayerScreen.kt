@@ -309,7 +309,7 @@ private fun PlayerChrome(
     suspend fun currentLiveNow(): LiveNow? {
         val g = guide
         val now = System.currentTimeMillis() / 1000
-        return withContext(Dispatchers.IO) { runCatching { feed.liveNow(g?.airingMatches(now).orEmpty()) }.getOrNull() }
+        return withContext(Dispatchers.IO) { runCatching { feed.liveNow(g?.airingMatches(now).orEmpty(), g?.crests.orEmpty()) }.getOrNull() }
     }
 
     fun perform(action: KeyAction) {

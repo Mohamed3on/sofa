@@ -17,9 +17,11 @@ const file = () => process.env.CRESTS_FILE ?? fileURLToPath(new URL('../.cache/c
 
 type Kept = Record<string, { at: number; url: string | null }>
 
-/** ESPN's soccer leagues and cups the household's competitions play in; top leagues first, so a shared short name keeps theirs. */
+/** ESPN's soccer leagues and cups the household's competitions play in; top leagues first, so a shared short name keeps theirs.
+ *  National teams last: Nations League, Euro and World Cup (qualifiers too), Africa Cup of Nations. */
 export const ESPN_LEAGUES = ['eng.1', 'esp.1', 'ger.1', 'ita.1', 'fra.1', 'uefa.champions', 'uefa.europa', 'uefa.europa.conf', 'eng.2', 'por.1', 'ned.1',
-  'sco.1', 'tur.1', 'ksa.1', 'usa.1', 'eng.fa', 'eng.league_cup', 'esp.copa_del_rey', 'ger.dfb_pokal', 'ita.coppa_italia', 'fra.coupe_de_france']
+  'sco.1', 'tur.1', 'ksa.1', 'usa.1', 'eng.fa', 'eng.league_cup', 'esp.copa_del_rey', 'ger.dfb_pokal', 'ita.coppa_italia', 'fra.coupe_de_france',
+  'uefa.nations', 'uefa.euroq', 'uefa.euro', 'fifa.worldq.uefa', 'fifa.world', 'caf.nations_qual', 'caf.nations']
 const ESPN_MS = 7 * 864e5
 const espnFile = () => process.env.CRESTS_ESPN_FILE ?? fileURLToPath(new URL('../.cache/crests-espn.json', import.meta.url))
 export interface EspnTeam { displayName?: string; shortDisplayName?: string; name?: string; location?: string; logos?: { href?: string }[] }
@@ -27,7 +29,7 @@ export interface EspnTeam { displayName?: string; shortDisplayName?: string; nam
 /** An ESPN team: its small crest, short name ("Man Utd") and the one key every name of it maps to (its full name's). */
 type EspnEntry = [crest: string, short: string, key: string]
 /** Team key → its ESPN team, from ESPN's lists ([espnTeams] builds it); loaded from disk on first use, fetched again when a week old. */
-let espn: { at: number; teams: Record<string, EspnEntry> } | null = null
+let espn: { at: number; teams: Record<string, EspnEntry>; leagues?: string } | null = null
 let espnLoading: Promise<void> | null = null
 
 /** ESPN's key for a team: its full name's, which its scoreboard rows carry too ([espnKey] of their team). */
@@ -54,6 +56,8 @@ function espnTeam(key: string): EspnEntry | null {
     try { espn = JSON.parse(readFileSync(espnFile(), 'utf8')) } catch { espn = { at: 0, teams: {} } }
     // Lists kept before they had names (crests only) are read again now, as on a first start.
     if (typeof Object.values(espn!.teams)[0] === 'string') espn = { at: 0, teams: {} }
+    // Lists kept from another set of leagues are read again now too, rather than a week later; the kept ones serve meanwhile.
+    if (espn!.leagues !== ESPN_LEAGUES.join()) espn!.at = 0
   }
   if (Date.now() - espn!.at > ESPN_MS && !espnLoading && process.env.NODE_ENV !== 'test') espnLoading = loadEspn().finally(() => (espnLoading = null))
   return espn!.teams[key] ?? null
@@ -73,7 +77,7 @@ async function loadEspn() {
   console.log(`crests: ESPN lists ${lists.length}/${ESPN_LEAGUES.length} leagues, ${Object.keys(teams).length} names`)
   // A failed run keeps the last lists and tries again in an hour, not a week.
   if (Object.keys(teams).length < 200) { espn = { at: Date.now() - ESPN_MS + 3_600_000, teams: { ...espn?.teams, ...teams } }; return }
-  espn = { at: Date.now(), teams }
+  espn = { at: Date.now(), teams, leagues: ESPN_LEAGUES.join() }
   await writeAtomic(espnFile(), espn)
 }
 
@@ -170,6 +174,62 @@ export function crestOf(team: string, onNow = false): string | null {
 /** A match title's two teams: crests as kept, the keys its live state is filed under, and short names. */
 export interface TitleMatch { home: string | null; away: string | null; homeKey: string; awayKey: string; homeName: string; awayName: string }
 
+// Broadcasters name a national team in their own language ("Spagna - Inghilterra", "Espanha x Inglaterra"), ESPN in
+// English. Intl names every country in every language; England, Scotland, Wales and Northern Ireland are no country to
+// it, so they are listed here, as are the countries ESPN or broadcasters name otherwise than Intl's English.
+const LOCALES = ['en', 'de', 'es', 'it', 'pt', 'fr', 'nl', 'nb', 'sv', 'da', 'fi', 'cs', 'sk', 'pl', 'hr', 'sr-Latn', 'sl', 'hu', 'ro', 'el', 'tr', 'ar', 'ru']
+const HOME_NATIONS: Record<string, string[]> = {
+  england: ['Inghilterra', 'Inglaterra', 'Angleterre', 'Engeland', 'Englanti', 'Anglie', 'Anglia', 'Engleska', 'Anglija', 'Anglicko', 'İngiltere', 'Αγγλία', 'Англия', 'إنجلترا', 'إنكلترا'],
+  scotland: ['Schottland', 'Escocia', 'Escócia', 'Scozia', 'Écosse', 'Schotland', 'Skottland', 'Skotland', 'Skotlanti', 'Skotsko', 'Szkocja', 'Škotska', 'Skócia', 'Scoția', 'İskoçya', 'Σκωτία', 'Шотландия', 'اسكتلندا', 'إسكتلندا'],
+  wales: ['Gales', 'País de Gales', 'Galles', 'Pays de Galles', 'Walia', 'Velšsko', 'Wales', 'Γουαλία', 'Уэльс', 'ويلز'],
+  'northern ireland': ['Nordirland', 'Irlanda del Norte', 'Irlanda do Norte', 'Irlanda del Nord', 'Irlande du Nord', 'Noord-Ierland', 'Nord-Irland', 'Pohjois-Irlanti',
+    'Severní Irsko', 'Irlandia Północna', 'Sjeverna Irska', 'Kuzey İrlanda', 'Βόρεια Ιρλανδία', 'Северная Ирландия', 'أيرلندا الشمالية'],
+}
+/** Intl's English (or a broadcaster's) name of a country as ESPN's. */
+const ESPN_NATION: Record<string, string> = {
+  'bosnia and herzegovina': 'bosnia herzegovina', bosnia: 'bosnia herzegovina', 'congo kinshasa': 'congo dr', 'dr congo': 'congo dr', 'rd congo': 'congo dr',
+  'congo brazzaville': 'congo', 'cote d ivoire': 'ivory coast', ireland: 'republic of ireland', 'czech republic': 'czechia', turkey: 'turkiye',
+  holland: 'netherlands', 'cape verde islands': 'cape verde', usa: 'united states', 'korea republic': 'south korea',
+  'republica checa': 'czechia', 'republica tcheca': 'czechia', 'repubblica ceca': 'czechia', 'tschechische republik': 'czechia', 'republique tcheque': 'czechia',
+  holanda: 'netherlands', olanda: 'netherlands', hollande: 'netherlands', 'costa marfil': 'ivory coast', 'costa do marfim': 'ivory coast', 'costa d avorio': 'ivory coast', elfenbeinkuste: 'ivory coast',
+  'd r congo': 'congo dr', 'r d congo': 'congo dr', 'republica del congo': 'congo', 'republic of congo': 'congo', 'republique du congo': 'congo',
+  'macedonia norte': 'north macedonia', macedonia: 'north macedonia', 'fyr macedonia': 'north macedonia',
+}
+let nations: Map<string, string> | undefined
+
+/**
+ * The English key of a country named in any of [LOCALES] ("Spagna", "Tschechien", "إسبانيا" → spain, czechia), ESPN's
+ * spelling where it has its own; null for no country's name, or for a name two languages give different countries.
+ */
+export function nationKey(team: string): string | null {
+  if (!nations) {
+    const found = new Map<string, Set<string>>()
+    const add = (name: string, en: string) => { const k = crestKey(name); if (k) (found.get(k) ?? found.set(k, new Set()).get(k)!).add(en) }
+    const en = new Intl.DisplayNames(['en'], { type: 'region' })
+    const codes: string[] = []
+    for (let a = 65; a < 91; a++) for (let b = 65; b < 91; b++) {
+      const c = String.fromCharCode(a, b)
+      try { if (en.of(c) !== c) codes.push(c) } catch {}
+    }
+    for (const locale of LOCALES) {
+      const names = new Intl.DisplayNames([locale], { type: 'region' })
+      for (const c of codes) add(names.of(c)!, crestKey(en.of(c)!))
+    }
+    for (const [nation, names] of Object.entries(HOME_NATIONS)) for (const n of names) add(n, nation)
+    nations = new Map([...found].filter(([, ens]) => ens.size === 1).map(([k, ens]) => { const e = [...ens][0]; return [k, ESPN_NATION[e] ?? e] }))
+  }
+  const key = crestKey(team)
+  return ESPN_NATION[key] ?? nations.get(key) ?? null
+}
+
+/** ESPN's team for [team]: by its own name, else a national team by its name in another language. */
+function espnOf(team: string): EspnEntry | null {
+  const own = espnTeam(crestKey(team))
+  if (own) return own
+  const nation = nationKey(team)
+  return nation ? espnTeam(nation) : null
+}
+
 /**
  * A match title's teams, home first: an ESPN team by its crest, key and short name ("Man Utd"), another by its crest
  * as kept and the name the title gives it. Null when neither has a crest. A match [onNow] is looked up before later ones.
@@ -178,7 +238,7 @@ export function titleMatch(title: string, onNow = false): TitleMatch | null {
   const teams = fixtureTeams(title)
   if (!teams) return null
   const [h, a] = teams.map((t) => {
-    const e = espnTeam(crestKey(t))
+    const e = espnOf(t)
     return e ? { crest: e[0], name: e[1], key: e[2] } : { crest: crestOf(t, onNow), name: t, key: crestKey(t) }
   })
   return h.crest || a.crest ? { home: h.crest, away: a.crest, homeKey: h.key, awayKey: a.key, homeName: h.name, awayName: a.name } : null
