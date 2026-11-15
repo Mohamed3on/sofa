@@ -80,6 +80,35 @@ class LiveNowTest {
         assertEquals(listOf(1, 2, 4), live.contextFor(c(2)).map { it.id }.sorted())
     }
 
+    @Test fun anEventSlotNamedInEnglishFoldsUnderItsMatchTitledOtherwise() {
+        val unl = "🏆 Nations League"
+        val ucl = "🏆 Champions League"
+        val polsat = Channel(id = 1, name = "Polsat Sport Premium 2", group = unl, tvgId = "p", family = "f1", rank = 0)
+        val sport1 = Channel(id = 2, name = "Sport 1", group = unl, tvgId = "s", family = "f2", rank = 0)
+        val croatia = ch(3, "UEFA | 06 - Croatia vs Czechia 7:45pm", ucl, slot = true)
+        val france = ch(4, "UEFA | 07 - France vs Turkey 7:45pm", ucl, slot = true)
+        val belgium = ch(5, "UEFA | 05 - Belgium vs Italy 7:45pm", ucl, slot = true)
+        val english = Channel(id = 6, name = "Sport 2", group = unl, tvgId = "e", family = "f6", rank = 0)
+        val feed = Feed(listOf(unl, ucl), ProviderRoute("http://p", "http://v", "u", "p"), listOf(polsat, sport1, english, croatia, france, belgium))
+        fun on(tvgId: String, title: String) = Airing(tvgId, title.lowercase(), Programme(0, 7200, title, "", false, true), unl)
+        val live = feed.liveNow(
+            listOf(
+                on("p", "Croatia vs Czech Republic - UEFA Nations League"), on("s", "Fotball: UEFA Nations League - Frankrike - Tyrkia"),
+                on("e", "France vs Turkey - UEFA Nations League"),
+            ),
+            mapOf(
+                "Croatia vs Czech Republic - UEFA Nations League" to Crests(null, null, "Croatia", "Czechia", "croatia|czechia"),
+                "Fotball: UEFA Nations League - Frankrike - Tyrkia" to Crests(null, null, "France", "Türkiye", "france|turkiye"),
+                "France vs Turkey - UEFA Nations League" to Crests(null, null, "France", "Türkiye", "france|turkiye"),
+            ),
+        )
+
+        // Croatia's slot by the crests' English "Czechia" (its title says "Czech Republic"); France's by "Turkey" in another
+        // channel's title of the match. Belgium vs Italy isn't on, so its slot stays one of its own.
+        assertEquals(setOf(setOf(1, 3), setOf(2, 4, 6)), live.matches.map { m -> (listOf(m.tune.id) + m.alsoOn.map { it.id }).toSet() }.toSet())
+        assertEquals(listOf(5), live.slots.map { it.tune.id })
+    }
+
     @Test fun abroadChannelsAreListedOnlyWhenTheirPictureHoldsUp() {
         val pl = "🏆 Premier League"
         fun c(id: Int, h: Int, q: Int, abroad: Boolean = false) =

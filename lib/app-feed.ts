@@ -3,7 +3,7 @@
 import { Database } from 'bun:sqlite'
 import { chanKey, channelPicture, COMPS, isAbroad, couldBeLiveMatch, curatedGuide, learnedCompetitions, replayAirings, teamWords, saneFps, unxml, type Channel, type Picture } from './curation.js'
 import { VPN_HOST, type BackupConfig, type XtreamConfig } from './provider.js'
-import type { TitleMatch } from './crests.js'
+import { fixtureTeams, type TitleMatch } from './crests.js'
 import { medianMbps, qualityOf } from './quality.js'
 import { flakyRank } from './flaky.js'
 
@@ -176,7 +176,12 @@ export function guideCompetitions(channels: Channel[], xmltv: string, now = Date
   // name for it: of the tagged airings starting within 90 min, those sharing the most team words, at
   // least two ("aek", "madrid"; a LaLiga re-run's lone "madrid" is not enough), if they agree. Words
   // compare by their first 6 letters, so another language's spelling counts (beIN France's "Barcelonne").
-  const words = rows.map((r) => [...new Set(teamWords(r.title.replace(SUPERSCRIPT, '')).map((w) => w.slice(0, 6)))])
+  // Only the fixture's own teams count where the title names them, never the words round them: every Polish
+  // title says "Piłka nożna … mecz:" (football … match), so a Nations League game took a Bundesliga one's.
+  const words = rows.map((r) => {
+    const title = r.title.replace(SUPERSCRIPT, '')
+    return [...new Set(teamWords(fixtureTeams(title)?.join(' ') ?? title).map((w) => w.slice(0, 6)))]
+  })
   const taggedByWord = new Map<string, number[]>()
   comps.forEach((c, j) => c && words[j].forEach((w) => (taggedByWord.get(w) ?? taggedByWord.set(w, []).get(w)!).push(j)))
   rows.forEach((r, i) => {

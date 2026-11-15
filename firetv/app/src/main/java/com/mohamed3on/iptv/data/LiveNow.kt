@@ -47,12 +47,16 @@ fun Feed.liveNow(airing: List<Airing>, crests: Map<String, Crests> = emptyMap())
         }
     }
     // An event channel named for a confirmed match, in any group ("Live | Atlético Madrid vs. Barcelona | … | DE: SOCCER PPV
-    // 104"), is listed under it: a team word from each side, so the club channel "LA LIGA - ATLETICO MADRID" is not.
+    // 104"), is listed under it: a team word from each side, so the club channel "LA LIGA - ATLETICO MADRID" is not. The
+    // sides are as any of the match's titles names them, or in English as its crests do ("UEFA | 06 - Croatia vs Czechia"
+    // when the titles say "Czech Republic" and "Chéquia").
     val named = channels.filter { it.slot && it.fixture }
     val folded = HashSet<String>()
-    val confirmed = sameMatchOnce(matches, crests).map { m ->
-        val (home, away) = sidesOf(m.title) ?: return@map m
-        val more = named.filter { s -> teamWords(s.name).let { w -> w.any { it in home } && w.any { it in away } } }
+    val confirmed = sameMatchOnce(matches, crests).map { (m, titles) ->
+        val english = crests[m.programme!!.title]?.let { c -> teamWords(c.homeName.orEmpty()) to teamWords(c.awayName.orEmpty()) }
+        val sides = titles.mapNotNull { sidesOf(fixtureOf(it)) } + listOfNotNull(english?.takeIf { it.first.isNotEmpty() && it.second.isNotEmpty() })
+        if (sides.isEmpty()) return@map m
+        val more = named.filter { s -> teamWords(s.name).let { w -> sides.any { (home, away) -> w.any { it in home } && w.any { it in away } } } }
         folded += more.map { it.family }
         val alsoOn = (m.alsoOn + more.map { bestOf(it) }).distinctBy { it.family }.filter { it.family != m.tune.family }
         m.copy(alsoOn = alsoOn)
@@ -93,7 +97,7 @@ private fun languageRank(c: Channel) = when (feedFlag(c)) {
 /** A fixture's two sides as team words ("Atletico Madrid vs Barcelona" → atletico madrid, barcelona), or null. */
 private fun sidesOf(fixture: String): Pair<Set<String>, Set<String>>? {
     val parts = VERSUS.find(fixture)?.let { listOf(fixture.take(it.range.first), fixture.drop(it.range.last + 1)) }
-        ?: fixture.split(" - ").takeIf { it.size == 2 } ?: return null
+        ?: fixture.split(" - ").filter { teamWords(it).isNotEmpty() }.takeIf { it.size == 2 } ?: return null
     return (teamWords(parts[0]) to teamWords(parts[1])).takeIf { it.first.isNotEmpty() && it.second.isNotEmpty() }
 }
 
@@ -103,25 +107,26 @@ private fun sidesOf(fixture: String): Pair<Set<String>, Set<String>>? {
  * the competition, overlap in time and either name two of the same teams' words or, by the server's [crests], the same
  * two teams in any language and order. The first row (best channel) is kept; it shows the clearest title of the group
  * (a "v"/"vs" one, then the shortest) and the programme of the first row whose teams the server knows, so the match
- * gets its crests and score.
+ * gets its crests and score. Each comes with every title of its group.
  */
-private fun sameMatchOnce(matches: List<LiveEntry>, crests: Map<String, Crests>): List<LiveEntry> {
+private fun sameMatchOnce(matches: List<LiveEntry>, crests: Map<String, Crests>): List<Pair<LiveEntry, List<String>>> {
     val teams = matches.associateWith { m -> crests[m.programme!!.title]?.key?.split('|')?.filter { it.isNotEmpty() }?.toSet()?.takeIf { it.size == 2 } }
     val groups = mutableListOf<MutableList<LiveEntry>>()
     for (m in matches) {
-        val words = teamWords(m.title)
+        val words = fixtureWords(m.title)
         val same = teams[m]
         val group = groups.firstOrNull { g ->
             val first = g.first()
             first.comp == m.comp && first.programme!!.start < m.programme!!.stop && m.programme.start < first.programme.stop &&
-                ((teamWords(first.title) intersect words).size >= 2 || (same != null && g.any { teams[it] == same }))
+                ((fixtureWords(first.title) intersect words).size >= 2 || (same != null && g.any { teams[it] == same }))
         }
         if (group != null) group += m else groups += mutableListOf(m)
     }
     return groups.map { g ->
         val title = g.map { it.title }.sortedWith(compareBy({ !VERSUS.containsMatchIn(it) }, { it.length })).first()
         val programme = g.firstOrNull { teams[it] != null }?.programme ?: g.first().programme
-        g.first().copy(title = fixtureOf(title), programme = programme, alsoOn = g.drop(1).map { it.tune }.distinctBy { it.family }.filter { it.family != g.first().tune.family })
+        g.first().copy(title = fixtureOf(title), programme = programme, alsoOn = g.drop(1).map { it.tune }.distinctBy { it.family }.filter { it.family != g.first().tune.family }) to
+            g.map { it.programme!!.title }
     }
 }
 
@@ -155,12 +160,17 @@ internal fun fixtureOf(title: String): String {
     // No fixture: a coverage title, often shouted with a feed prefix ("IT: DAZN DIRETTA GOL SERIE A HD").
     return if (t.contains(" - ")) t else displayName(t)
 }
-/** Words that name a competition or the coverage, never a team. */
+/** Words that name a competition, the sport or the coverage, never a team ("Fotball: UEFA Nations League - …"). */
 private val NOT_TEAM = setOf(
     "live", "liga", "laliga", "league", "premier", "spanish", "english", "italian", "german", "french", "serie",
     "bundesliga", "ligue", "champions", "europa", "conference", "football", "sports", "sport", "primera", "primeira",
     "matchday", "round", "final", "copa", "coppa", "cup", "pokal", "championship",
+    "uefa", "fifa", "nations", "world", "euro", "qualifiers", "qualifier", "qualifying", "qualification", "friendly", "international",
+    "soccer", "fotball", "futebol", "fussball", "futbol", "calcio", "voetbal", "fodbold", "fotboll", "piłka", "pilka", "nozna", "mecz",
+    "narodow", "naciones", "nacoes", "kick",
 )
+/** A match title's team words: its fixture's two sides where it names them, else every word but [NOT_TEAM]'s. */
+private fun fixtureWords(title: String): Set<String> = sidesOf(fixtureOf(title))?.let { (home, away) -> home + away } ?: teamWords(title)
 private val WORD = Regex("\\p{L}{4,}")
 private fun teamWords(title: String): Set<String> =
     WORD.findAll(searchNorm(title))

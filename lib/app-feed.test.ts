@@ -179,8 +179,14 @@ describe('guide', () => {
       `<programme start="${stamp(0)}" stop="${stamp(2)}" channel="y"><title>Juventus - SSC Napoli</title></programme>` +
       `<programme start="${stamp(0)}" stop="${stamp(2)}" channel="z"><title>Ajax - Feyenoord</title></programme>` +
       `<programme start="${stamp(0)}" stop="${stamp(2)}" channel="v"><title>Atletico Madrid vs Barcelona - Spanish LaLiga</title></programme>` +
-      `<programme start="${stamp(0)}" stop="${stamp(2)}" channel="w"><title>Atlético Madrid vs Barcelonne - Liga - FOOTBALL</title></programme>` + PROVIDER_XML)))
+      `<programme start="${stamp(0)}" stop="${stamp(2)}" channel="w"><title>Atlético Madrid vs Barcelonne - Liga - FOOTBALL</title></programme>` +
+      // Polish titles all wrap the fixture in "Piłka nożna: … - mecz:" (football … match): those words make no match the same.
+      `<programme start="${stamp(0)}" stop="${stamp(2)}" channel="p1"><title>Piłka nożna: Bundesliga - mecz: Union Berlin - Bayern Monachium</title></programme>` +
+      `<programme start="${stamp(0)}" stop="${stamp(2)}" channel="p2"><title>Piłka nożna: Mecz towarzyski - mecz: Polska - Holandia</title></programme>` +
+      `<programme start="${stamp(3)}" stop="${stamp(5)}" channel="p3"><title>Piłka nożna: Liga Narodów - mecz: Francja - Turcja</title></programme>` + PROVIDER_XML)))
     expect(appGuide.query("SELECT title, comp FROM programmes WHERE comp IS NOT NULL ORDER BY tvg_id").all()).toEqual([
+      { title: "Piłka nożna: Bundesliga - mecz: Union Berlin - Bayern Monachium", comp: "🏆 Bundesliga" },
+      { title: "Piłka nożna: Liga Narodów - mecz: Francja - Turcja", comp: "🏆 Nations League" },
       { title: "Atletico Madrid vs Barcelona - Spanish LaLiga", comp: "🏆 La Liga" },
       // …in another language too
       { title: "Atlético Madrid vs Barcelonne - Liga - FOOTBALL", comp: "🏆 La Liga" },
