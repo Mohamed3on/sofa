@@ -40,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.geometry.CornerRadius
 import com.mohamed3on.iptv.ui.theme.Radius
 import com.mohamed3on.iptv.data.FAVOURITES
@@ -1167,6 +1168,15 @@ fun LazyItemScope.groupMotion(): Modifier {
 @Composable
 fun GroupRow(label: String, marked: Boolean, focus: FocusRequester?, onFocused: () -> Unit, onClick: () -> Unit, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
+    // Its name scrolls only once focus rests, as a channel row's lines (RowFrame).
+    var rested by remember { mutableStateOf(false) }
+    LaunchedEffect(focused) {
+        rested = false
+        if (focused) {
+            delay(LINES_REST_MS)
+            rested = true
+        }
+    }
     val name = remember(label) { groupName(label) }
     Box(
         modifier
@@ -1174,11 +1184,13 @@ fun GroupRow(label: String, marked: Boolean, focus: FocusRequester?, onFocused: 
             .height(GROUP_ROW_HEIGHT)
             .then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocused() }
-            .pressable(onClick),
+            .pressable(onClick)
+            // One semantics node per row: the launcher's accessibility services make Compose walk the whole tree every frame a list scrolls.
+            .clearAndSetSemantics {},
         contentAlignment = Alignment.CenterStart,
     ) {
         if (marked) Box(Modifier.size(MARKER).clip(RoundedCornerShape(MARKER.width)).background(Palette.accent))
-        CompName(label, if (focused || marked) Type.headline else groupIdle, Modifier.padding(horizontal = Space.l), fallback = name, active = focused)
+        CompName(label, if (focused || marked) Type.headline else groupIdle, Modifier.padding(horizontal = Space.l), fallback = name, active = rested)
     }
 }
 
@@ -1199,7 +1211,17 @@ internal fun RowFrame(
     height: Dp = ROW_HEIGHT,
     lines: @Composable ColumnScope.() -> Unit,
 ) {
+    // Its lines take focus (and start their marquee) only once focus rests here: rows passed under a held key never
+    // attach the marquee, whose unbounded measure lays each line out again as it comes and goes.
     var focused by remember { mutableStateOf(false) }
+    var rested by remember { mutableStateOf(false) }
+    LaunchedEffect(focused) {
+        rested = false
+        if (focused) {
+            delay(LINES_REST_MS)
+            rested = true
+        }
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -1208,12 +1230,13 @@ internal fun RowFrame(
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocused() }
             .then(if (LocalHeld.current) Modifier.drawBehind { drawRoundRect(Palette.raised, cornerRadius = CornerRadius(Radius.row.toPx())) } else Modifier)
             .pressable(onClick)
+            .clearAndSetSemantics {} // one semantics node per row, as GroupRow
             .padding(horizontal = Space.m),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.l),
     ) {
         lead()
-        Column(Modifier.weight(1f)) { CompositionLocalProvider(LocalFocused provides focused) { lines() } }
+        Column(Modifier.weight(1f)) { CompositionLocalProvider(LocalFocused provides rested) { lines() } }
     }
 }
 
@@ -1438,6 +1461,9 @@ private class PendingShow {
 }
 
 private const val GROUP_REST_MS = 120L
+
+/** How long focus rests on a channel-list row before its lines take it (see RowFrame). */
+private const val LINES_REST_MS = 400L
 
 /**
  * A column's rows built a few per frame: [perFrame] more each frame from [from] (the first on screen)
