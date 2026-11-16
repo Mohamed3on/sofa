@@ -939,7 +939,7 @@ fun ChannelOverlay(
                         }
                         return@onKeyEvent true
                     }
-                    if (code == AndroidKeyEvent.KEYCODE_MENU) {
+                    if (remoteKey(code) == RemoteKey.Menu) {
                         val row = items?.firstOrNull { item -> item.key == focusedKey } as? ChannelItem
                         if (row == null || onKeyboard) return@onKeyEvent false
                         if (it.type == KeyEventType.KeyDown) {

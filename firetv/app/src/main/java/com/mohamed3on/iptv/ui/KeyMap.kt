@@ -17,7 +17,8 @@ fun remoteKey(keyCode: Int): RemoteKey? = when (keyCode) {
     KeyEvent.KEYCODE_DPAD_LEFT -> RemoteKey.Left
     KeyEvent.KEYCODE_DPAD_RIGHT -> RemoteKey.Right
     KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> RemoteKey.Ok
-    KeyEvent.KEYCODE_MENU -> RemoteKey.Menu
+    // Info stands in for ☰ on remotes whose own menu button never reaches apps (TCL's opens the TV's quick settings).
+    KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_INFO -> RemoteKey.Menu
     KeyEvent.KEYCODE_BACK -> RemoteKey.Back
     KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> RemoteKey.FastForward
     KeyEvent.KEYCODE_MEDIA_REWIND -> RemoteKey.Rewind
@@ -210,7 +211,7 @@ private const val FILM_REPEAT_MS = 100L
 fun filmKey(code: Int, down: Boolean, repeat: Int, held: Long, sinceStep: Long, s: FilmKeys): FilmAction {
     val back = code == KeyEvent.KEYCODE_BACK
     if (back && s.error) return if (down) FilmAction.Leave else FilmAction.Swallow
-    if (s.panel) return if (!back && code != KeyEvent.KEYCODE_MENU) FilmAction.Pass else if (down) FilmAction.ClosePanel else FilmAction.Swallow
+    if (s.panel) return if (!back && remoteKey(code) != RemoteKey.Menu) FilmAction.Pass else if (down) FilmAction.ClosePanel else FilmAction.Swallow
     if (s.error) return FilmAction.Pass
     val ok = code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER
     if (s.asleep) return when {
@@ -226,7 +227,7 @@ fun filmKey(code: Int, down: Boolean, repeat: Int, held: Long, sinceStep: Long, 
             s.controls -> FilmAction.HideControls
             else -> FilmAction.Leave
         }
-        KeyEvent.KEYCODE_MENU -> FilmAction.OpenPanel
+        KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_INFO -> FilmAction.OpenPanel
         KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER,
         KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE -> when {
             repeat > 0 -> FilmAction.Swallow

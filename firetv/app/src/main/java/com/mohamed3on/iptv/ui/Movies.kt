@@ -1077,7 +1077,7 @@ private fun UpNextPage(
                     if (!alone || it.type != KeyEventType.KeyDown) return@onKeyEvent false
                     when (it.nativeKeyEvent.keyCode) {
                         AndroidKeyEvent.KEYCODE_DPAD_DOWN -> onDown()
-                        AndroidKeyEvent.KEYCODE_MENU -> onMenu(movie)
+                        AndroidKeyEvent.KEYCODE_MENU, AndroidKeyEvent.KEYCODE_INFO -> onMenu(movie)
                         else -> return@onKeyEvent false
                     }
                     true
@@ -1111,7 +1111,7 @@ private fun UpNextPage(
                             true
                         }
                         // The focused title's actions (Remove from Up next among them).
-                        AndroidKeyEvent.KEYCODE_MENU -> {
+                        AndroidKeyEvent.KEYCODE_MENU, AndroidKeyEvent.KEYCODE_INFO -> {
                             if (down && it.nativeKeyEvent.repeatCount == 0) onMenu(movie)
                             true
                         }
