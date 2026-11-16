@@ -626,7 +626,8 @@ private fun PlayerChrome(
             shown = { moviesShown.value },
             open = movies,
             onPlaying = onMovie,
-            onExit = { exit?.onBackPressed() },
+            // Opened from the channel list, Back goes back to the list under it; opened at launch, it leaves the app.
+            onExit = { if (layer == Layer.ChannelList) movies = false else exit?.onBackPressed() },
             onLive = { toLive(null) },
             asked = askedTitle,
             // A channel picked in Movies & Shows' search: tuned, full screen.
