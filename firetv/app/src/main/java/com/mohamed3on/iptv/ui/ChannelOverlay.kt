@@ -401,7 +401,9 @@ fun ChannelOverlay(
             // The guide can be swapped (and the old file closed) mid-read after a download: keep what is shown.
             value = withContext(Dispatchers.IO) {
                 val airing = if (guide == null) emptyList() else runCatching { guide.airingMatches(now) }.getOrNull()
-                airing?.let(feed::liveNow)
+                // With the guide's crests, as the player's Live now: one match titled in two languages that share no
+                // word ("Germany vs Netherlands", "Tyskland - Nederland") is then one row, not two.
+                airing?.let { feed.liveNow(it, guide?.crests.orEmpty()) }
             } ?: return@collectLatest
         }
     }
