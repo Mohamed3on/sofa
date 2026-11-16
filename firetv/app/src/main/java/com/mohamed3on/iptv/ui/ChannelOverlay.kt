@@ -41,6 +41,14 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Size
+import android.graphics.ComposeShader
+import androidx.compose.ui.graphics.LinearGradientShader
+import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.geometry.CornerRadius
 import com.mohamed3on.iptv.ui.theme.Radius
 import com.mohamed3on.iptv.data.FAVOURITES
@@ -159,6 +167,10 @@ private val GROUP_ROW_HEIGHT = 44.dp
 private val ROW_HEIGHT = 72.dp
 /** A feed under a known match's header: one line beside the logo. */
 private val FEED_ROW_HEIGHT = 64.dp
+/** How far below a pinned match header its ground fades out, so the rows going under it dissolve rather than meet an edge. */
+private val PINNED_FADE = Space.xl
+/** Where the focused row stops in Live now: below a pinned header (safe area, match line, competition) and its fade. */
+private val PINNED_CLEAR = Space.safeY + ROW_HEIGHT + PINNED_FADE
 // 2:1, so a wide logo (most real-shape ones are 2.5–3.5:1) reads; a square one keeps the full height.
 private val TILE = DpSize(112.dp, 56.dp)
 private val MARKER = DpSize(3.dp, 24.dp)
@@ -759,20 +771,9 @@ fun ChannelOverlay(
 
     // Keep the focused row clear of the edge fades, with the next row in view.
     val density = LocalDensity.current
-    val keepClear = remember(density) {
-        val margin = with(density) { (ROW_HEIGHT * 0.75f + Space.safeY).toPx() }
-        object : BringIntoViewSpec {
-            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
-                val before = offset - margin
-                val after = offset + size + margin - containerSize
-                return when {
-                    before < 0 -> before
-                    after > 0 -> after
-                    else -> 0f
-                }
-            }
-        }
-    }
+    val keepClear = remember(density) { clearOfEdges(density, top = ROW_HEIGHT * 0.75f + Space.safeY) }
+    // In Live now the focused row also stays clear of a pinned match header and its fade.
+    val clearOfHeader = remember(density) { clearOfEdges(density, top = PINNED_CLEAR) }
 
     // The row being moved stays in view: the list scrolls a row at a time as it nears an edge.
     val rowStep = with(density) { (ROW_HEIGHT + Space.xs).toPx() }
@@ -992,7 +993,7 @@ fun ChannelOverlay(
                 list.isEmpty() -> Box(Modifier.padding(top = Space.safeY)) {
                     if (source == LiveSource) Empty("No matches on right now", "Matches appear here when they kick off.") else Empty("Nothing in this group right now")
                 }
-                else -> CompositionLocalProvider(LocalBringIntoViewSpec provides keepClear) {
+                else -> CompositionLocalProvider(LocalBringIntoViewSpec provides if (source == LiveSource) clearOfHeader else keepClear) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxWidth().fillMaxHeight(),
@@ -1307,6 +1308,36 @@ internal fun ChannelRow(
     }
 }
 
+/** Scrolls a focused row to [top] from the top edge (the same at the bottom, by default), with the next row in view. */
+private fun clearOfEdges(density: Density, top: Dp, bottom: Dp = ROW_HEIGHT * 0.75f + Space.safeY) = object : BringIntoViewSpec {
+    private val above = with(density) { top.toPx() }
+    private val below = with(density) { bottom.toPx() }
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+        val before = offset - above
+        val after = offset + size + below - containerSize
+        return when {
+            before < 0 -> before
+            after > 0 -> after
+            else -> 0f
+        }
+    }
+}
+
+/**
+ * Behind a pinned match header: solid under its lines, then fading out over [PINNED_FADE] below them, so a row
+ * passing under it dims away instead of being cut by a hard edge with its logo showing beneath. Its sides fade over
+ * [Space.l] too, so it never reads as a block against the picture. One draw (One Pass Rule): the downward fade masked
+ * by the sideways one in a single composed shader, no layer.
+ */
+private fun Modifier.pinnedGround() = drawWithCache {
+    val area = Size(size.width, size.height + PINNED_FADE.toPx())
+    val side = (Space.l.toPx() / size.width).coerceAtMost(0.5f)
+    val down = LinearGradientShader(Offset.Zero, Offset(0f, area.height), listOf(Palette.ink, Palette.ink, Color.Transparent), listOf(0f, size.height / area.height, 1f))
+    val across = LinearGradientShader(Offset.Zero, Offset(area.width, 0f), listOf(Color.Transparent, Color.Black, Color.Black, Color.Transparent), listOf(0f, side, 1f - side, 1f))
+    val ground = ShaderBrush(ComposeShader(down, across, android.graphics.BlendMode.DST_IN))
+    onDrawBehind { drawRect(ground, size = area) }
+}
+
 /**
  * [list]'s rows, each Live now match's header pinned at the top while its channels scroll under it (stickyHeader); one
  * run of rows, as before, for a list without any.
@@ -1329,7 +1360,7 @@ private fun LazyListScope.rowsOf(list: List<Item>, header: @Composable LazyItemS
 
 /**
  * A known match over the channels showing it: its match line, then its 🏆 competition. While its channels scroll under
- * it, it sits on solid ground inside the safe area, so no row reads through it.
+ * it, it sits on solid ground inside the safe area that fades out below it ([pinnedGround]), so no row reads through it.
  */
 @Composable
 private fun MatchHeader(entry: LiveEntry, listState: LazyListState, index: Int) {
@@ -1345,7 +1376,7 @@ private fun MatchHeader(entry: LiveEntry, listState: LazyListState, index: Int) 
     Column(
         Modifier
             .fillMaxWidth()
-            .then(if (stuck) Modifier.background(Palette.ink) else Modifier)
+            .then(if (stuck) Modifier.pinnedGround() else Modifier)
             .padding(top = if (stuck) Space.safeY else Space.m, bottom = Space.xs)
             .padding(horizontal = Space.m),
         verticalArrangement = Arrangement.spacedBy(Space.xs),
