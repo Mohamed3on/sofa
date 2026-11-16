@@ -34,9 +34,9 @@ class UpdaterTest {
 
     @After fun tearDown() = box.close()
 
-    private fun updater(packageName: String = app.packageName) = Updater(
+    private fun updater(packageName: String = app.packageName, sdk: Int = 34) = Updater(
         app, box.client, TestScope(),
-        installed = 100, dir = dir, packageOf = { packageName },
+        installed = 100, dir = dir, sdk = sdk, packageOf = { packageName },
     )
 
     private fun sha(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
@@ -52,6 +52,17 @@ class UpdaterTest {
         serve(101, dmSha256 = sha(dm))
         val u = updater()
         u.check()
+        assertTrue(u.ready.value?.dm?.readBytes()?.contentEquals(dm) == true)
+    }
+
+    // Android 11 and below can't read the 12+ profile, and install uncompiled with it.
+    @Test fun android11TakesItsOwnProfile() = runTest {
+        box.reply(body = """{"versionCode":101,"versionName":"1.101","sha256":"${sha(apk)}","dmSha256":"x","dm30Sha256":"${sha(dm)}"}""")
+        box.reply(apk)
+        box.reply(dm)
+        val u = updater(sdk = 30)
+        u.check()
+        assertEquals(listOf("version", "apk", "dm30"), List(3) { box.request()!!.url.encodedPath.substringAfterLast('/') })
         assertTrue(u.ready.value?.dm?.readBytes()?.contentEquals(dm) == true)
     }
 

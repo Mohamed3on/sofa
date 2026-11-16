@@ -70,15 +70,22 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/app_deploy && chmod 600 ~/.ssh/app_deploy
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # Android 12+ and 11-and-below each read only their own profile format: one .dm each.
+          dm30="$RUNNER_TEMP/app-30.dm"
           dm_field=''
-          if baselineprofile/dex-metadata.sh "$apk" "$dm"; then
+          if baselineprofile/dex-metadata.sh 31 "$dm"; then
             dm_field=$(printf ',"dmSha256":"%s"' "$(sha256sum "$dm" | cut -d' ' -f1)")
           fi
+          dm30_field=''
+          if baselineprofile/dex-metadata.sh 30 "$dm30"; then
+            dm30_field=$(printf ',"dm30Sha256":"%s"' "$(sha256sum "$dm30" | cut -d' ' -f1)")
+          fi
           printf '{"versionCode":%s,"versionName":"1.%s","sha256":"%s"%s}\n' \
-            "$code" "$code" "$(sha256sum "$apk" | cut -d' ' -f1)" "$dm_field" > "$RUNNER_TEMP/version.json"
+            "$code" "$code" "$(sha256sum "$apk" | cut -d' ' -f1)" "$dm_field$dm30_field" > "$RUNNER_TEMP/version.json"
           # The key may only write /opt/sofa/app (rrsync -wo), so paths are relative to it.
           ssh_cmd='ssh -i ~/.ssh/app_deploy -o IdentitiesOnly=yes'
           rsync -t -e "$ssh_cmd" "$apk" "sofa-app@$HOST:app.apk"
           if [ -n "$dm_field" ]; then rsync -t -e "$ssh_cmd" "$dm" "sofa-app@$HOST:app.dm"; fi
+          if [ -n "$dm30_field" ]; then rsync -t -e "$ssh_cmd" "$dm30" "sofa-app@$HOST:app-30.dm"; fi
           rsync -t -e "$ssh_cmd" "$RUNNER_TEMP/version.json" "sofa-app@$HOST:version.json"
           rm -f ~/.ssh/app_deploy

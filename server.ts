@@ -50,6 +50,7 @@ export const routes: Record<string, Route> = {
   '/api/app/version': { gate: 'app', cache: 'no-store', run: app.version },
   '/api/app/apk': { gate: 'app', cache: 'no-store', run: app.apk },
   '/api/app/dm': { gate: 'app', cache: 'no-store', run: app.dm },
+  '/api/app/dm30': { gate: 'app', cache: 'no-store', run: app.dm30 },
   // Answered from their own memory.
   '/api/app/library': { gate: 'app', cache: 'etag', run: app.library },
   '/api/app/history': { gate: 'app', cache: 'etag', run: app.history },

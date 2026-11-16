@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
-# Builds the dex metadata (.dm) for an APK from the baseline profile packaged inside it: installed
+# Copies the dex metadata (.dm) AGP built for Android [sdk] from the last assembleRelease: installed
 # alongside the APK (as base.dm), the platform compiles the app's hot paths at install instead of at
-# the next idle maintenance. Usage: dex-metadata.sh app-release.apk app-release.dm
+# the next idle maintenance. Each platform reads only its own profile format (Android 12+ rejects the
+# 9-11 one the APK's assets carry, and installs uncompiled), so AGP builds one per range; the map
+# names, for each sdk, its .dm (the first sdk at or above the asked one).
+# Usage: dex-metadata.sh <sdk> <out.dm>
 set -euo pipefail
-apk=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
-out=$(cd "$(dirname "$2")" && pwd)/$(basename "$2")
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-unzip -q -j "$apk" assets/dexopt/baseline.prof assets/dexopt/baseline.profm -d "$tmp"
-mv "$tmp/baseline.prof" "$tmp/primary.prof"
-mv "$tmp/baseline.profm" "$tmp/primary.profm"
-rm -f "$out"
-(cd "$tmp" && zip -q -X "$out" primary.prof primary.profm)
+dir=$(cd "$(dirname "$0")/../app/build/intermediates/dex_metadata_directory/release/compileReleaseArtProfile" && pwd)
+dm=$(awk -F= -v sdk="$1" '$1 >= sdk && (best == "" || $1 < best) { best = $1; file = $2 } END { print file }' "$dir/dex-metadata-map.properties")
+[ -n "$dm" ] && cp "$dir/$dm" "$2"

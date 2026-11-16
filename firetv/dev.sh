@@ -19,7 +19,8 @@ installed=$(a 15 "$adb" -s "$stick" shell dumpsys package com.mohamed3on.iptv | 
 ((code > ${installed:-0})) || code=$((installed + 1))
 ./gradlew -q assembleRelease -Piptv.versionCode=$code
 out=app/build/outputs/apk/release
-baselineprofile/dex-metadata.sh "$out/app-release.apk" "$out/app-release.dm" # the .dm name must match the APK's
+sdk=$(a 15 "$adb" -s "$stick" shell getprop ro.build.version.sdk | tr -d "\r")
+baselineprofile/dex-metadata.sh "$sdk" "$out/app-release.dm" # the .dm name must match the APK's
 a 120 "$adb" -s "$stick" install-multiple -r "$out/app-release.apk" "$out/app-release.dm"
 a 15 "$adb" -s "$stick" shell am start -n com.mohamed3on.iptv/.MainActivity >/dev/null
 a 15 "$adb" -s "$stick" shell dumpsys package com.mohamed3on.iptv | grep -m1 versionName

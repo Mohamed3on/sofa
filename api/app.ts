@@ -6,8 +6,8 @@
 // GET /api/app/matches?t=TOKEN — today's football scores and match clocks, by "home_key|away_key" (the guide's crests table).
 // GET /api/app/movies?t=TOKEN — the on-demand library: 4K movies, UFC replays and Blu-ray films.
 // GET /api/app/vod-search?t=TOKEN&q=… — films across the provider's whole catalogue.
-// GET /api/app/version, /api/app/apk, /api/app/dm ?t=TOKEN — the latest build and its dex metadata (the
-// baseline profile, compiled at install), copied to the box by firetv.yml.
+// GET /api/app/version, /api/app/apk, /api/app/dm, /api/app/dm30 ?t=TOKEN — the latest build and its dex metadata (the
+// baseline profile, compiled at install; dm30 for Android 11 and below), copied to the box by firetv.yml.
 // POST /api/app/quality?t=TOKEN — a quality reading the app measured while playing.
 // POST /api/app/bitrate?t=TOKEN — a feed's bitrate the app measured while playing.
 // POST /api/app/events?t=TOKEN — what happened while watching, for later analysis.
@@ -76,6 +76,7 @@ async function serveFile(name: string, type: string): Promise<Response> {
 export const version = () => serveFile('version.json', 'application/json')
 export const apk = () => serveFile('app.apk', 'application/vnd.android.package-archive')
 export const dm = () => serveFile('app.dm', 'application/zip')
+export const dm30 = () => serveFile('app-30.dm', 'application/zip')
 
 // POST /api/app/quality?t=TOKEN — what the app measured on a stream it played. Saved into
 // the quality cache under the probe's rules, so normal viewing keeps the ordering current.

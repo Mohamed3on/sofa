@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import com.mohamed3on.iptv.BuildConfig
@@ -29,8 +30,9 @@ import java.security.MessageDigest
  */
 data class UpdateReady(val versionCode: Long, val versionName: String, val apk: File, val dm: File? = null, val askedPermission: Boolean = false)
 
+/** [dmSha256]: the profile for Android 12 and up; [dm30Sha256]: for 11 and below, which read an older format. */
 @Serializable
-private class Manifest(val versionCode: Long, val versionName: String, val sha256: String, val dmSha256: String? = null)
+private class Manifest(val versionCode: Long, val versionName: String, val sha256: String, val dmSha256: String? = null, val dm30Sha256: String? = null)
 
 private val json = Json { ignoreUnknownKeys = true }
 
@@ -48,6 +50,7 @@ class Updater(
     private val scope: CoroutineScope,
     private val installed: Long = BuildConfig.VERSION_CODE.toLong(),
     private val dir: File = context.cacheDir,
+    private val sdk: Int = Build.VERSION.SDK_INT,
     @Suppress("DEPRECATION")
     private val packageOf: (File) -> String? = { context.packageManager.getPackageArchiveInfo(it.path, 0)?.packageName },
 ) {
@@ -97,7 +100,8 @@ class Updater(
                 return
             }
             dm.delete()
-            val withDm = manifest.dmSha256?.let { runCatching { download("dm", dm, it) }.getOrDefault(false) } == true
+            val (kind, dmSha256) = if (sdk <= 30) "dm30" to manifest.dm30Sha256 else "dm" to manifest.dmSha256
+            val withDm = dmSha256?.let { runCatching { download(kind, dm, it) }.getOrDefault(false) } == true
             Log.i(TAG, "update ${manifest.versionName} ready${if (withDm) " with its profile" else ""}")
             _ready.value = UpdateReady(manifest.versionCode, manifest.versionName, apk, dm.takeIf { withDm })
         } finally {
