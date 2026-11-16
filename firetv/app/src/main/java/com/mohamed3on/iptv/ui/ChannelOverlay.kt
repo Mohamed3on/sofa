@@ -847,7 +847,9 @@ fun ChannelOverlay(
                                     if (edge && it.type == KeyEventType.KeyDown) {
                                         if (it.nativeKeyEvent.repeatCount == 0) jumpGroups(top = down) else bump(groupsNudge, down)
                                     }
-                                    edge
+                                    // A held key waits for the next group to be laid out, as in the channel column.
+                                    edge || (it.type == KeyEventType.KeyDown && it.nativeKeyEvent.repeatCount > 0 &&
+                                        (at == null || info.visibleItemsInfo.none { v -> v.index == at + (if (down) 1 else -1) }))
                                 }
                                 else -> false
                             }
@@ -959,6 +961,14 @@ fun ChannelOverlay(
                         // A fresh press at either end wraps round; a held key stops there, so a fast scroll never laps.
                         if (edge && it.type == KeyEventType.KeyDown) {
                             if (it.nativeKeyEvent.repeatCount == 0 && first != last) focusChannels(if (down) first else last) else bump(channelsNudge, down)
+                        }
+                        // A held key moves focus only onto a row the list has laid out: past it, focus search builds every
+                        // row up to the target inside the key press, the scroll gets no frames, and focus runs further ahead.
+                        if (!edge && it.type == KeyEventType.KeyDown && it.nativeKeyEvent.repeatCount > 0) {
+                            val step = if (down) 1 else -1
+                            var next = focusedIndex + step
+                            while (next in list.indices && !list[next].focusable) next += step
+                            return@onKeyEvent listState.layoutInfo.visibleItemsInfo.none { v -> v.index == next }
                         }
                         return@onKeyEvent edge
                     }
