@@ -1001,7 +1001,9 @@ fun ChannelOverlay(
                         rowsOf(list, header = { index, item -> MatchHeader(item.entry, listState, index) }) { index, item ->
                             val ready by remember(index) { derivedStateOf { built.ready(index) } }
                             if (item.focusable && !ready) return@rowsOf Box(Modifier.fillMaxWidth().height(item.height))
-                            val focus = if (item.key == entryKey) rowFocus else null
+                            // Each row reads only whether it is the one focused (or entered): a focus move recomposes those two rows, not every row on screen. Keyed on [opens] too: each opening has its own focus state.
+                            val entry by remember(item.key, opens) { derivedStateOf { item.key == entryKey } }
+                            val focus = if (entry) rowFocus else null
                             val onFocused = {
                                 focusedKey = item.key
                                 focusedIndex = index
@@ -1011,9 +1013,9 @@ fun ChannelOverlay(
                                 onKeyboard = false
                             }
                             // The row a pane beside the list is about (its schedule, ☰) stays marked while focus is in the pane.
-                            val focusedHere = item.key == focusedKey
+                            val focusedHere by remember(item.key, opens) { derivedStateOf { item.key == focusedKey } }
                             CompositionLocalProvider(
-                                LocalHeld provides ((actions != null || details != null) && focusedHere),
+                                LocalHeld provides (focusedHere && (actions != null || details != null)),
                                 LocalRowHint provides (if (focusedHere) item.target?.let { pickHint?.invoke(it) } else null),
                             ) {
                             when (item) {

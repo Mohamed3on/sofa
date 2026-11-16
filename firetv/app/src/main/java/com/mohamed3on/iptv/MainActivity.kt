@@ -117,6 +117,10 @@ class MainActivity : ComponentActivity() {
         // Android then counts its keepScreenOn without seeing a change, so the window never got the flag and a TCL Q7C
         // dimmed and went to its screensaver and auto standby mid-episode.
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Google TV turns on content capture for every app, and Compose then walks the whole semantics tree each frame
+        // anything changes: ~13% of the main thread while a held key scrolls the channel list on the TCL. Nothing on a TV uses it.
+        @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+        androidx.compose.ui.contentcapture.ContentCaptureManager.isEnabled = false
         // A launch reopens Movies & Shows (or the title page) it was closed on; a check target wins.
         Check.request(intent.getStringExtra("open") ?: graph.prefs.get(Check.LAST_SCREEN))
         val sync = graph.sync
