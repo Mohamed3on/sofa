@@ -773,7 +773,8 @@ private fun MoviesBrowse(
                             )
                         } else Box(Modifier.onFocusChanged { if (it.hasFocus) at = FocusAt.Rows }) {
                             Rows(
-                                rows, watched, content, active,
+                                // A panel over them (☰) holds focus meanwhile; closed, they are active again and refocus its card.
+                                rows, watched, content, active && actions == null,
                                 onFocused = { focused.value = it },
                                 onOpen = onOpen,
                                 onMenu = { m, row -> actions = Actions(m, removable = row == CONTINUE_ROW, row = row) },
@@ -809,10 +810,10 @@ private fun MoviesBrowse(
                 a.movie,
                 onClose = {
                     actions = null
-                    // Back where it was: the card (or its row's, when it left), the result, or Resume.
-                    scope.launch {
+                    // Back where it was: the result, or Resume; the rows take their card back themselves (Rows, as after a title page).
+                    if (shownPage != BrowsePage.Rows) scope.launch {
                         withFrameNanos {}
-                        runCatching { (if (shownPage == BrowsePage.Search) results else if (shownPage == BrowsePage.UpNext) resumeButton else content).requestFocus() }
+                        runCatching { (if (shownPage == BrowsePage.Search) results else resumeButton).requestFocus() }
                     }
                 },
                 onRemove = if (a.removable) ({ onRemove(a.movie) }) else null,
@@ -1503,7 +1504,7 @@ private fun Rows(
         }
     }
     val keepClear = rememberKeepClear()
-    // The card a title page was opened from (row key, movie id). Back lands on it explicitly.
+    // The card a title page or ☰'s panel was opened from (row key, movie id). Back lands on it explicitly.
     val list = rememberLazyListState()
     val back = remember { FocusRequester() }
     var opened by remember { mutableStateOf(tile?.let { GENRES_ROW to it.id }) }
@@ -1511,9 +1512,13 @@ private fun Rows(
     LaunchedEffect(active) {
         val target = opened?.takeIf { active } ?: return@LaunchedEffect
         val index = rows.indexOfFirst { it.key == target.first }
+        // Its row gone (hidden from ☰), the rows' own first card.
+        if (index < 0) runCatching { focus.requestFocus() }
         if (index >= 0) {
             // Up at the top, where a focused row sits; one only partly on screen would leave its card half below it.
             list.scrollToItem(index)
+            // Landed only once the card takes focus again: it was the last focused before the page or panel took it.
+            lastFocused[0] = null
             repeat(FOCUS_FRAMES) {
                 withFrameNanos {}
                 if (lastFocused[0] == target) return@repeat
@@ -1588,7 +1593,10 @@ private fun Rows(
                             val genre = row.genres?.get(movie.key)
                             if (genre != null) onGenre(genre, GenreTile(movie.id, columns[row.key] ?: 0)) else onOpen(movie)
                         },
-                        onMenu = { movie -> onMenu(movie, row.key) },
+                        onMenu = { movie ->
+                            opened = row.key to movie.id
+                            onMenu(movie, row.key)
+                        },
                         onVertical = { down ->
                             when {
                                 !down && i == 0 -> onTop()
