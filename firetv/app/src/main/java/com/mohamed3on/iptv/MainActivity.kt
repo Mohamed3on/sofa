@@ -3,6 +3,7 @@ package com.mohamed3on.iptv
 import android.content.Intent
 import android.os.Bundle
 import com.mohamed3on.iptv.system.Check
+import com.mohamed3on.iptv.ui.MicButton
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
@@ -306,6 +307,11 @@ class MainActivity : ComponentActivity() {
     // once it has stopped playback, only OK (resume) and Back (leave the app) do anything.
     // Everything else goes to the player screen's key map.
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // The remote's mic button, wherever focus is, while a search box can listen (Search.kt's Dictation).
+        if (event.keyCode == KeyEvent.KEYCODE_SEARCH) MicButton.press?.let { press ->
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) press()
+            return true
+        }
         val watch = idle.value ?: return super.dispatchKeyEvent(event)
         val down = event.action == KeyEvent.ACTION_DOWN
         when (watch.state.value) {

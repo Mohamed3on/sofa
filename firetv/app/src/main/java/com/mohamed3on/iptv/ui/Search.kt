@@ -1,6 +1,18 @@
 package com.mohamed3on.iptv.ui
 
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Bundle
 import android.os.SystemClock
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,6 +34,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,6 +97,7 @@ private const val SPACE = "Space"
 private const val ARRIVAL_MS = 50L
 private const val DELETE = "Delete"
 private const val VOICE = "Voice search"
+private const val LISTENING = "Listening…"
 /**
  * Three rows of 13 cells: a–m, n–z, then 0–9 with Space and Delete taking a cell and a half each;
  * then Voice search across the width.
@@ -101,7 +115,8 @@ private val KEYS: List<List<String>> =
  * Voice search hands the query to the Fire TV keyboard: apps never get the remote's mic, but that
  * keyboard does ("Speak to search"), and what it hears is typed into the query. It opens on arriving
  * at Search and from the Voice search key; its Search action, Back or moving off the query hands
- * focus back to the keys.
+ * focus back to the keys. Where the TV has a speech recognizer (Google TV), the app listens itself
+ * instead ([Dictation]): from the Voice search key or the remote's mic button, and no keyboard opens.
  */
 @Composable
 internal fun SearchBox(
@@ -117,6 +132,37 @@ internal fun SearchBox(
     var at by remember { mutableStateOf(0 to 0) }
     val focusManager = LocalFocusManager.current
     var listening by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val dictation = remember { if (SpeechRecognizer.isRecognitionAvailable(context)) Dictation(context) else null }
+    DisposableEffect(dictation) { onDispose { dictation?.destroy() } }
+    var hearing by remember { mutableStateOf(false) }
+    fun hear() {
+        hearing = true
+        dictation?.start(onQuery) { text ->
+            hearing = false
+            if (text != null) {
+                onQuery(text)
+                onSpoken(text)
+            }
+        }
+    }
+    val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { if (it) hear() }
+    /** The Voice search key and the mic button: the app's own dictation where there is one, else the system keyboard's. */
+    fun voiceSearch() {
+        when {
+            dictation == null -> listening = true
+            hearing -> { dictation.stop(); hearing = false }
+            context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED -> hear()
+            else -> askMic.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+    // The remote's mic button (KEYCODE_SEARCH once the Google app is off) listens while this box is on screen.
+    val onMic by rememberUpdatedState(::voiceSearch)
+    DisposableEffect(dictation) {
+        val before = MicButton.press
+        if (dictation != null) MicButton.press = { onMic() }
+        onDispose { if (dictation != null) MicButton.press = before }
+    }
     var field by remember { mutableStateOf(TextFieldValue()) }
     var settled by remember { mutableStateOf("") }
     val voice = remember { FocusRequester() }
@@ -162,7 +208,7 @@ internal fun SearchBox(
                 val now = SystemClock.uptimeMillis()
                 // An arrival, not a blip: inside a grid (Movies' search), moving between key rows leaves the box and
                 // comes back in the same frame, which must not open the keyboard.
-                if (it.hasFocus && !inside && now - leftAt[0] > ARRIVAL_MS && arrive()) listening = true
+                if (it.hasFocus && !inside && now - leftAt[0] > ARRIVAL_MS && arrive() && dictation == null) listening = true
                 if (!it.hasFocus && inside) leftAt[0] = now
                 inside = it.hasFocus
             },
@@ -214,7 +260,7 @@ internal fun SearchBox(
                     Box(Modifier.padding(start = 2.dp).size(CARET).clip(RoundedCornerShape(1.dp)).background(Palette.accent))
                 }
             }
-            val shown by animateFloatAsState(if (busy) 1f else 0f, Motion.panel(), label = "busy")
+            val shown by animateFloatAsState(if (busy || hearing) 1f else 0f, Motion.panel(), label = "busy")
             Box(Modifier.height(ACTIVITY_HEIGHT)) {
                 if (shown > 0f) ActivityLine(Modifier.graphicsLayer { alpha = shown })
             }
@@ -239,14 +285,14 @@ internal fun SearchBox(
                     row.forEachIndexed { c, key ->
                         val word = key.length > 1
                         KeyboardKey(
-                            key,
+                            if (key == VOICE && hearing) LISTENING else key,
                             style = if (word) Type.caption else Type.headline,
                             modifier = Modifier.weight(if (word) 1.5f else 1f),
                             focus = if (at == r to c) entry else null,
                             onFocused = { at = r to c; onFocused() },
                         ) {
                             if (key == VOICE) {
-                                listening = true
+                                voiceSearch()
                                 return@KeyboardKey
                             }
                             onQuery(
@@ -262,6 +308,44 @@ internal fun SearchBox(
             }
         }
     }
+}
+
+/** What the remote's mic button does now: set while a search box with [Dictation] is on screen (MainActivity routes the key). */
+internal object MicButton {
+    var press: (() -> Unit)? = null
+}
+
+/**
+ * Speech to text through the TV's own recognizer (Speech Services by Google), on its built-in mic and only while asked:
+ * Google TV's keyboard dictation needs the Google app, whose always-on listening costs a third of the held-key scroll's frames.
+ */
+private class Dictation(context: Context) {
+    private val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+
+    /** Hears one phrase: [onWords] as it is recognised, then [onDone] with the phrase, or null for nothing heard. */
+    fun start(onWords: (String) -> Unit, onDone: (String?) -> Unit) {
+        recognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onPartialResults(results: Bundle?) { first(results)?.let(onWords) }
+            override fun onResults(results: Bundle?) = onDone(first(results))
+            override fun onError(error: Int) = onDone(null)
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+        recognizer.startListening(
+            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true),
+        )
+    }
+
+    fun stop() = recognizer.cancel()
+    fun destroy() = recognizer.destroy()
+
+    private fun first(results: Bundle?) = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.takeIf { it.isNotBlank() }
 }
 
 @Composable
