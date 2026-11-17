@@ -53,26 +53,39 @@ export function language(cat: string): (typeof LANGS)[number] | null {
 export function buildShowList({ cats, series }: SeriesCatalogue): ShowList {
   const catOrder = new Map(cats.map((c, i) => [c.id, i]))
   const catName = new Map(cats.map((c) => [c.id, c.name]))
-  type Pick = { s: SeriesEntry; cat: string; lang: number; k4: boolean }
+  type Pick = { s: SeriesEntry; cat: string; lang: number; k4: boolean; key: string }
   const rank = (p: Pick) => {
     const i = FIRST.indexOf(plainCategory(p.cat))
     return i < 0 ? FIRST.length : i
   }
   const best = new Map<string, Pick>()
+  const all = new Map<string, Pick[]>()
   for (const s of series) {
     const cat = catName.get(s.cat)
     const lang = cat ? language(cat) : null
     if (!cat || !lang) continue
     const key = `${lang}|${s.tmdb || s.name.toLowerCase()}`
     const k4 = claims4K(cat)
-    if (!best.has(key) || (k4 && !best.get(key)!.k4)) best.set(key, { s, cat, lang: LANGS.indexOf(lang), k4 })
+    const p = { s, cat, lang: LANGS.indexOf(lang), k4, key }
+    all.set(key, [...(all.get(key) ?? []), p])
+    if (!best.has(key) || (k4 && !best.get(key)!.k4)) best.set(key, p)
   }
   const picks = [...best.values()].sort(
     (a, b) => a.lang - b.lang || rank(a) - rank(b) || catOrder.get(a.s.cat)! - catOrder.get(b.s.cat)!,
   )
   const movies = picks.map(({ s, cat }) => ({ id: s.id, titleId: showTitle(s.tmdb, s.id), name: readName(s.name).title, poster: s.cover, group: plainCategory(cat) }))
-  return { groups: [...new Set(movies.map((m) => m.group))], movies }
+  const list = { groups: [...new Set(movies.map((m) => m.group))], movies }
+  sameShow.set(list, new Map(picks.map((p) => [p.s.id, [p, ...all.get(p.key)!.filter((x) => x !== p).sort((a, b) => +b.k4 - +a.k4)].map((x) => x.s.id)])))
+  return list
 }
+
+/** By a listed show's series id, every entry the provider files it under in that language, the listed one first, then the 4K ones. */
+const sameShow = new WeakMap<ShowList, Map<number, number[]>>()
+/**
+ * [id]'s show's entries ([sameShow]): the provider often splits a show over several, a 4K one holding only its
+ * latest season (Peaky Blinders: 4K-NF has season 5, NF all six).
+ */
+export const showEntries = (list: ShowList | null, id: number) => (list && sameShow.get(list)?.get(id)) ?? [id]
 
 const built = new WeakMap<SeriesCatalogue, ShowList>()
 
@@ -117,11 +130,17 @@ async function showTitleOf(cfg: XtreamConfig): Promise<(id: number) => string> {
   return (id) => byId.get(id) ?? showTitle('', id)
 }
 
-/** A show's title id, plot, backdrop, genres, cast and rating, and its episodes (each with its title id) in season and episode order. */
+/**
+ * A show's title id, plot, backdrop, genres, cast and rating, and its episodes (each with its title id) in season and
+ * episode order: those of all its entries in the language ([showEntries]), an episode two have from the first.
+ */
 export async function showEpisodes(cfg: XtreamConfig, seriesId: number, show?: string) {
-  const info = await seriesInfo(cfg, seriesId)
-  const titleId = show ?? (await showTitleOf(cfg))(seriesId)
-  const episodes = Object.entries(info.episodes ?? {})
+  const list = await showList(cfg).catch(() => null)
+  const [info, ...others] = await Promise.all(showEntries(list, seriesId).map((id, i) => (i ? seriesInfo(cfg, id).catch((): SeriesInfo => ({})) : seriesInfo(cfg, id))))
+  const titleId = show ?? list?.movies.find((m) => m.id === seriesId)?.titleId ?? showTitle('', seriesId)
+  const seen = new Set<string>()
+  const episodes = [info, ...others]
+    .flatMap((info) => Object.entries(info.episodes ?? {}))
     .flatMap(([season, eps]) =>
       eps.map((e) => ({
         id: Number(e.id),
@@ -137,22 +156,25 @@ export async function showEpisodes(cfg: XtreamConfig, seriesId: number, show?: s
         tier: pictureTier(probedPicture(e.info) ?? { width: 0, height: 0 }) ?? '',
       })),
     )
-    .filter((e) => e.id > 0)
+    .filter((e) => e.id > 0 && !seen.has(`${e.season}x${e.episode}`) && !!seen.add(`${e.season}x${e.episode}`))
     .sort((a, b) => a.season - b.season || a.episode - b.episode)
   const i = info.info ?? {}
   return { titleId, plot: String(i.plot ?? '').trim(), backdrop: firstBackdrop(i.backdrop_path), genre: String(i.genre ?? '').trim(), cast: castOf(i.cast), rating: ratingOf(i.rating), episodes }
 }
 
 /**
- * Every copy of an episode the provider has, one per language the show is listed in: stream id,
+ * Every copy of an episode the provider has, one per language the show is listed in (from the first of its entries there that has it): stream id,
  * container, its probe, its category and the language that category is in.
  */
 export async function episodeEntries(cfg: XtreamConfig, show: string, season: number, episode: number) {
-  const lists = (await showList(cfg)).movies.filter((m) => m.titleId === show)
-  const found = await Promise.all(lists.map(async (m) => {
-    const info = await seriesInfo(cfg, m.id).catch(() => null)
-    const e = Object.entries(info?.episodes ?? {}).flatMap(([s, eps]) => eps.filter((e) => Number(e.season ?? s) === season && Number(e.episode_num) === episode))[0]
-    return e && Number(e.id) > 0 ? { id: Number(e.id), ext: e.container_extension || 'mkv', probe: e.info, category: m.group, lang: language(m.group) ?? '' } : null
+  const list = await showList(cfg)
+  const found = await Promise.all(list.movies.filter((m) => m.titleId === show).map(async (m) => {
+    for (const id of showEntries(list, m.id)) {
+      const info = await seriesInfo(cfg, id).catch(() => null)
+      const e = Object.entries(info?.episodes ?? {}).flatMap(([s, eps]) => eps.filter((e) => Number(e.season ?? s) === season && Number(e.episode_num) === episode))[0]
+      if (e && Number(e.id) > 0) return { id: Number(e.id), ext: e.container_extension || 'mkv', probe: e.info, category: m.group, lang: language(m.group) ?? '' }
+    }
+    return null
   }))
   return found.filter((e) => e !== null)
 }

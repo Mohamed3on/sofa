@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { buildShowList } from './shows'
+import { buildShowList, showEntries } from './shows'
 
 test('a show is kept once per language, the 4K copy first, English rows leading', () => {
   const cats = [
@@ -24,4 +24,7 @@ test('a show is kept once per language, the 4K copy first, English rows leading'
     [5, 'iptv:tv:5', 'World Cup Diaries', 'FIFA+ SERIES'],
     [3, 'tv:95396', 'Severance (2022) (US)', 'GERMANY APPLE'],
   ])
+  // A 4K entry often holds only the latest season: the show's episodes come from all its entries in the language.
+  expect(showEntries(list, 2)).toEqual([2, 1])
+  expect(showEntries(list, 3)).toEqual([3])
 })
