@@ -219,7 +219,8 @@ private val FADE = 24.dp
  * Lines that never end in "…": a slot [lines] high (at least [minLines]); text that runs past it moves up a line at a
  * time once it has rested 1.5 s (a short glide, then a pause to read the new line), so at rest the slot always shows
  * whole lines, never one cut through; it pauses at the end and starts over from the top, and from the top when the text
- * changes, clipped under a soft fade at the bottom. With reduced motion the slot grows to hold all of it.
+ * changes, clipped under a soft fade at the bottom. Given less room than [lines] (a weighted slot), it takes the whole lines that fit.
+ * With reduced motion the slot grows to hold all of it.
  */
 @Composable
 fun ScrollText(text: String, style: TextStyle, lines: Int, modifier: Modifier = Modifier, minLines: Int = 1, color: Color = Color.Unspecified) {
@@ -242,7 +243,17 @@ fun ScrollText(text: String, style: TextStyle, lines: Int, modifier: Modifier = 
             scroll.scrollTo(0)
         }
     }
-    Box(modifier.heightIn(max = slot).fadeBottom(scroll).verticalScroll(scroll, enabled = false)) {
+    val slotPx = with(density) { slot.roundToPx() }
+    Box(
+        modifier
+            // Whole lines only, in whatever room it is given up to [lines].
+            .layout { m, c ->
+                val max = minOf(c.maxHeight, slotPx).let { it - it % step }.coerceAtLeast(minOf(step, c.maxHeight))
+                val p = m.measure(c.copy(minHeight = minOf(c.minHeight, max), maxHeight = max))
+                layout(p.width, p.height) { p.place(0, 0) }
+            }
+            .fadeBottom(scroll).verticalScroll(scroll, enabled = false),
+    ) {
         Text(text, style = style, color = color, minLines = minLines)
     }
 }

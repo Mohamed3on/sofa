@@ -2019,7 +2019,8 @@ private fun FilmPage(
                         }
                         seenLine?.let { WatchedLine(it) }
                     }
-                    info?.plot?.ifBlank { null }?.let { ScrollText(it, style = Type.prose, lines = if (unavailable) 8 else 10, modifier = Modifier.widthIn(max = PROSE_WIDTH).appear()) }
+                    // Up to its lines, in whatever the page leaves it: the buttons below always stay on screen.
+                    info?.plot?.ifBlank { null }?.let { ScrollText(it, style = Type.prose, lines = if (unavailable) 8 else 10, modifier = Modifier.weight(1f, fill = false).widthIn(max = PROSE_WIDTH).appear()) }
                     // The provider's facts name people only as text; TMDB's are the row below.
                     if (info?.people.isNullOrEmpty()) {
                         info?.cast?.ifBlank { null }?.let { Text("Starring $it", style = Type.caption, maxLines = 2, modifier = Modifier.appear()) }
@@ -2657,7 +2658,8 @@ private fun ShowPage(
                         MetaLine(show, info ?: data?.info, extra = seasons?.let { if (it == 1) "1 season" else "$it seasons" }, modifier = Modifier.glide())
                         remember(info) { info?.let(::showStatus) }?.let { FitText(it, style = Type.body, active = true, modifier = Modifier.glide().appear()) }
                         watchedLabel(show.titleId, show = true)?.let { WatchedLine(it, Modifier.glide()) }
-                        (info?.plot?.ifBlank { null } ?: data?.plot?.ifBlank { null })?.let { ScrollText(it, style = Type.prose, lines = 10, modifier = Modifier.widthIn(max = PROSE_WIDTH).glide().appear()) }
+                        // Up to 10 lines, in whatever room the logo, meta and lines above leave it: Play and the chips below always stay on screen (Down from them reaches the cast).
+                        (info?.plot?.ifBlank { null } ?: data?.plot?.ifBlank { null })?.let { ScrollText(it, style = Type.prose, lines = 10, modifier = Modifier.weight(1f, fill = false).widthIn(max = PROSE_WIDTH).glide().appear()) }
                         if (info?.people.isNullOrEmpty()) data?.cast?.ifBlank { null }?.let { Text("Starring $it", style = Type.caption, maxLines = 2, modifier = Modifier.glide().appear()) }
                         val next = target?.let { episodes[it] }
                         // The copy the episode up next plays on, prepared as the page opens; TMDB's episodes have no IPTV copy of their own.
