@@ -12,6 +12,12 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlin.time.Duration.Companion.seconds
 
 /** A shared key's value as written, with when (epoch ms); a null value is a removal. */
@@ -24,7 +30,7 @@ data class StateEntry(val v: String?, val at: Long)
  * and languages. Each key's newest write wins. A change goes up a few seconds after it is made; the box's newer ones come
  * down with it and whenever [sync] runs (the app coming to the front), and [changed] then names the keys rewritten, for the
  * stores holding them to read again. What belongs to one device (bandwidth, route, what its screen plays, its copy marks)
- * stays on it. On the first run everything already here goes up, behind whatever the box already has.
+ * stays on it. On the first run everything already here goes up: a key the box already has is [merged] with it once.
  */
 class StateSync(
     private val local: KeyValueStore,
@@ -58,17 +64,26 @@ class StateSync(
     }
 
     /** Sends the keys changed here and takes the box's newer ones; a failure leaves them to the next time. */
-    suspend fun sync() = running.withLock {
+    suspend fun sync(): Unit = running.withLock {
         val sent = synchronized(this) { state.dirty.associateWith { StateEntry(local.get(it), state.at[it] ?: 0) } }
         val box = withContext(Dispatchers.IO) { exchange(sent) } ?: return@withLock
-        val newer = synchronized(this) {
+        val (newer, again) = synchronized(this) {
             val newer = box.filter { (k, e) -> shared(k) && e.at > (state.at[k] ?: -1) }
-            newer.forEach { (k, e) -> local.put(k, e.v) }
+            val taken = mutableMapOf<String, Long>()
+            val again = mutableSetOf<String>()
+            newer.forEach { (k, e) ->
+                val mine = local.get(k)?.takeIf { k !in state.at }
+                val v = if (mine == null) e.v else merged(k, mine, e.v)
+                local.put(k, v)
+                // A merge goes back up for the other devices.
+                if (v == e.v) taken[k] = e.at else { taken[k] = now(); again += k }
+            }
             // A key changed again while this was on its way stays to send.
-            state = State(state.at + newer.mapValues { it.value.at }, state.dirty.filterNot { it in newer || sent[it]?.at == (state.at[it] ?: 0) }.toSet())
+            state = State(state.at + taken, state.dirty.filterNot { it in newer || sent[it]?.at == (state.at[it] ?: 0) }.toSet() + again)
             save()
-            newer.keys
+            newer.keys to again
         }
+        if (again.isNotEmpty()) scope.launch { sync() }
         if (newer.isNotEmpty()) _changed.emit(newer)
     }
 
@@ -85,5 +100,29 @@ class StateSync(
         )
 
         fun shared(key: String) = key in SHARED || key.startsWith("lineup.order.")
+
+        /**
+         * A device's own [mine] the first time it meets the box's [theirs] for a key, both kept: places by title (the newer
+         * one), maps by key (the box's), lists in the box's order with this device's extras after; a removal keeps [mine].
+         */
+        fun merged(key: String, mine: String, theirs: String?): String? = if (theirs == null) mine else runCatching {
+            when {
+                key == "copies.dubFirst" -> theirs
+                key.startsWith("titles.") && key != "titles.upnext.dismissed" -> JsonArray(
+                    (json.parseToJsonElement(theirs).jsonArray + json.parseToJsonElement(mine).jsonArray)
+                        .sortedByDescending { it.jsonObject["at"]?.jsonPrimitive?.longOrNull ?: 0 }
+                        .distinctBy { it.jsonObject["title"] }.take(RESUME_CAP),
+                ).toString()
+                key.startsWith("copies.") -> JsonObject(json.parseToJsonElement(mine).jsonObject + json.parseToJsonElement(theirs).jsonObject).toString()
+                else -> {
+                    val by = if (key == "titles.upnext.dismissed") "," else "\n"
+                    (theirs.split(by) + mine.split(by)).filter(String::isNotEmpty).distinct()
+                        .let { if (key == "movies.search.recent") it.take(SEARCH_CAP) else it }.joinToString(by)
+                }
+            }
+        }.getOrDefault(theirs)
+
+        private const val RESUME_CAP = 50
+        private const val SEARCH_CAP = 8
     }
 }
