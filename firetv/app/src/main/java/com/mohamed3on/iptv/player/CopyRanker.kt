@@ -168,8 +168,8 @@ fun audioFamily(audio: String): Correction? = when (audio) {
 }
 
 private fun judge(c: Copy, p: SetupProfile, mark: Mark?, language: String?, speaksWanted: Boolean?, typical: Float?, pinned: Boolean, learnt: Map<Correction, Long>): Ranked {
-    // Profile 7 plays as its HDR10 base layer (MoviePlayer's Dv7AsHevc): the stick decodes no profile 7 Dolby Vision.
-    val dv = "DV" in c.hdr && c.dvProfile != 7
+    // Profile 7 plays as Dolby Vision only where [SetupProfile.playsDv7]; elsewhere as its HDR10 base layer (MoviePlayer's Dv7AsHevc).
+    val dv = "DV" in c.hdr && (c.dvProfile != 7 || p.playsDv7)
     val hdr10 = "HDR10" in c.hdr || "HDR10+" in c.hdr || c.dvProfile == 7
     val shown = when {
         dv && Hdr.DolbyVision in p.hdr -> 5
@@ -186,7 +186,7 @@ private fun judge(c: Copy, p: SetupProfile, mark: Mark?, language: String?, spea
     val why = when {
         mark != null -> if (mark.works) "works here" else "failed here on ${DAY.format(Instant.ofEpochMilli(mark.at))}".also { support = Support.Wont }
         mime != null && mime !in p.videoCodecs -> "${c.codec.uppercase()} not decoded here".also { support = Support.Wont }
-        dv && c.dvProfile != null && c.dvProfile !in p.dolbyVisionProfiles -> "Dolby Vision profile ${c.dvProfile} not supported".also { support = Support.Wont }
+        dv && c.dvProfile != null && c.dvProfile !in p.dolbyVisionProfiles && c.dvProfile != 7 ->"Dolby Vision profile ${c.dvProfile} not supported".also { support = Support.Wont }
         // A TV without Dolby Vision shows a named HDR10 layer: the profile doesn't matter there (a hybrid remux, say).
         dv && c.dvProfile == null && (Hdr.DolbyVision in p.hdr || !hdr10) -> "Dolby Vision profile unknown".also { support = Support.Unsure }
         !dv && hdr10 && shown == 0 -> "TV shows no HDR10".also { support = Support.Unsure }

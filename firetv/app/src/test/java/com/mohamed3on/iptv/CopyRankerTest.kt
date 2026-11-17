@@ -104,6 +104,16 @@ class CopyRankerTest {
         assertEquals("best for this setup", corrected.pick?.reason)
     }
 
+    @Test fun profile7IsDolbyVisionWhereTheTvShowsItAndHdr10Elsewhere() {
+        val dv7 = dvRemux.copy(id = "rd:dv7", dvProfile = 7, mbps = 80f)
+        val onDvTv = rank(listOf(dvRemux, dv7), oled)
+        assertEquals(dv7, onDvTv.pick?.copy)
+        assertEquals(Support.Works, onDvTv.pick?.support)
+        val onHdr10Tv = rank(listOf(dv7, hdr10Web.copy(mbps = 90f)), hdr10Tv)
+        assertEquals(90f, onHdr10Tv.pick?.copy?.mbps) // both shown as HDR10 there: the bigger one wins
+        assertEquals(Support.Works, onHdr10Tv.copies.first { it.copy == dv7 }.support)
+    }
+
     @Test fun ae9AnUnknownDolbyVisionProfileIsOfferedNotPlayed() {
         val dvUnknown = dvRemux.copy(dvProfile = null)
         val r = rank(listOf(dvUnknown, hdr10Web), oled)

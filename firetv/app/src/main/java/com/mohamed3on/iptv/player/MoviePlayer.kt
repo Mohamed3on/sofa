@@ -4,6 +4,7 @@ package com.mohamed3on.iptv.player
 
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
@@ -22,6 +23,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -36,6 +38,8 @@ import androidx.media3.extractor.ForwardingTrackOutput
 import androidx.media3.extractor.TrackOutput
 import androidx.media3.extractor.text.SubtitleParser
 import okhttp3.OkHttpClient
+import kotlinx.coroutines.flow.MutableStateFlow
+import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -44,11 +48,12 @@ import java.util.concurrent.atomic.AtomicLong
  * buffer by bytes (KTD14: [TARGET_BYTES], up to [MAX_BUFFER_MS]), since a file can be read ahead where
  * live can't; the manifest's largeHeap makes room for it. Seeks land on the nearest keyframe: a 4K
  * HEVC seek decoding up to an exact frame takes seconds on the stick, and a step is ±10s anyway.
- * Its owner releases it. [onFileSize] hears the file's full size in bytes, from the first response that says.
+ * Its owner releases it. [onFileSize] hears the file's full size in bytes, from the first response that says. [dv7]: profile 7
+ * plays as Dolby Vision ([SetupProfile.playsDv7]), else as its HDR10 layer.
  */
-fun moviePlayer(context: Context, http: OkHttpClient, heads: FilmHeads, load: FilmLoad = FilmLoad(), onFileSize: (Long) -> Unit = {}): ExoPlayer =
+fun moviePlayer(context: Context, http: OkHttpClient, heads: FilmHeads, dv7: Boolean, load: FilmLoad = FilmLoad(), onFileSize: (Long) -> Unit = {}): ExoPlayer =
     ExoPlayer.Builder(context, FixedAudioCapabilities(context))
-        .setMediaSourceFactory(DefaultMediaSourceFactory(HeadSource.Factory(OkHttpDataSource.Factory(http).setTransferListener(FileSize(load.bytes, onFileSize)), heads), Dv7AsHevc()))
+        .setMediaSourceFactory(DefaultMediaSourceFactory(HeadSource.Factory(OkHttpDataSource.Factory(http).setTransferListener(FileSize(load.bytes, onFileSize)), heads), FilmExtractors(dv7AsHevc = !dv7, load.fps)))
         .setLoadControl(
             DefaultLoadControl.Builder()
                 .setAllocator(load.allocator)
@@ -70,20 +75,46 @@ fun moviePlayer(context: Context, http: OkHttpClient, heads: FilmHeads, load: Fi
 private class FixedAudioCapabilities(context: Context) : DefaultRenderersFactory(context) {
     @Suppress("DEPRECATION") // the context-free builder is the one that takes fixed capabilities
     override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink =
-        DefaultAudioSink.Builder()
-            .setAudioCapabilities(dtsAsCore(AudioCapabilities.getCapabilities(context)))
-            .setEnableFloatOutput(enableFloatOutput)
-            .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-            .build()
+        PatientSink(
+            DefaultAudioSink.Builder()
+                .setAudioCapabilities(dtsAsCore(AudioCapabilities.getCapabilities(context)))
+                .setEnableFloatOutput(enableFloatOutput)
+                .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                .build(),
+        )
 }
 
 /**
- * Every container Media3 reads, with a Dolby Vision profile 7 track (UHD Blu-ray's dual layer) read as the HEVC
- * it is underneath: the stick's Dolby Vision decoder takes no profile 7 and shows black, while its HEVC
- * decoder plays the HDR10 base layer and skips the enhancement layer. Other profiles stay Dolby Vision (5 has no
- * HDR10 layer). Setters return this factory, not [base], so the wrapping survives DefaultMediaSourceFactory's set-up.
+ * Keeps trying to make its AudioTrack for [PASSTHROUGH_GAP_MS], not Media3's 100 ms. A display mode switch kills a
+ * passthrough track (TrueHD) and passthrough comes back about a second later: the film then waits for it, where it
+ * failed, and the session reopened the copy, a ~3 s blank on the stick (Matrix TrueHD remux, 2026-11-17).
  */
-private class Dv7AsHevc(private val base: ExtractorsFactory = DefaultExtractorsFactory()) : ExtractorsFactory {
+private class PatientSink(sink: AudioSink) : ForwardingAudioSink(sink) {
+    private var failingSince = 0L
+
+    override fun handleBuffer(buffer: ByteBuffer, presentationTimeUs: Long, encodedAccessUnitCount: Int): Boolean = try {
+        super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount).also { failingSince = 0L }
+    } catch (e: AudioSink.InitializationException) {
+        val now = SystemClock.elapsedRealtime()
+        if (failingSince == 0L) failingSince = now
+        if (now - failingSince > PASSTHROUGH_GAP_MS) throw e
+        false
+    }
+}
+
+/**
+ * Every container Media3 reads, telling [fps] the video's frame rate from its first [RATE_SAMPLES] samples as they load
+ * (before the first frame: mkv declares none), and with [dv7AsHevc] a Dolby Vision profile 7 track (UHD Blu-ray's dual
+ * layer) read as the HEVC it is underneath, for a display without Dolby Vision: the stick converting profile 7 for one
+ * shows black, while its HEVC decoder plays the HDR10 base layer and skips the enhancement layer. Other profiles stay
+ * Dolby Vision (5 has no HDR10 layer). Setters return this factory, not [base], so the wrapping survives
+ * DefaultMediaSourceFactory's set-up.
+ */
+private class FilmExtractors(
+    private val dv7AsHevc: Boolean,
+    private val fps: MutableStateFlow<Float?>,
+    private val base: ExtractorsFactory = DefaultExtractorsFactory(),
+) : ExtractorsFactory {
     override fun createExtractors() = wrap(base.createExtractors())
     override fun createExtractors(uri: Uri, responseHeaders: Map<String, List<String>>) = wrap(base.createExtractors(uri, responseHeaders))
     override fun setSubtitleParserFactory(subtitleParserFactory: SubtitleParser.Factory) = apply { base.setSubtitleParserFactory(subtitleParserFactory) }
@@ -98,18 +129,32 @@ private class Dv7AsHevc(private val base: ExtractorsFactory = DefaultExtractorsF
 
     private fun wrap(extractors: Array<Extractor>) = Array<Extractor>(extractors.size) { i ->
         object : ForwardingExtractor(extractors[i]) {
-            override fun init(output: ExtractorOutput) = super.init(object : ForwardingExtractorOutput(output) {
-                override fun track(id: Int, type: Int): TrackOutput {
-                    val track = super.track(id, type)
-                    return object : ForwardingTrackOutput(track) {
-                        override fun format(format: Format) = super.format(
-                            if (format.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION && dolbyVisionProfile(format) == 7) {
-                                format.buildUpon().setSampleMimeType(MimeTypes.VIDEO_H265).setCodecs(null).build()
-                            } else format,
-                        )
+            override fun init(output: ExtractorOutput) {
+                fps.value = null // a new copy
+                super.init(object : ForwardingExtractorOutput(output) {
+                    override fun track(id: Int, type: Int): TrackOutput {
+                        val track = super.track(id, type)
+                        if (type != C.TRACK_TYPE_VIDEO) return track
+                        return object : ForwardingTrackOutput(track) {
+                            private val times = ArrayList<Long>(RATE_SAMPLES)
+
+                            override fun format(format: Format) = super.format(
+                                if (dv7AsHevc && format.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION && dolbyVisionProfile(format) == 7) {
+                                    format.buildUpon().setSampleMimeType(MimeTypes.VIDEO_H265).setCodecs(null).build()
+                                } else format,
+                            )
+
+                            // Samples load in decode order: sorted, their times are the frames' presentation times.
+                            override fun sampleMetadata(timeUs: Long, flags: Int, size: Int, offset: Int, cryptoData: TrackOutput.CryptoData?) {
+                                super.sampleMetadata(timeUs, flags, size, offset, cryptoData)
+                                if (times.size == RATE_SAMPLES) return
+                                times += timeUs
+                                if (times.size == RATE_SAMPLES) fps.value = measuredFps(times.sorted())
+                            }
+                        }
                     }
-                }
-            })
+                })
+            }
         }
     }
 }
@@ -221,6 +266,8 @@ class ExoFilmPlayer(private val exo: ExoPlayer) : FilmPlayer {
 class FilmLoad {
     internal val allocator = DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE)
     val bytes = AtomicLong()
+    /** The playing copy's frame rate, read off its video samples as they load; null until then. */
+    val fps = MutableStateFlow<Float?>(null)
 
     /**
      * The loader wants data: the buffer is well short of its byte and time caps, so bytes come in as fast
@@ -275,6 +322,9 @@ fun filmReading(exo: ExoPlayer, fileBytes: Long): Map<String, Any>? {
 private const val TARGET_BYTES = 160 * 1024 * 1024
 private const val MAX_BUFFER_MS = 120_000
 private const val START_BUFFER_MS = 1_500
+private const val PASSTHROUGH_GAP_MS = 2_500L
+/** About 0.7 s of a film, well inside [START_BUFFER_MS]: known before the first frame. */
+private const val RATE_SAMPLES = 16
 private const val REBUFFER_MS = 5_000
 /** Margins under the caps, beyond the loader's 1 MB top-ups, where it counts as filling. */
 private const val TOP_UP_BYTES = 8 * 1024 * 1024

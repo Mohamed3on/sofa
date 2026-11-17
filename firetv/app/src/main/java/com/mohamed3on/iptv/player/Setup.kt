@@ -52,6 +52,13 @@ data class SetupProfile(
     val fingerprint: String
         get() = "$displayName|${hdr.sorted().joinToString(",")}|${passthrough.sorted().joinToString(",")}"
 
+    /**
+     * Profile 7 (UHD Blu-ray's dual layer) plays as Dolby Vision: no decoder here lists it, yet the TCL's and the stick's
+     * Dolby Vision decoders both play it when the display shows Dolby Vision (2026-11-17). Otherwise it plays as its
+     * HDR10 base layer: the stick converting it for a TV without Dolby Vision showed black.
+     */
+    val playsDv7: Boolean get() = Hdr.DolbyVision in hdr && dolbyVisionProfiles.isNotEmpty()
+
     /** The TV is off or on another input: the reading says nothing about the setup. */
     val isBlank: Boolean get() = hdr.isEmpty() && passthrough.isEmpty()
 }

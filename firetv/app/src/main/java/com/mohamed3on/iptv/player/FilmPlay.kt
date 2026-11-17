@@ -200,7 +200,7 @@ fun openFilmPlay(
     // Its loading bursts teach the typical bandwidth; every film is an IPTV copy until a debrid one plays.
     val load = FilmLoad()
     val meter = BandwidthMeter(graph.capacity)
-    val exo = moviePlayer(context, graph.http, graph.filmHeads, load) { fileBytes.compareAndSet(0, it) }
+    val exo = moviePlayer(context, graph.http, graph.filmHeads, graph.setup.profile.value.playsDv7, load) { fileBytes.compareAndSet(0, it) }
     val film = ExoFilmPlayer(exo)
     val setup = graph.setup
     val plan = graph.films.plan(title)
@@ -217,7 +217,7 @@ fun openFilmPlay(
         }
         Showing(playback, it.copy?.id)
     }.distinctUntilChanged()
-    val surface = PlaybackSurface(exo, window, playback, scope)
+    val surface = PlaybackSurface(exo, window, playback, scope, load.fps)
     val subtitles = SubtitleTracks(exo)
     lateinit var play: FilmPlay
     val listener = object : Player.Listener {
