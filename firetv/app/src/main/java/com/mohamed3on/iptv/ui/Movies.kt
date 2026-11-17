@@ -143,6 +143,7 @@ import com.mohamed3on.iptv.data.resume
 import com.mohamed3on.iptv.data.LibTitle
 import com.mohamed3on.iptv.data.Person
 import com.mohamed3on.iptv.data.Scored
+import com.mohamed3on.iptv.data.episodeOf
 import com.mohamed3on.iptv.data.isShow
 import com.mohamed3on.iptv.data.isTmdb
 import com.mohamed3on.iptv.data.known
@@ -460,6 +461,7 @@ fun MoviesLayer(
                                 onBack = nav::back,
                             ) else ShowPage(
                                 show = title,
+                                episode = page.episode,
                                 resume = saved,
                                 watched = watched,
                                 active = active,
@@ -1428,7 +1430,9 @@ private fun Hero(movie: Movie?, info: MovieInfo?, resume: List<Resume>, placehol
                     listOfNotNull(r.label, r.takeIf { it.dur > 0 && it.pos > 0 }?.let { leftLabel(it.dur - it.pos) }).joinToString(" · ").ifEmpty { null }
                 }
             }
-            MetaLine(m, i, extra = left, hero = true)
+            // An episode's card (the TrueScore episodes row): "S5 E14 · Ozymandias".
+            val ep = remember(m) { m.titleId.episodeOf()?.let { (_, code) -> listOfNotNull(code, m.lib?.en?.ifEmpty { null }).joinToString(" · ") } }
+            MetaLine(m, i, extra = left ?: ep, hero = true)
             i?.plot?.ifBlank { null }?.let { ScrollText(it, style = Type.prose, lines = 2, modifier = Modifier.widthIn(max = PROSE_WIDTH)) }
         }
     }
@@ -1744,12 +1748,14 @@ private fun PosterCard(movie: Movie, progress: Float?, watched: Boolean = false,
         if (request != null) {
             AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, onError = { failed = true }, modifier = Modifier.fillMaxSize())
         }
-        if (label != null) {
+        // A Genres tile's genre, or an episode's code over its show's poster ("S5 E14").
+        val caption = label ?: remember(movie.titleId) { movie.titleId.episodeOf()?.second }
+        if (caption != null) {
             // Dark enough at the foot that the name reads over a poster's own lettering.
             Box(Modifier.fillMaxSize().drawBehind { drawRect(TileScrim) })
-            Text(label, style = Type.title, modifier = Modifier.align(Alignment.BottomStart).padding(Space.s))
-            return@Box
+            Text(caption, style = Type.title, modifier = Modifier.align(Alignment.BottomStart).padding(Space.s))
         }
+        if (label != null) return@Box
         if (progress != null) {
             ProgressLine({ progress }, Modifier.align(Alignment.BottomCenter).padding(horizontal = Space.s, vertical = Space.s))
         }
@@ -2504,7 +2510,7 @@ private sealed interface EpisodeLine {
  */
 @Composable
 private fun ShowPage(
-    show: Movie, resume: Resume?, watched: Set<TitleId>, active: Boolean, hidden: Boolean,
+    show: Movie, episode: TitleId?, resume: Resume?, watched: Set<TitleId>, active: Boolean, hidden: Boolean,
     onPlay: (List<Episode>, Int, fromStart: Boolean) -> Unit, onOpen: (Movie) -> Unit, onPerson: (Person) -> Unit, onBack: () -> Unit,
 ) {
     val graph = LocalContext.current.graph
@@ -2552,7 +2558,8 @@ private fun ShowPage(
     }
     val standout = remember(episodes, seen) { episodes?.let { standout(it, seen) } }
     var lastPlayed by remember { mutableStateOf<Int?>(null) }
-    val target = episodes?.takeIf { it.isNotEmpty() }?.let { lastPlayed ?: upNextIndex(it, resume, seen) }
+    // Opened on an episode (the TrueScore episodes row), that one; else the one up next.
+    val target = episodes?.takeIf { it.isNotEmpty() }?.let { lastPlayed ?: it.indexOfFirst { e -> e.titleId == episode }.takeIf { i -> i >= 0 } ?: upNextIndex(it, resume, seen) }
     val primary = remember { FocusRequester() }
     val targetRow = remember { FocusRequester() }
     val listFocus = remember { FocusRequester() }

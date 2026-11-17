@@ -9,10 +9,10 @@ import { netScore, netShare, sum } from './scores.js'
 const MIN_VOTES = 50
 const MAX_AGE_MS = 864e5
 const HEADERS = { 'content-type': 'application/json', 'x-imdb-client-name': 'imdb-web-next-localized', 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' }
-const Q = `query($id: ID!, $after: ID) { title(id: $id) { episodes { episodes(first: 250, after: $after) { edges { node { series { episodeNumber { seasonNumber episodeNumber } } aggregateRatingsBreakdown { histogram { histogramValues { rating voteCount } } } } } pageInfo { hasNextPage endCursor } } } } }`
+const Q = `query($id: ID!, $after: ID) { title(id: $id) { episodes { episodes(first: 250, after: $after) { edges { node { titleText { text } series { episodeNumber { seasonNumber episodeNumber } } aggregateRatingsBreakdown { histogram { histogramValues { rating voteCount } } } } } pageInfo { hasNextPage endCursor } } } } }`
 
-/** An episode's score and net-loved ratio (0–1, two decimals). */
-export type EpisodeScore = { ts: number; tr: number }
+/** An episode's score and net-loved ratio (0–1, two decimals), and its name [n] (kept since 2026-11-17). */
+export type EpisodeScore = { ts: number; tr: number; n?: string }
 /** A show's episode scores by "season:episode". */
 type Scores = Record<string, EpisodeScore>
 const store = jsonFile<Record<string, { at: number; e: Scores }>>(
@@ -21,7 +21,7 @@ const store = jsonFile<Record<string, { at: number; e: Scores }>>(
 )
 const pending = new Map<string, Promise<Scores | null>>()
 
-type Node = { series?: { episodeNumber?: { seasonNumber?: number; episodeNumber?: number } | null } | null; aggregateRatingsBreakdown?: { histogram?: { histogramValues?: { rating: number; voteCount: number }[] } | null } | null }
+type Node = { titleText?: { text?: string } | null; series?: { episodeNumber?: { seasonNumber?: number; episodeNumber?: number } | null } | null; aggregateRatingsBreakdown?: { histogram?: { histogramValues?: { rating: number; voteCount: number }[] } | null } | null }
 
 /** The scores of IMDb's episodes ([nodes]) with a number and [MIN_VOTES] votes. */
 export function scoreEpisodes(nodes: Node[]): Scores {
@@ -33,7 +33,7 @@ export function scoreEpisodes(nodes: Node[]): Scores {
     for (const { rating, voteCount } of n.aggregateRatingsBreakdown?.histogram?.histogramValues ?? []) if (rating >= 1 && rating <= 10) h[rating - 1] = voteCount || 0
     const total = sum(h)
     if (total < MIN_VOTES) continue
-    out[`${s}:${e}`] = { ts: netScore(h[8] + h[9] - h[0] - h[1], total), tr: Math.round(netShare(h) * 100) / 100 }
+    out[`${s}:${e}`] = { ts: netScore(h[8] + h[9] - h[0] - h[1], total), tr: Math.round(netShare(h) * 100) / 100, ...(n.titleText?.text && { n: n.titleText.text }) }
   }
   return out
 }
@@ -52,23 +52,45 @@ async function fetchScores(imdb: string, get: typeof fetch): Promise<Scores | nu
   return scoreEpisodes(nodes)
 }
 
+/** The show [imdb]'s ("tt0903747") episode scores: kept a day, else asked again (the last kept, however old, when IMDb fails); null when there are none. */
+export async function episodeScores(imdb: string | undefined, get: typeof fetch = fetch): Promise<Scores | null> {
+  if (!imdb || !/^tt\d+$/.test(imdb)) return null
+  const kept = store.read()[imdb]
+  if (kept && Date.now() - kept.at < MAX_AGE_MS) return kept.e
+  let job = pending.get(imdb)
+  if (!job) {
+    job = fetchScores(imdb, get).then(async (e) => {
+      if (e) await store.update((cur) => ({ ...cur, [imdb]: { at: Date.now(), e } })).catch(() => {})
+      return e
+    }).finally(() => pending.delete(imdb))
+    pending.set(imdb, job)
+  }
+  return (await job) ?? kept?.e ?? null
+}
+
 /** [episodes] with their scores from the show [imdb] ("tt0903747"), when IMDb has them; as they are otherwise. */
 export async function withEpisodeScores<E extends { season: number; episode: number }>(episodes: E[], imdb: string | undefined, get: typeof fetch = fetch): Promise<(E & Partial<EpisodeScore>)[]> {
-  if (!episodes.length || !imdb || !/^tt\d+$/.test(imdb)) return episodes
-  const kept = store.read()[imdb]
-  let scores = kept && Date.now() - kept.at < MAX_AGE_MS ? kept.e : null
-  if (!scores) {
-    let job = pending.get(imdb)
-    if (!job) {
-      job = fetchScores(imdb, get).then(async (e) => {
-        if (e) await store.update((cur) => ({ ...cur, [imdb]: { at: Date.now(), e } })).catch(() => {})
-        return e
-      }).finally(() => pending.delete(imdb))
-      pending.set(imdb, job)
-    }
-    // IMDb failing serves the last scores kept, however old.
-    scores = (await job) ?? kept?.e ?? null
-  }
+  const scores = episodes.length ? await episodeScores(imdb, get) : null
   if (!scores) return episodes
-  return episodes.map((e) => ({ ...e, ...scores[`${e.season}:${e.episode}`] }))
+  return episodes.map((e) => {
+    const { n: _n, ...s } = scores[`${e.season}:${e.episode}`] ?? {}
+    return { ...e, ...s }
+  })
+}
+
+/** Episodes one show gives the TrueScore episodes row at most, so a few shows don't fill it. */
+const PER_SHOW = 3
+
+/**
+ * The TrueScore episodes row: the kept episodes of [shows] (title ids; [imdb] gives each one's IMDb id) the owner hasn't
+ * watched ([seen]), by TrueScore, best first, [PER_SHOW] a show, the first [n]; each by its episode id ("tv:1396:s5e14").
+ */
+export function bestEpisodes(shows: string[], imdb: (show: string) => string | undefined, seen: Set<string>, n = 90): (EpisodeScore & { id: string; show: string })[] {
+  const kept = store.read()
+  return shows.flatMap((show) => Object.entries(kept[imdb(show) ?? '']?.e ?? {})
+    .map(([k, s]) => ({ ...s, show, id: `${show}:s${k.replace(':', 'e')}` }))
+    // Specials (season 0) aren't the show's own.
+    .filter((x) => !x.id.includes(':s0e') && !seen.has(x.id))
+    .sort((a, b) => b.ts - a.ts).slice(0, PER_SHOW))
+    .sort((a, b) => b.ts - a.ts).slice(0, n)
 }

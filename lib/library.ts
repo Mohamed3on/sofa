@@ -15,6 +15,7 @@ import { listRows, scoreTitles, trueScoreRows, trueScoreShows, untilUnseen, type
 import { measuredFilms, showList } from './shows.js'
 import { keptRuntimes, parseTitleId, TMDB_IMG, type Kind } from './tmdb.js'
 import { fromTmdb, knownOf, providerCard, titleCard, unscored, type Known, type LibTitle, type TmdbItem } from './titles.js'
+import { bestEpisodes } from './episode-scores.js'
 import { bestFilmCopies, blurayMovies, filmTitleOf } from './vod.js'
 
 export interface Row { id: string; n: string; /** Indexes into Library.titles. */ i: number[] }
@@ -46,6 +47,8 @@ export function rowDefs(today = new Date()): RowDef[] {
     { id: 'ts-recent', n: 'TrueScore', q: [] },
     // IMDb's Top 250 and Most Popular TV shows by TrueScore's net score on IMDb's histogram: filled and ordered by [rebuildLibrary].
     { id: 'ts-shows', n: 'TrueScore · shows', q: [] },
+    // Those shows' best episodes by TrueScore (episode-scores.ts [bestEpisodes]): made by [showLibrary], each opening its show's page on it.
+    { id: 'ts-episodes', n: 'TrueScore · episodes', q: [] },
     { id: 'trending', n: 'Trending', q: [['movie', 'trending/movie/week'], ['tv', 'trending/tv/week']] },
     // Films out on digital or disc in the last 60 days; shows with an episode out in them, kept by [rebuildLibrary] only for a season that began in them.
     { id: 'new', n: 'New releases', q: [films(`with_release_type=4%7C5&release_date.gte=${day(NEW_DAYS)}&release_date.lte=${day(0)}&vote_count.gte=20`), shows(`air_date.gte=${day(NEW_DAYS)}&air_date.lte=${day(0)}&vote_count.gte=100`)] },
@@ -204,6 +207,8 @@ export interface ShowDeps {
   card: (id: string) => Promise<LibTitle | null>
   /** A title's runtime in minutes; undefined or 0 when unknown. */
   runtime: (id: string) => Promise<number | undefined>
+  /** A show's IMDb id, for its episodes' scores (the TrueScore episodes row); none, no row. */
+  imdb?: (id: string) => string | undefined
 }
 
 /**
@@ -223,10 +228,21 @@ export async function showLibrary(full: Library, d: ShowDeps): Promise<Library> 
     return titles[index.get(x) ?? -1]?.p ? [index.get(x)!] : []
   }))] })
   const rest = full.rows.filter((r) => !ts.some(({ id }) => id === r.id))
-  // The lists after the TrueScore shows row (the app puts Continue watching between).
+  // The TrueScore shows row's best episodes, each a card of its show's with the episode's id, name and scores.
+  const scores = new Map(d.scores)
+  const shows = full.rows.find((r) => r.id === 'ts-shows')?.i.map((i) => full.titles[i]) ?? []
+  const byShow = new Map(shows.map((t) => [t.id, t]))
+  const episodes = d.imdb ? bestEpisodes(shows.map((t) => t.id), d.imdb, d.seen) : []
+  for (const e of episodes) {
+    const { v: _v, x: _x, pp: _p, ...card } = unscored(byShow.get(e.show)!)
+    index.set(e.id, titles.push({ ...card, id: e.id, ...(e.n && { en: e.n }) }) - 1)
+    scores.set(e.id, { s: e.ts, tr: e.tr })
+  }
+  const episodeRow = { id: 'ts-episodes', n: names.get('ts-episodes')!, ids: episodes.map((e) => e.id) }
+  // The episodes and the lists after the TrueScore shows row (the app puts Continue watching after the episodes).
   const after = rest.findIndex((r) => r.id === 'ts-shows') + 1
-  const rows = [...ts.map(row), ...rest.slice(0, after), ...lists.map(row), ...rest.slice(after)].filter((r) => r.i.length >= (r.id === 'ar-dub' ? DUB_MIN : 1))
-  const shown = ranked({ ...full, titles, rows }, d.scores, ROW_CAP, d.seen)
+  const rows = [...ts.map(row), ...rest.slice(0, after), row(episodeRow), ...lists.map(row), ...rest.slice(after)].filter((r) => r.i.length >= (r.id === 'ar-dub' ? DUB_MIN : 1))
+  const shown = ranked({ ...full, titles, rows }, scores, ROW_CAP, d.seen)
   return { ...shown, titles: await pool(shown.titles, 6, async (t) => ({ ...t, ...(await d.runtime(t.id).then((rt) => rt && { rt })) })) }
 }
 
@@ -326,7 +342,7 @@ export function currentLibrary(seen: () => Promise<Set<string>>): Promise<Served
     async () => {
       const [full, cache, rt, watched] = await Promise.all([readFile(LIBRARY_FULL_FILE, 'utf8').then((s) => JSON.parse(s) as Library), loadScores(), keptRuntimes(), seen()])
       const films = letterboxdFilms()
-      return showLibrary(full, { seen: watched, films, lists: letterboxdLists(), scores: scoreTitles(cache, films), card: titleCard, runtime: async (id) => rt(id) })
+      return showLibrary(full, { seen: watched, films, lists: letterboxdLists(), scores: scoreTitles(cache, films), card: titleCard, runtime: async (id) => rt(id), imdb: (id) => cache[id]?.im })
     },
     storeAt,
   )

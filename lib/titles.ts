@@ -34,6 +34,8 @@ export interface LibTitle extends Score {
   rt?: number
   /** TMDB popularity: picks a row's candidates without a score in the build (library-full.json); not served. */
   pp?: number
+  /** An episode's name, on the TrueScore episodes row's cards (id "tv:1396:s5e14", the rest its show's). */
+  en?: string
 }
 
 /** A TMDB list result or details, as far as a card needs it. */
@@ -116,7 +118,8 @@ export interface Known { lib: Library | null; titles: Map<string, LibTitle>; sco
 /** [Known] from the served library, the uncut build (whose titles it overlays), the score cache, TrueScore's store and the kept runtimes. */
 export function knownOf(lib: Library | null, full: Library | null, cache: ScoreCache, films: Store, rt?: (id: string) => number | undefined): Known {
   const titles = new Map<string, LibTitle>()
-  for (const t of [...(full?.titles ?? []), ...(lib?.titles ?? [])]) titles.set(t.id, { ...titles.get(t.id), ...t })
+  // Films and shows: the TrueScore episodes row's cards are its shows' again (search would list a show once per episode).
+  for (const t of [...(full?.titles ?? []), ...(lib?.titles ?? [])]) if (parseTitleId(t.id)?.season == null) titles.set(t.id, { ...titles.get(t.id), ...t })
   return { lib, titles, scores: scoreTitles(cache, films), cache, rt }
 }
 

@@ -9,8 +9,9 @@
 // Usage: bun scripts/build-library.ts   (XTREAM_*, TMDB_TOKEN, TRAKT_CLIENT_ID, MDBLIST_KEY from env / .env.local)
 import { readFile } from 'node:fs/promises'
 import { dubbedFilms } from '../lib/arabp2p.js'
+import { episodeScores } from '../lib/episode-scores.js'
 import { historyTitles, keepRefreshed, loadHistory, refreshHistory, updateHistory, watchedOf, watchlistRuntimes } from '../lib/history.js'
-import { LIBRARY_FILE, LIBRARY_FULL_FILE, providerTitles, rebuildLibrary, saveLibrary, withProviderCopies, type Library } from '../lib/library.js'
+import { LIBRARY_FILE, LIBRARY_FULL_FILE, pool, providerTitles, rebuildLibrary, saveLibrary, withProviderCopies, type Library } from '../lib/library.js'
 import { configFromEnv } from '../lib/provider.js'
 import { imdbTopShows, letterboxdFilms, letterboxdLists, loadScores, refreshScores, saveScores } from '../lib/ratings.js'
 import { scoreTitles } from '../lib/scores.js'
@@ -40,6 +41,9 @@ if (history) {
 const cfg = configFromEnv()
 const cache = await loadScores()
 let asked = { mdblist: 0, imdb: 0 }
+const topShows = await imdbTopShows(cache)
+// Their episodes' scores (kept a day), for the TrueScore episodes row; a few at a time, one IMDb query a show.
+await pool(topShows, 3, (id) => episodeScores(cache[id]?.im))
 const { full, shown, failed, lookedUp } = await rebuildLibrary({
   tmdb: (path) => tmdbGet(path),
   card: titleCard,
@@ -54,7 +58,8 @@ const { full, shown, failed, lookedUp } = await rebuildLibrary({
     await saveScores(cache)
     return scoreTitles(cache, letterboxdFilms())
   },
-  topShows: await imdbTopShows(cache),
+  topShows,
+  imdb: (id) => cache[id]?.im,
   // The films ArabP2P has an Arabic dub of that TorBox holds (the server's crawl keeps the list).
   dubbed: await dubbedFilms(),
   // TMDB's kept details, looked up only where none are kept.

@@ -51,6 +51,7 @@ val Scored.known get() = sn != null || lb != null || ir != null || s10 != null |
  * A library title (`/api/app/library`, `/api/app/search`, More like this): its id, 'm' film or 't' show, name, year,
  * poster and backdrop (a TMDB path, or a full URL), genre ids, best known tier ([e] 1 when estimated) and scores;
  * a film the provider has, its best copy's VOD id [v] and container [x] (Play starts it when the box can't answer); its runtime [rt] in minutes (a show's: an episode's), 0 unknown.
+ * An episode (the TrueScore episodes row: [id] "tv:1396:s5e14", the rest its show's) has its name in [en].
  */
 @Serializable
 data class LibTitle(
@@ -59,7 +60,7 @@ data class LibTitle(
     override val s: Int? = null, override val sn: Int? = null, override val se: Int = 0, override val lb: Double? = null, override val ir: Double? = null,
     override val lv: Int? = null, override val iv: Int? = null, override val s10: Double? = null,
     override val ta: Int? = null, override val tr: Double? = null, override val tq: Double? = null,
-    val v: Int = 0, val x: String = "", val rt: Int = 0,
+    val v: Int = 0, val x: String = "", val rt: Int = 0, val en: String = "",
 ) : Scored {
     /** On screen, [genres] its first two genres' names. */
     fun toMovie(genres: String = ""): Movie {
@@ -70,6 +71,10 @@ data class LibTitle(
 
 /** A negative id for a title the provider has no id for, so it never reaches a provider call. */
 fun titleKey(title: TitleId) = -1 - (title.hashCode() and Int.MAX_VALUE)
+
+/** An episode's show and code ("tv:1396:s5e14" → "tv:1396", "S5 E14"); null for a film or show. */
+fun TitleId.episodeOf(): Pair<TitleId, String>? = EPISODE_ID.find(this)?.let { m -> substring(0, m.range.first) to "S${m.groupValues[1]} E${m.groupValues[2]}" }
+private val EPISODE_ID = Regex(":s(\\d+)e(\\d+)$")
 
 /** A film or show (not an episode) by its title id. */
 val TitleId.isShow get() = startsWith("tv:") || startsWith("iptv:tv:")
@@ -92,7 +97,8 @@ class Catalog(val rows: List<CatalogRow>, titles: List<Movie>) {
     private val byTitle = titles.associateBy { it.titleId }
     fun find(title: TitleId): Movie? = byTitle[title]
 
-    private val searchIndex by lazy { titles.map { searchNorm(it.title.title) to it } }
+    // Films and shows: an episode's card (the TrueScore episodes row) is named as its show.
+    private val searchIndex by lazy { titles.filter { it.titleId.episodeOf() == null }.map { searchNorm(it.title.title) to it } }
 
     /** Titles containing every typed word, at most [SEARCH_CAP]: search with the box out of reach. */
     fun search(query: String): List<Movie> = matching(searchIndex, query)

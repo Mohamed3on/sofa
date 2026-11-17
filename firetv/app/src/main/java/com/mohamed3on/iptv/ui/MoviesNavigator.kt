@@ -14,6 +14,7 @@ import com.mohamed3on.iptv.data.Person
 import com.mohamed3on.iptv.data.Resume
 import com.mohamed3on.iptv.data.ResumeStore
 import com.mohamed3on.iptv.data.TitleId
+import com.mohamed3on.iptv.data.episodeOf
 import com.mohamed3on.iptv.data.isShow
 import com.mohamed3on.iptv.player.Capacity
 import com.mohamed3on.iptv.player.Copy
@@ -29,7 +30,8 @@ import java.time.ZoneId
 
 /** A page over the browsing screen: a title's, or a person's titles. Back takes the top one off. */
 internal sealed interface LibraryPage {
-    data class Title(val movie: Movie, val versions: Boolean = false) : LibraryPage
+    /** A show's page opened on [episode] (the TrueScore episodes row's card) focuses it. */
+    data class Title(val movie: Movie, val versions: Boolean = false, val episode: TitleId? = null) : LibraryPage
     data class Cast(val person: Person) : LibraryPage
 }
 
@@ -92,10 +94,15 @@ internal class MoviesNavigator(
     private var warming: Job? = null
     private var resuming: Job? = null
 
-    /** A title's page; a person search found ("person:<id>") opens theirs. */
+    /** A title's page; a person search found ("person:<id>") opens theirs, an episode's card its show's, on it. */
     fun open(movie: Movie) {
         val person = movie.titleId.takeIf { it.startsWith("person:") }?.removePrefix("person:")?.toIntOrNull()
-        push(if (person != null) LibraryPage.Cast(Person(person, movie.name)) else LibraryPage.Title(movie))
+        val show = movie.titleId.episodeOf()?.first
+        push(when {
+            person != null -> LibraryPage.Cast(Person(person, movie.name))
+            show != null && movie.lib != null -> LibraryPage.Title(movie.lib.copy(id = show, en = "", s = null, tr = null).toMovie(movie.group), episode = movie.titleId)
+            else -> LibraryPage.Title(movie)
+        })
     }
 
     fun open(person: Person) = push(LibraryPage.Cast(person))

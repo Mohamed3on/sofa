@@ -130,14 +130,15 @@ class TitlesClient(
      * provider's own, a show's from its episodes call.
      */
     suspend fun info(m: Movie, fresh: Boolean = false): Result<MovieInfo> {
-        if (m.titleId.isTmdb) title(m.titleId, fresh).let { if (it.isSuccess || m.id <= 0) return it }
+        // An episode's card says its show's.
+        if (m.titleId.isTmdb) title(m.titleId.episodeOf()?.first ?: m.titleId, fresh).let { if (it.isSuccess || m.id <= 0) return it }
         if (m.id <= 0) return Result.failure(IOException("no provider id"))
         return if (m.titleId.isShow) episodes(m.id).map { it.info } else movieInfo(m.id)
     }
 
     /** What [info] already holds for [m], without waiting: a screen's first frame. */
     fun peekInfo(m: Movie): MovieInfo? =
-        (if (m.titleId.isTmdb) titles[m.titleId] else null) ?: if (m.titleId.isShow) showCache[m.id]?.second?.info else movieInfos[m.id]
+        (if (m.titleId.isTmdb) titles[m.titleId.episodeOf()?.first ?: m.titleId] else null) ?: if (m.titleId.isShow) showCache[m.id]?.second?.info else movieInfos[m.id]
 
     /**
      * A show's episodes: the provider's when it lists the show ([m]'s own id, or the series TMDB's answer names),
