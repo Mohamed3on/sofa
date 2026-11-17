@@ -332,10 +332,16 @@ fun resumeAt(pos: Long, dur: Long): Long = if (pos > MIN_RESUME_MS && !finished(
  */
 class ResumeStore(private val store: KeyValueStore, private val key: String, private val now: () -> Long = System::currentTimeMillis) {
     private val serializer = ListSerializer(Resume.serializer())
-    private val _entries = MutableStateFlow(
-        store.get(key)?.let { runCatching { json.decodeFromString(serializer, it) }.getOrNull() }.orEmpty()
-    )
+    private val _entries = MutableStateFlow(read())
     val entries: StateFlow<List<Resume>> = _entries
+
+    /** Reads them again: another device's places came in ([StateSync]). */
+    @Synchronized
+    fun reload() {
+        _entries.value = read()
+    }
+
+    private fun read() = store.get(key)?.let { runCatching { json.decodeFromString(serializer, it) }.getOrNull() }.orEmpty()
 
     /** Where [title] (for a show, its [episode]) starts: its saved place, else the beginning. */
     fun startAt(title: TitleId, episode: TitleId? = null): Long =
@@ -380,8 +386,16 @@ class ResumeStore(private val store: KeyValueStore, private val key: String, pri
  * the newest [CAP] are kept.
  */
 class WatchedStore(private val store: KeyValueStore, private val key: String) {
-    private val _ids = MutableStateFlow<Set<TitleId>>(store.get(key)?.split(',')?.filter(String::isNotEmpty)?.toCollection(LinkedHashSet()) ?: emptySet())
+    private val _ids = MutableStateFlow(read())
     val ids: StateFlow<Set<TitleId>> = _ids
+
+    /** Reads them again: another device's came in ([StateSync]). */
+    @Synchronized
+    fun reload() {
+        _ids.value = read()
+    }
+
+    private fun read(): Set<TitleId> = store.get(key)?.split(',')?.filter(String::isNotEmpty)?.toCollection(LinkedHashSet()) ?: emptySet()
 
     fun mark(id: TitleId) = markAll(listOf(id))
 

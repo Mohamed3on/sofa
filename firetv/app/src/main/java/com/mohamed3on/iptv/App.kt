@@ -16,6 +16,9 @@ import com.mohamed3on.iptv.data.PrefsStore
 import com.mohamed3on.iptv.data.Route
 import com.mohamed3on.iptv.data.LIBRARY_CHECK
 import com.mohamed3on.iptv.data.RecentSearches
+import com.mohamed3on.iptv.data.RowLayout
+import com.mohamed3on.iptv.data.StateEntry
+import com.mohamed3on.iptv.data.StateSync
 import com.mohamed3on.iptv.data.ResumeStore
 import com.mohamed3on.iptv.data.TitleMigration
 import com.mohamed3on.iptv.data.TraktSync
@@ -41,6 +44,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.encodeToJsonElement
 import okhttp3.OkHttpClient
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
@@ -79,12 +84,20 @@ class App : Application(), SingletonImageLoader.Factory {
 
 val Context.graph get() = (applicationContext as App).graph
 
+private val stateJson = Json { ignoreUnknownKeys = true }
+
 /** App-wide singletons. */
 class AppGraph(context: Context) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     /** The one HTTP client: feed sync now, Media3's OkHttp data source later. */
     val http = OkHttpClient()
-    val prefs = PrefsStore(context.getSharedPreferences("iptv", Context.MODE_PRIVATE))
+    /** Every call to the box goes through this. */
+    val server = SofaServer(http, BuildConfig.SERVER_URL, BuildConfig.APP_TOKEN)
+    private val sharedPrefs = context.getSharedPreferences("iptv", Context.MODE_PRIVATE)
+    /** What the app keeps, the owner's own state shared with their other devices through the box. */
+    val prefs = StateSync(PrefsStore(sharedPrefs), { sharedPrefs.all.keys }, scope) { sent ->
+        server.post("state", stateJson.encodeToJsonElement(mapOf("put" to sent))) { stateJson.decodeFromString<Map<String, StateEntry>>(it.string()) }.getOrNull()
+    }
     val network = NetworkMonitor(context)
     val route = Route(prefs, network.vpn, scope)
     val history = WatchHistory(prefs)
@@ -111,10 +124,10 @@ class AppGraph(context: Context) {
     val marks by lazy { Marks(titles, watchedMovies, watchedEpisodes, scope) { syncHistory(Duration.ZERO) } }
     /** Movies & Shows searches that led to a title, offered under an empty search box. */
     val recentSearches = RecentSearches(prefs)
+    /** The Movies & Shows rows as arranged (moved, hidden). */
+    val rowLayout = RowLayout(prefs)
     /** Marks, corrections and pins the copy ranker reads. */
     val copyChoices = CopyChoices(prefs)
-    /** Every call to the box goes through this. */
-    val server = SofaServer(http, BuildConfig.SERVER_URL, BuildConfig.APP_TOKEN)
     /** Channels and guide. */
     val sync = LiveSync(server, context.filesDir, prefs)
     /** Today's football scores, polled while live TV is on screen. */
@@ -144,6 +157,20 @@ class AppGraph(context: Context) {
     val films by lazy { FilmCopies(titles::copies, debrid, copyChoices, capacity, { setup.profile.value }, scope, ip = { network.vpn.value }, linked = filmHeads::fetch) }
     /** The head and index of a Real-Debrid file whose link was fetched ahead, served to the film player from memory. */
     val filmHeads by lazy { FilmHeads(http) }
+
+    init {
+        // Another device's changes, taken by the stores holding them.
+        scope.launch {
+            prefs.changed.collect { keys ->
+                if (keys.any { it.startsWith("lineup.") }) lineup.reload()
+                if (keys.any { it.startsWith("movies.") && it != "movies.search.recent" }) rowLayout.reload()
+                recentSearches.reload()
+                listOf(resume, showResume, followed).forEach { it.reload() }
+                dismissed.reload()
+                copyChoices.reload()
+            }
+        }
+    }
 
     /** The owner's history from the box, telling it the shows finished here in the last 6 months ("tv:N:sSeE@ms"). */
     suspend fun syncHistory(maxAge: Duration = LIBRARY_CHECK) = titles.history.sync(maxAge, followed.entries.value

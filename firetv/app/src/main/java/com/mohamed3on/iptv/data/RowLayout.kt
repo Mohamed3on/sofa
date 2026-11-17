@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * The viewer's arrangement of the Movies & Shows rows, kept on this device by row key: the order they were moved into and
+ * The viewer's arrangement of the Movies & Shows rows, shared by their devices ([StateSync]) by row key: the order they were moved into and
  * the rows hidden. A row never moved (a new Letterboxd list, Dubbed in Arabic once it fills) keeps the box's place for it.
  * [version] moves on each change.
  */
@@ -13,6 +13,11 @@ class RowLayout(private val store: KeyValueStore) {
     val version: StateFlow<Int> = _version
 
     val hidden: Set<String> get() = read(HIDDEN_KEY).toSet()
+
+    /** Shows it again: another device's changes came in ([StateSync]). */
+    fun reload() {
+        _version.value++
+    }
 
     /** [rows] in the box's order, arranged: the moved ones take the places they hold among them in their moved order; hidden ones go. */
     fun <T> arrange(rows: List<T>, key: (T) -> String): List<T> {

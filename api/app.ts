@@ -22,6 +22,7 @@
 // GET /api/app/trakt?t=TOKEN — the Trakt sign-in; POST it { action: connect | cancel | disconnect } to change it.
 // POST /api/app/trakt-history?t=TOKEN — { title, at } a film or episode finished on the stick, for Trakt history.
 // POST /api/app/mark?t=TOKEN — { title, watched?, rating? } a mark or rating made on the stick, for Trakt.
+// POST /api/app/state?t=TOKEN — { put: { key: { v, at } } } the owner's state shared by every device; answers all of it.
 import { appendFile, mkdir, rename, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { buildAppFeed, buildAppGuide, guideUpcoming } from '../lib/app-feed.js'
@@ -37,6 +38,7 @@ import { currentHistory, editHistory, historyAnswer, loadHistory, watchedOf, wat
 import { currentLibrary, knownTitles } from '../lib/library.js'
 import { recordBitrate, recordReading, type Meta } from '../lib/quality.js'
 import { eventsFile } from '../lib/flaky.js'
+import { exchangeState, type StateEntry } from '../lib/app-state.js'
 import { movieInfo, saveMeasuredFilm, showEpisodes, showList, titleIds as mapTitleIds } from '../lib/shows.js'
 import { subtitleFile, subtitlesFor } from '../lib/subtitles.js'
 import { personTitles, searchTitles, titleDetails } from '../lib/browse.js'
@@ -387,3 +389,14 @@ export async function letterboxdLogs(req: Request) {
 
 /** Trakt didn't take a change: 503 when it isn't connected, else 502. */
 const traktRefused = (result: string) => new Response(result === 'off' ? 'Trakt not connected' : 'Trakt failed', { status: result === 'off' ? 503 : 502 })
+
+// POST /api/app/state?t=TOKEN — { put: { key: { v: string | null, at: epoch ms } } } the keys a device changed (lib/app-state.ts):
+// each kept unless the box has a newer write; answers every key kept, { key: { v, at } }, for the device to take the newer ones.
+export async function state(req: Request) {
+  const r = (await req.json().catch(() => null)) as { put?: unknown } | null
+  const put = r?.put && typeof r.put === 'object' && !Array.isArray(r.put) ? Object.entries(r.put as Record<string, StateEntry>) : null
+  const ok = put && put.length <= 500 && put.every(([k, e]) => k.length <= 200 && e && (e.v === null || (typeof e.v === 'string' && e.v.length <= 512 * 1024))
+    && Number.isSafeInteger(e.at) && e.at >= 0 && e.at <= Date.now() + 864e5)
+  if (!ok) return new Response('Bad state', { status: 400 })
+  return exchangeState(Object.fromEntries(put.map(([k, e]) => [k, { v: e.v, at: e.at }])))
+}

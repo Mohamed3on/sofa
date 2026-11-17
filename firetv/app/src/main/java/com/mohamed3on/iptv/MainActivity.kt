@@ -160,6 +160,8 @@ class MainActivity : ComponentActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 // A newer build downloads in the background and waits as "Update ready" in the list (R15, R16).
                 graph.scope.launch { graph.updater.check() }
+                // The favourites, places and the rest changed on the owner's other device since (StateSync).
+                graph.scope.launch { graph.prefs.sync() }
                 sync.refresh(30.minutes, 1.hours)
                 while (true) {
                     delay(1.minutes)

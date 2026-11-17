@@ -166,7 +166,6 @@ import com.mohamed3on.iptv.data.Seen
 import java.time.ZoneId
 import java.time.Instant
 import com.mohamed3on.iptv.data.Resume
-import com.mohamed3on.iptv.data.RowLayout
 import com.mohamed3on.iptv.data.TitleId
 import com.mohamed3on.iptv.data.SyncError
 import com.mohamed3on.iptv.data.groupLabel
@@ -596,8 +595,8 @@ private fun MoviesBrowse(
     var actions by remember { mutableStateOf<Actions?>(null) }
     // A followed show's next episode takes the hero only when nothing is part-way through; what isn't recent is the Continue watching row.
     val (upNext, older) = remember(library, resume, nextUp) { upNextOf(library, resume, nextUp) }
-    // The rows as the viewer arranged them with ☰ (moved, hidden), kept on this device.
-    val layout = remember { RowLayout(prefs) }
+    // The rows as the viewer arranged them with ☰ (moved, hidden), shared by their devices.
+    val layout = LocalContext.current.graph.rowLayout
     val arranged by layout.version.collectAsState()
     // The row picked up to move (hold OK on a card, or ☰ → Move row): Up and Down move it, OK or Back puts it down.
     var lifted by remember { mutableStateOf<String?>(null) }

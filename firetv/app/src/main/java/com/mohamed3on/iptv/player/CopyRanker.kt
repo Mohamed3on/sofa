@@ -364,9 +364,20 @@ class CopyChoices(private val store: KeyValueStore, private val now: () -> Long 
             .apply { values.removeAll { it.isEmpty() } }
     }
     private val corrections: MutableMap<String, Set<Correction>> by lazy { read<Map<String, Set<Correction>>>(CORRECTIONS).orEmpty().toMutableMap() }
-    private val pins: MutableMap<String, String> by lazy { read<Map<String, String>>(PINS).orEmpty().toMutableMap() }
-    private val lacking: MutableMap<String, Set<String>> by lazy { read<Map<String, Set<String>>>(LACKING).orEmpty().toMutableMap() }
-    private val languages: MutableMap<String, String> by lazy { read<Map<String, String>>(LANGUAGES).orEmpty().toMutableMap() }
+    // Shared by the owner's devices ([StateSync]), so read again by [reload].
+    private var pins = readPins()
+    private var lacking = readLacking()
+    private var languages = readLanguages()
+    private fun readPins() = lazy { read<Map<String, String>>(PINS).orEmpty().toMutableMap() }
+    private fun readLacking() = lazy { read<Map<String, Set<String>>>(LACKING).orEmpty().toMutableMap() }
+    private fun readLanguages() = lazy { read<Map<String, String>>(LANGUAGES).orEmpty().toMutableMap() }
+
+    /** Reads the pins, languages and lacking tracks again: another device's came in. */
+    @Synchronized fun reload() {
+        pins = readPins()
+        lacking = readLacking()
+        languages = readLanguages()
+    }
     private val learnt: MutableMap<String, Map<Correction, Long>> by lazy { read<Map<String, Map<Correction, Long>>>(LEARNT).orEmpty().toMutableMap() }
 
     /** Ranks [copies] of [titleId] for [setup] with this setup's marks, corrections and learnt audio, the title's pin and its audio language. */
@@ -374,22 +385,22 @@ class CopyChoices(private val store: KeyValueStore, private val now: () -> Long 
         rankCopies(copies, originalLanguage, setup, typicalMbps, marks(setup), corrections(setup), pin(titleId), learnt(setup), prefer(titleId, copies), lacking())
 
     /** The audio language for [titleId]: chosen on its page (an episode's, else its show's), else with "Arabic dub first" an Egyptian dub when it has one, else Arabic. */
-    @Synchronized fun prefer(titleId: String, copies: List<Copy>): String? = languages[titleId] ?: languages[titleId.replace(EPISODE, "")]
+    @Synchronized fun prefer(titleId: String, copies: List<Copy>): String? = languages.value[titleId] ?: languages.value[titleId.replace(EPISODE, "")]
         ?: if (dubFirst) EGYPTIAN.takeIf { copies.any { EGYPTIAN in it.languages } } ?: "ar" else null
 
     /** Copy ids with the audio languages their files were found to lack. */
-    @Synchronized fun lacking(): Map<String, Set<String>> = lacking
+    @Synchronized fun lacking(): Map<String, Set<String>> = lacking.value
 
     /** Records that [copy]'s file has no [lang] track, whatever its name claims. */
     @Synchronized fun lacks(copy: Copy, lang: String) {
-        lacking[copy.id] = lacking[copy.id].orEmpty() + lang
-        write<Map<String, Set<String>>>(LACKING, lacking)
+        lacking.value[copy.id] = lacking.value[copy.id].orEmpty() + lang
+        write<Map<String, Set<String>>>(LACKING, lacking.value)
     }
 
     /** Chooses [lang] as [titleId]'s audio (null: back to the default); a pinned copy gives way to it. */
     @Synchronized fun language(titleId: String, lang: String?) {
-        if (lang == null) languages.remove(titleId) else languages[titleId] = lang
-        write<Map<String, String>>(LANGUAGES, languages)
+        if (lang == null) languages.value.remove(titleId) else languages.value[titleId] = lang
+        write<Map<String, String>>(LANGUAGES, languages.value)
         pin(titleId, null)
     }
 
@@ -435,12 +446,12 @@ class CopyChoices(private val store: KeyValueStore, private val now: () -> Long 
         write<Map<String, Set<Correction>>>(CORRECTIONS, corrections)
     }
 
-    @Synchronized fun pin(titleId: String): String? = pins[titleId]
+    @Synchronized fun pin(titleId: String): String? = pins.value[titleId]
 
     /** Pins [copyId] for [titleId], or clears the pin when null. */
     @Synchronized fun pin(titleId: String, copyId: String?) {
-        if (copyId == null) pins.remove(titleId) else pins[titleId] = copyId
-        write<Map<String, String>>(PINS, pins)
+        if (copyId == null) pins.value.remove(titleId) else pins.value[titleId] = copyId
+        write<Map<String, String>>(PINS, pins.value)
     }
 
     private inline fun <reified T> read(key: String): T? = store.get(key)?.let { runCatching { json.decodeFromString<T>(it) }.getOrNull() }

@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
 const val FAVOURITES = "Favourites"
 
 /**
- * The viewer's own lineup, kept on this device: favourite channels, shown as a group of their own
+ * The viewer's own lineup, shared by their devices ([StateSync]): favourite channels, shown as a group of their own
  * (copies, like the 🏆 groups'), and each group's channels in the order they were arranged. Both
  * are by family, so they outlive a refresh that renumbers streams. Favourites also lead their own group
  * (not the 🏆 groups, which stay quality-sorted for Live now). [version] moves on each change.
@@ -18,6 +18,12 @@ class Lineup(private val store: KeyValueStore) {
     private var favourites = read(FAVOURITES_KEY)
 
     fun isFavourite(family: String) = family in favourites
+
+    /** Reads it again: another device's changes came in ([StateSync]). */
+    fun reload() {
+        favourites = read(FAVOURITES_KEY)
+        _version.value++
+    }
 
     fun toggleFavourite(family: String) {
         favourites = if (family in favourites) favourites - family else favourites + family
