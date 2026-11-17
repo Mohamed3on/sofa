@@ -16,8 +16,10 @@ import com.mohamed3on.iptv.ui.theme.ActionButton
 import com.mohamed3on.iptv.ui.theme.ActivityLine
 import com.mohamed3on.iptv.ui.theme.Mark
 import android.os.SystemClock
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.util.Log
 import android.view.KeyEvent
+import android.view.accessibility.AccessibilityManager
 import android.view.SurfaceView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -38,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
@@ -121,6 +124,13 @@ class MainActivity : ComponentActivity() {
         // anything changes: ~13% of the main thread while a held key scrolls the channel list on the TCL. Nothing on a TV uses it.
         @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
         androidx.compose.ui.contentcapture.ContentCaptureManager.isEnabled = false
+        // Launchers keep an accessibility service on to catch the Home key (gathin on the TCL, Projectivy on the stick),
+        // and Compose then diffs the whole semantics tree on every layout change for it. Only a screen reader reads that
+        // tree, so without one the app shows a single empty node: a 4 s held key in the channel list lost 20-99 of 240
+        // frames on the stick with the tree, 12-20 without.
+        val reader = getSystemService(AccessibilityManager::class.java)
+            .getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_SPOKEN or AccessibilityServiceInfo.FEEDBACK_BRAILLE).isNotEmpty()
+        val semantics = if (reader) Modifier else Modifier.clearAndSetSemantics {}
         // A launch reopens Movies & Shows (or the title page) it was closed on; a check target wins.
         Check.request(intent.getStringExtra("open") ?: graph.prefs.get(Check.LAST_SCREEN))
         val sync = graph.sync
@@ -138,7 +148,9 @@ class MainActivity : ComponentActivity() {
             val streamHealth by health.collectAsState()
             IptvTheme(reducedMotion = Motion.reducedMotion(this)) {
                 CompositionLocalProvider(LocalIdleWatch provides idleWatch) {
-                    Root(state, playing, shown?.audio, surface, shape, tiles, liveQuality, streamHealth, idleState, onRetry = { graph.scope.launch { sync.retry() } })
+                    Box(semantics) {
+                        Root(state, playing, shown?.audio, surface, shape, tiles, liveQuality, streamHealth, idleState, onRetry = { graph.scope.launch { sync.retry() } })
+                    }
                 }
             }
         }

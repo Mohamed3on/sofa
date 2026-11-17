@@ -2,8 +2,6 @@ package com.mohamed3on.iptv.baselineprofile
 
 import android.view.KeyEvent
 import androidx.benchmark.macro.MacrobenchmarkScope
-import androidx.test.uiautomator.By
-import androidx.test.uiautomator.Until
 
 internal const val PACKAGE = "com.mohamed3on.iptv"
 
@@ -15,12 +13,14 @@ internal fun MacrobenchmarkScope.press(code: Int, times: Int = 1, pauseMs: Long 
     }
 }
 
-/** Launched, with the channels loaded and the hidden channel list built (LIST_BUILD_DELAY_MS, 6 s after launch). */
+/**
+ * Launched, with the channels loaded and the hidden channel list built (LIST_BUILD_DELAY_MS, 6 s after launch). A wait,
+ * not a text check: without a screen reader the app shows no semantics tree (MainActivity), so UiAutomator sees no text.
+ */
 internal fun MacrobenchmarkScope.launchAndSettle() {
     pressHome()
     startActivityAndWait()
-    device.wait(Until.gone(By.text("Loading channels…")), 30_000)
-    Thread.sleep(8_000)
+    Thread.sleep(10_000)
 }
 
 /** OK in the player: the info view (banner, stream numbers, health) for a moment, then OK again: the list. */
