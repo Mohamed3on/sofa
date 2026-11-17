@@ -13,7 +13,7 @@ import { measuredStream, pictureTier, probedPicture, type Tier } from './quality
 import { letterboxdFilms, letterboxdLists, loadScores, storeAt } from './ratings.js'
 import { listRows, scoreTitles, trueScoreRows, trueScoreShows, untilUnseen, type Score, type Store, type StoreList } from './scores.js'
 import { measuredFilms, showList } from './shows.js'
-import { keptRuntimes, parseTitleId, TMDB_IMG, type Kind } from './tmdb.js'
+import { keptRuntimes, parseTitleId, tmdbEpisodeIds, TMDB_IMG, type Kind } from './tmdb.js'
 import { fromTmdb, knownOf, providerCard, titleCard, unscored, type Known, type LibTitle, type TmdbItem } from './titles.js'
 import { bestEpisodes } from './episode-scores.js'
 import { bestFilmCopies, blurayMovies, filmTitleOf } from './vod.js'
@@ -232,7 +232,7 @@ export async function showLibrary(full: Library, d: ShowDeps): Promise<Library> 
   const scores = new Map(d.scores)
   const shows = full.rows.find((r) => r.id === 'ts-shows')?.i.map((i) => full.titles[i]) ?? []
   const byShow = new Map(shows.map((t) => [t.id, t]))
-  const episodes = d.imdb ? bestEpisodes(shows.map((t) => t.id), d.imdb, d.seen) : []
+  const episodes = d.imdb ? await bestEpisodes(shows.map((t) => t.id), d.imdb, d.seen, tmdbEpisodeIds) : []
   for (const e of episodes) {
     const { v: _v, x: _x, pp: _p, ...card } = unscored(byShow.get(e.show)!)
     index.set(e.id, titles.push({ ...card, id: e.id, ...(e.n && { en: e.n }) }) - 1)

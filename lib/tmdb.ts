@@ -332,3 +332,10 @@ export async function tmdbEpisodes(id: string | number, seasons: number[]): Prom
     return entry?.e ?? []
   }
 }
+
+/** A show's ("tv:1396") aired episodes as episode ids, numbered as TMDB numbers them ([tmdbEpisodes]); [] when TMDB doesn't know it. */
+export async function tmdbEpisodeIds(show: string): Promise<string[]> {
+  const p = parseTitleId(show)
+  const t = p?.kind === 'tv' ? await tmdbTitle('tv', p.tmdb) : null
+  return t ? (await tmdbEpisodes(p!.tmdb, t.seasons)).map((e) => episodeTitle(show, e.season, e.episode)) : []
+}

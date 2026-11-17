@@ -81,16 +81,29 @@ export async function withEpisodeScores<E extends { season: number; episode: num
 /** Episodes one show gives the TrueScore episodes row at most, so a few shows don't fill it. */
 const PER_SHOW = 3
 
+/** A card of the TrueScore episodes row: its episode id ("tv:1396:s5e14"), its show's, and its score, ratio and name. */
+export type BestEpisode = EpisodeScore & { id: string; show: string }
+
 /**
  * The TrueScore episodes row: the kept episodes of [shows] (title ids; [imdb] gives each one's IMDb id) the owner hasn't
- * watched ([seen]), by TrueScore, best first, [PER_SHOW] a show, the first [n]; each by its episode id ("tv:1396:s5e14").
+ * watched ([seen]), by TrueScore, best first, [PER_SHOW] a show, the first [n]. Only episodes [listed] (a show's episode
+ * ids as its page numbers them) has too: IMDb numbers some shows apart (One Piece's episodes all in season 1), and
+ * a card must open its show's page on itself. [listed] is asked only of shows still in the running.
  */
-export function bestEpisodes(shows: string[], imdb: (show: string) => string | undefined, seen: Set<string>, n = 90): (EpisodeScore & { id: string; show: string })[] {
+export async function bestEpisodes(shows: string[], imdb: (show: string) => string | undefined, seen: Set<string>, listed: (show: string) => Promise<string[]>, n = 90): Promise<BestEpisode[]> {
   const kept = store.read()
-  return shows.flatMap((show) => Object.entries(kept[imdb(show) ?? '']?.e ?? {})
-    .map(([k, s]) => ({ ...s, show, id: `${show}:s${k.replace(':', 'e')}` }))
+  const all = shows.flatMap((show) => Object.entries(kept[imdb(show) ?? '']?.e ?? {}).map(([k, s]) => ({ ...s, show, id: `${show}:s${k.replace(':', 'e')}` })))
     // Specials (season 0) aren't the show's own.
     .filter((x) => !x.id.includes(':s0e') && !seen.has(x.id))
-    .sort((a, b) => b.ts - a.ts).slice(0, PER_SHOW))
-    .sort((a, b) => b.ts - a.ts).slice(0, n)
+    .sort((a, b) => b.ts - a.ts)
+  const ids = new Map<string, Promise<Set<string>>>(), taken = new Map<string, number>(), out: BestEpisode[] = []
+  for (const x of all) {
+    if (out.length >= n) break
+    if ((taken.get(x.show) ?? 0) >= PER_SHOW) continue
+    if (!ids.has(x.show)) ids.set(x.show, listed(x.show).then((l) => new Set(l), () => new Set()))
+    if (!(await ids.get(x.show)!).has(x.id)) continue
+    taken.set(x.show, (taken.get(x.show) ?? 0) + 1)
+    out.push(x)
+  }
+  return out
 }
