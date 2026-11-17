@@ -21,6 +21,9 @@ installed=$(a 15 "$adb" -s "$stick" shell dumpsys package com.mohamed3on.iptv | 
 out=app/build/outputs/apk/release
 sdk=$(a 15 "$adb" -s "$stick" shell getprop ro.build.version.sdk | tr -d "\r")
 baselineprofile/dex-metadata.sh "$sdk" "$out/app-release.dm" # the .dm name must match the APK's
+# Home first: the install kills the app, and a TV falls back to whatever task sits under it, an HDMI input if one
+# was opened from its launcher (the TCL then switches to the Fire TV stick's input for the length of the install).
+a 10 "$adb" -s "$stick" shell input keyevent KEYCODE_HOME
 a 120 "$adb" -s "$stick" install-multiple -r "$out/app-release.apk" "$out/app-release.dm"
 a 15 "$adb" -s "$stick" shell am start -n com.mohamed3on.iptv/.MainActivity >/dev/null
 a 15 "$adb" -s "$stick" shell dumpsys package com.mohamed3on.iptv | grep -m1 versionName

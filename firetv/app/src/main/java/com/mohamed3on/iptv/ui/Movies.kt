@@ -2301,7 +2301,7 @@ private val NO_SCROLL = object : BringIntoViewSpec {
  * A title page's two screens: [main] fills the first, bottom-aligned; [extras] (franchise, cast, More like this) wait
  * below it. Focus going down into a section of them ([extras]' scrollTo, with the section's top) scrolls it to the top
  * of the screen, or as far as the page goes, and back up to [main] scrolls back; nothing else scrolls the page, so a
- * row moving its cards never drags it.
+ * row moving its cards never drags it, nor does an episode list that runs out of room mid-scroll (no nested scroll).
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -2323,7 +2323,8 @@ private fun TitleScroll(main: @Composable BoxScope.() -> Unit, extras: @Composab
     val scrollTo = remember(from) { { top: Float -> scope.launch { scroll.animateScrollTo((from + top).toInt().coerceIn(0, scroll.maxValue)) }; Unit } }
     Box(Modifier.fillMaxSize()) {
         CompositionLocalProvider(LocalBringIntoViewSpec provides NO_SCROLL) {
-            Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
+            // Scrolled only from here: a list inside it at its end handed the rest of its scroll on, and the page slid to its bottom.
+            Column(Modifier.fillMaxSize().verticalScroll(scroll, enabled = false)) {
                 CompositionLocalProvider(LocalBringIntoViewSpec provides inherited) {
                     Box(
                         Modifier.fillMaxWidth().height(screen - PEEK).onFocusChanged { if (it.hasFocus) scope.launch { scroll.animateScrollTo(0) } },
