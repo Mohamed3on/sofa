@@ -857,7 +857,8 @@ private fun TitleActions(
     val seen = id in graph.marks.watched.collectAsState().value
     val markable = graph.marks.canMark(id)
     MarksPanel(
-        movie.title.title,
+        // An episode's card says which episode the marks are for.
+        listOfNotNull(movie.title.title, id.episodeOf()?.second).joinToString(" · "),
         listOfNotNull(
             if (graph.watchlist.canHold(id)) (if (onList) "Remove from Watchlist" else "Add to Watchlist") to { graph.watchlist.toggle(id); onClose() } else null,
             if (markable) (if (seen) "Mark unwatched" else "Mark watched") to { graph.marks.setWatched(id, !seen); onClose() } else null,
@@ -908,9 +909,12 @@ private fun rememberInfo(movie: Movie?, fresh: Boolean = false): MovieInfo? {
     }.value
 }
 
-/** A title's backdrop: its page's, else the library's (known before the page answers). */
-private fun backdropOf(movie: Movie?, info: MovieInfo?): String? =
-    info?.backdrop?.ifEmpty { null } ?: movie?.lib?.b?.ifEmpty { null }?.let { tmdbImage(it, "w1280") }
+/** A title's backdrop: its page's, else the library's (known before the page answers); an episode's card (TrueScore · episodes) its own still first. */
+private fun backdropOf(movie: Movie?, info: MovieInfo?): String? {
+    val own = movie?.lib?.b?.ifEmpty { null }?.let { tmdbImage(it, "w1280") }
+    val page = info?.backdrop?.ifEmpty { null }
+    return if (movie?.titleId?.episodeOf() != null) own ?: page else page ?: own
+}
 
 /**
  * The focused title's backdrop over the whole screen, darkened from the left and the bottom where text
@@ -1672,7 +1676,8 @@ private fun PosterRow(
 /**
  * A 2:3 poster at a fixed size, so nothing moves while it loads; the title's monogram when there is
  * none. Focus lifts it toward the viewer with an accent ring, on one spring read only while drawing.
- * With a [label] it is a Genres tile: the poster pictures the genre, named over it, and nothing else.
+ * With a [label] it is a Genres tile: the poster pictures the genre, named over it, and nothing else. An episode's card (TrueScore ·
+ * episodes) is 16:9 like Up next's: its still, its name over its show's and number ("Invincible · S3 E8").
  */
 @Composable
 private fun PosterCard(movie: Movie, progress: Float?, watched: Boolean = false, focus: FocusRequester?, back: FocusRequester? = null, onFocused: () -> Unit, onClick: () -> Unit, onMenu: (() -> Unit)? = null, label: String? = null, onHold: (() -> Unit)? = null) {
@@ -1684,15 +1689,17 @@ private fun PosterCard(movie: Movie, progress: Float?, watched: Boolean = false,
     val press = remember { booleanArrayOf(false, false) }
     var focused by remember { mutableStateOf(false) }
     val lift = animateFloatAsState(if (focused) 1f else 0f, Motion.focus(), label = "lift")
-    var failed by remember(movie.poster) { mutableStateOf(false) }
-    val request = remember(movie.poster) {
-        movie.poster.takeIf { it.isNotEmpty() }?.let {
-            with(density) { ImageRequest.Builder(context).data(posterUrl(it)).size(CARD.width.roundToPx(), CARD.height.roundToPx()).crossfade(Motion.IMAGE_FADE_MS).build() }
-        }
+    val episode = remember(movie.titleId) { movie.titleId.episodeOf()?.second }
+    val cardSize = if (episode != null) WIDE else CARD
+    val poster = movie.poster.ifEmpty { null }?.let(::posterUrl)
+    val image = if (episode != null) movie.lib?.b?.ifEmpty { null }?.let { tmdbImage(it, "w780") } ?: poster else poster
+    var failed by remember(image) { mutableStateOf(false) }
+    val request = remember(image) {
+        image?.let { with(density) { ImageRequest.Builder(context).data(it).size(cardSize.width.roundToPx(), cardSize.height.roundToPx()).crossfade(Motion.IMAGE_FADE_MS).build() } }
     }
     Box(
         Modifier
-            .size(CARD)
+            .size(cardSize)
             .then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
             .then(if (back != null) Modifier.focusRequester(back) else Modifier)
             .onFocusChanged {
@@ -1748,14 +1755,20 @@ private fun PosterCard(movie: Movie, progress: Float?, watched: Boolean = false,
         if (request != null) {
             AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, onError = { failed = true }, modifier = Modifier.fillMaxSize())
         }
-        // A Genres tile's genre, or an episode's code over its show's poster ("S5 E14").
-        val caption = label ?: remember(movie.titleId) { movie.titleId.episodeOf()?.second }
-        if (caption != null) {
+        if (label != null) {
             // Dark enough at the foot that the name reads over a poster's own lettering.
             Box(Modifier.fillMaxSize().drawBehind { drawRect(TileScrim) })
-            Text(caption, style = Type.title, modifier = Modifier.align(Alignment.BottomStart).padding(Space.s))
+            Text(label, style = Type.title, modifier = Modifier.align(Alignment.BottomStart).padding(Space.s))
+            return@Box
         }
-        if (label != null) return@Box
+        if (episode != null) {
+            // The names read over any still, as on Up next's cards.
+            Box(Modifier.fillMaxSize().drawBehind { drawRect(CardScrim) })
+            Column(Modifier.align(Alignment.BottomStart).padding(Space.s)) {
+                movie.lib?.en?.ifEmpty { null }?.let { FitText(it, style = Type.caption.copy(color = Palette.textPrimary), active = focused) }
+                FitText("${movie.title.title} · $episode", style = Type.caption.copy(color = Palette.textSecondary), active = focused)
+            }
+        }
         if (progress != null) {
             ProgressLine({ progress }, Modifier.align(Alignment.BottomCenter).padding(horizontal = Space.s, vertical = Space.s))
         }

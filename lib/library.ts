@@ -13,7 +13,7 @@ import { measuredStream, pictureTier, probedPicture, type Tier } from './quality
 import { letterboxdFilms, letterboxdLists, loadScores, storeAt } from './ratings.js'
 import { listRows, scoreTitles, trueScoreRows, trueScoreShows, untilUnseen, type Score, type Store, type StoreList } from './scores.js'
 import { measuredFilms, showList } from './shows.js'
-import { keptRuntimes, parseTitleId, tmdbEpisodeIds, TMDB_IMG, type Kind } from './tmdb.js'
+import { keptRuntimes, parseTitleId, tmdbEpisodeStills, TMDB_IMG, type Kind } from './tmdb.js'
 import { fromTmdb, knownOf, providerCard, titleCard, unscored, type Known, type LibTitle, type TmdbItem } from './titles.js'
 import { bestEpisodes } from './episode-scores.js'
 import { bestFilmCopies, blurayMovies, filmTitleOf } from './vod.js'
@@ -228,14 +228,14 @@ export async function showLibrary(full: Library, d: ShowDeps): Promise<Library> 
     return titles[index.get(x) ?? -1]?.p ? [index.get(x)!] : []
   }))] })
   const rest = full.rows.filter((r) => !ts.some(({ id }) => id === r.id))
-  // The TrueScore shows row's best episodes, each a card of its show's with the episode's id, name and scores.
+  // The TrueScore shows row's best episodes, each a card of its show's with the episode's id, name, scores and still (as its backdrop).
   const scores = new Map(d.scores)
   const shows = full.rows.find((r) => r.id === 'ts-shows')?.i.map((i) => full.titles[i]) ?? []
   const byShow = new Map(shows.map((t) => [t.id, t]))
-  const episodes = d.imdb ? await bestEpisodes(shows.map((t) => t.id), d.imdb, d.seen, tmdbEpisodeIds) : []
+  const episodes = d.imdb ? await bestEpisodes(shows.map((t) => t.id), d.imdb, d.seen, tmdbEpisodeStills) : []
   for (const e of episodes) {
     const { v: _v, x: _x, pp: _p, ...card } = unscored(byShow.get(e.show)!)
-    index.set(e.id, titles.push({ ...card, id: e.id, ...(e.n && { en: e.n }) }) - 1)
+    index.set(e.id, titles.push({ ...card, id: e.id, ...(e.n && { en: e.n }), ...(e.still && { b: e.still }) }) - 1)
     scores.set(e.id, { s: e.ts, tr: e.tr })
   }
   const episodeRow = { id: 'ts-episodes', n: names.get('ts-episodes')!, ids: episodes.map((e) => e.id) }

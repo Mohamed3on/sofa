@@ -100,7 +100,7 @@ internal class MoviesNavigator(
         val show = movie.titleId.episodeOf()?.first
         push(when {
             person != null -> LibraryPage.Cast(Person(person, movie.name))
-            show != null && movie.lib != null -> LibraryPage.Title(movie.lib.copy(id = show, en = "", s = null, tr = null).toMovie(movie.group), episode = movie.titleId)
+            show != null && movie.lib != null -> LibraryPage.Title(movie.lib.copy(id = show, en = "", b = "", s = null, tr = null).toMovie(movie.group), episode = movie.titleId)
             else -> LibraryPage.Title(movie)
         })
     }

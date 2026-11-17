@@ -333,9 +333,9 @@ export async function tmdbEpisodes(id: string | number, seasons: number[]): Prom
   }
 }
 
-/** A show's ("tv:1396") aired episodes as episode ids, numbered as TMDB numbers them ([tmdbEpisodes]); [] when TMDB doesn't know it. */
-export async function tmdbEpisodeIds(show: string): Promise<string[]> {
+/** A show's ("tv:1396") aired episodes by episode id, numbered as TMDB numbers them ([tmdbEpisodes]), each its still's path ('' without one); empty when TMDB doesn't know it. */
+export async function tmdbEpisodeStills(show: string): Promise<Map<string, string>> {
   const p = parseTitleId(show)
   const t = p?.kind === 'tv' ? await tmdbTitle('tv', p.tmdb) : null
-  return t ? (await tmdbEpisodes(p!.tmdb, t.seasons)).map((e) => episodeTitle(show, e.season, e.episode)) : []
+  return new Map(t ? (await tmdbEpisodes(p!.tmdb, t.seasons)).map((e) => [episodeTitle(show, e.season, e.episode), e.image && imagePath(e.image)]) : [])
 }
