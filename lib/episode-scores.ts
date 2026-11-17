@@ -85,8 +85,9 @@ const PER_SHOW = 3
 export type BestEpisode = EpisodeScore & { id: string; show: string; still: string }
 
 /**
- * The TrueScore episodes row: the kept episodes of [shows] (title ids; [imdb] gives each one's IMDb id) the owner hasn't
- * watched ([seen]), by TrueScore, best first, [PER_SHOW] a show, the first [n]. Only episodes [listed] (a show's episode
+ * The TrueScore episodes row: the kept episodes of [shows] (title ids; [imdb] gives each one's IMDb id) by TrueScore, best
+ * first, [PER_SHOW] a show, until [n] the owner hasn't watched ([seen]) are in: like the other TrueScore rows, the watched ones
+ * stay among them for the app to show or hide (Hide watched titles). Only episodes [listed] (a show's episode
  * ids as its page numbers them) has too: IMDb numbers some shows apart (One Piece's episodes all in season 1), and
  * a card must open its show's page on itself. [listed] (by episode id, each its still) is asked only of shows still in the running.
  */
@@ -94,16 +95,18 @@ export async function bestEpisodes(shows: string[], imdb: (show: string) => stri
   const kept = store.read()
   const all = shows.flatMap((show) => Object.entries(kept[imdb(show) ?? '']?.e ?? {}).map(([k, s]) => ({ ...s, show, id: `${show}:s${k.replace(':', 'e')}` })))
     // Specials (season 0) aren't the show's own.
-    .filter((x) => !x.id.includes(':s0e') && !seen.has(x.id))
+    .filter((x) => !x.id.includes(':s0e'))
     .sort((a, b) => b.ts - a.ts)
   const ids = new Map<string, Promise<Map<string, string>>>(), taken = new Map<string, number>(), out: BestEpisode[] = []
+  let unseen = 0
   for (const x of all) {
-    if (out.length >= n) break
+    if (unseen >= n) break
     if ((taken.get(x.show) ?? 0) >= PER_SHOW) continue
     if (!ids.has(x.show)) ids.set(x.show, listed(x.show).catch(() => new Map<string, string>()))
     const still = (await ids.get(x.show)!).get(x.id)
     if (still === undefined) continue
     taken.set(x.show, (taken.get(x.show) ?? 0) + 1)
+    if (!seen.has(x.id)) unseen++
     out.push({ ...x, still })
   }
   return out
