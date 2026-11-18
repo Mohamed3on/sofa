@@ -22,7 +22,7 @@ let reply: { ok: boolean; error?: string };
 if (!/^https:\/\/([\w-]+\.)?(youtube\.com|youtu\.be)\/[^']*$/.test(msg.url)) reply = { ok: false, error: 'Not a YouTube URL' };
 else {
   adb('connect', TV); // also wakes the TV from standby
-  const r = adb('-s', TV, 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', `'${msg.url}'`, 'org.smarttube.stable');
+  const r = adb('-s', TV, 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', `'${msg.url}'`, 'org.smarttube.beta');
   reply = r.ok && !/Error/.test(r.out) ? { ok: true } : { ok: false, error: r.out || 'adb failed (is the TV on?)' };
 }
 
