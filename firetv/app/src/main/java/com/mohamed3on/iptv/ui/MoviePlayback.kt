@@ -290,8 +290,8 @@ internal fun MoviePlayback(
     val controlsLift = animateFloatAsState(if (controls && !error) controlsHeight.intValue.toFloat() else 0f, Motion.panel(reduced), label = "lift")
 
     // Post-play: an episode with one after it shows that one's card over its end credits (else its last 20 s);
-    // OK or the 10 s countdown plays it, Back keeps the credits (the file's end then moves on as before). The
-    // countdown runs only over known credits: a guessed last 20 s may still be the story, so it plays out.
+    // only OK plays it, Back keeps the credits. The 10 s countdown (only over known credits) is a cue, never a
+    // start: when it runs out, or the file ends, nothing plays on its own.
     val nextUp = remember(of) { nextUpOf(graph.titles, of) }
     val credits by remember { opened.plan.state.map { it.answer?.copies?.credits }.distinctUntilChanged() }.collectAsState(null)
     var card by remember { mutableStateOf(false) }
@@ -347,7 +347,6 @@ internal fun MoviePlayback(
             drain.snapTo((drain.value + 1_000f / COUNTDOWN_MS).coerceAtMost(1f))
         }
         else drain.animateTo(1f, tween(((1f - drain.value) * COUNTDOWN_MS).toInt(), easing = LinearEasing))
-        playNext()
     }
     // While the controls show, the bar follows the player; elapsed and remaining recompose once a second.
     LaunchedEffect(controls) {
@@ -787,7 +786,7 @@ private fun headingOf(movie: Movie, of: PlayOf): Heading {
     return Heading(show.title, listOfNotNull(e.code, e.title.takeUnless { it.isEmpty() || GENERIC_EPISODE.matches(it) }).joinToString(" · "), show.badge)
 }
 
-/** The next episode's card counts down this long before playing it. */
+/** The next episode's card counts down this long; it never plays it. */
 private const val COUNTDOWN_MS = 10_000L
 /** Without known credits, the card comes this long before the end. */
 private const val CREDITS_FALLBACK_MS = 20_000L

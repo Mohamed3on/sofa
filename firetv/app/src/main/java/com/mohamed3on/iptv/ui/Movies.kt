@@ -507,7 +507,6 @@ private fun <T> heldWhile(hold: Boolean, value: T): T {
 private class Held<T>(var value: T)
 
 /** A row of the library: one group's titles. [progress] is every saved place, by title id. */
-private const val CONTINUE_ROW = "h|continue"
 /** The other rows' opacity while one is being moved. */
 private const val DIMMED_ROW = 0.3f
 /** Titles a row shows once watched ones are out (the box sends each row long enough for that). */
@@ -527,9 +526,9 @@ private class GenreTile(val id: Int, val col: Int)
  * provider's groups when TMDB's are missing), then one Genres row; what is part-way through lives in Up next, not here.
  * [hideWatched] leaves watched titles out of the library's rows (a row left empty goes); each shows its first 60; the
  * Watchlist keeps everything. A genre is a tile pictured by its best title not already picturing another; OK opens its
- * titles. What is part-way through but not recent ([continuing]) is a plain Continue watching row after TrueScore's.
+ * titles.
  */
-private fun rowsOf(library: Catalog?, resume: List<Resume>, history: History?, watched: Set<TitleId>, hideWatched: Boolean, continuing: List<Movie>): List<MovieRow> {
+private fun rowsOf(library: Catalog?, resume: List<Resume>, history: History?, watched: Set<TitleId>, hideWatched: Boolean): List<MovieRow> {
     library ?: return emptyList()
     val progress = resume.filter { it.dur > 0 }.associate { it.title to it.pos.toFloat() / it.dur }
     // The library's own card for a title it has (its genres), else the history's.
@@ -547,10 +546,8 @@ private fun rowsOf(library: Catalog?, resume: List<Resume>, history: History?, w
         }
         MovieRow("r|${row.id}", label.name, label.badge, movies, progress)
     }
-    val at = rows.indexOfLast { it.key.startsWith("r|ts-") } + 1
-    val later = continuing.takeIf { it.isNotEmpty() }?.let { MovieRow(CONTINUE_ROW, "Continue watching", null, it, progress) }
     val genreRow = tiles.takeIf { it.isNotEmpty() }?.let { MovieRow(GENRES_ROW, "Genres", null, it, progress, genres) }
-    return mine + rows.take(at) + listOfNotNull(later) + rows.drop(at) + listOfNotNull(genreRow)
+    return mine + rows + listOfNotNull(genreRow)
 }
 
 /** A library row's titles as the screen shows them: watched ones out when [hideWatched], the first 60. */
@@ -595,14 +592,14 @@ private fun MoviesBrowse(
     var hideWatched by remember { mutableStateOf(prefs.get(SHOW_WATCHED) == null) }
     // ☰ on a card: its actions panel, with Remove from Up next ([Actions.removable]) and the rows' Hide watched setting.
     var actions by remember { mutableStateOf<Actions?>(null) }
-    // A followed show's next episode takes the hero only when nothing is part-way through; what isn't recent is the Continue watching row.
-    val (upNext, older) = remember(library, resume, nextUp) { upNextOf(library, resume, nextUp) }
+    // A followed show's next episode takes the hero only when nothing is part-way through.
+    val upNext = remember(library, resume, nextUp) { upNextOf(library, resume, nextUp) }
     // The rows as the viewer arranged them with ☰ (moved, hidden), shared by their devices.
     val layout = LocalContext.current.graph.rowLayout
     val arranged by layout.version.collectAsState()
     // The row picked up to move (hold OK on a card, or ☰ → Move row): Up and Down move it, OK or Back puts it down.
     var lifted by remember { mutableStateOf<String?>(null) }
-    val rows = remember(library, resume, history, watched, hideWatched, older, arranged) { layout.arrange(rowsOf(library, resume, history, watched, hideWatched, older)) { it.key } }
+    val rows = remember(library, resume, history, watched, hideWatched, arranged) { layout.arrange(rowsOf(library, resume, history, watched, hideWatched)) { it.key } }
     val newShows = remember(nextUp) { nextUp.filter { it.new }.mapTo(HashSet()) { it.show.titleId } }
     var page by remember { mutableStateOf(BrowsePage.UpNext) }
     var beforeSearch by remember { mutableStateOf(BrowsePage.UpNext) }
@@ -777,7 +774,7 @@ private fun MoviesBrowse(
                                 rows, watched, content, active && actions == null,
                                 onFocused = { focused.value = it },
                                 onOpen = onOpen,
-                                onMenu = { m, row -> actions = Actions(m, removable = row == CONTINUE_ROW, row = row) },
+                                onMenu = { m, row -> actions = Actions(m, row = row) },
                                 // Up from the first row: back to Up next, else to Search.
                                 onTop = { if (upNext.isNotEmpty()) page = BrowsePage.UpNext else runCatching { searchButton.requestFocus() } },
                                 onGenre = ::openGenre,
@@ -839,7 +836,7 @@ private fun MoviesBrowse(
     } }
 }
 
-/** ☰'s panel on the browsing screen: for [movie], from Up next or Continue watching ([removable]) or the rows ([row], its key). */
+/** ☰'s panel on the browsing screen: for [movie], from Up next ([removable]) or the rows ([row], its key). */
 private class Actions(val movie: Movie, val removable: Boolean = false, val row: String? = null)
 
 /**

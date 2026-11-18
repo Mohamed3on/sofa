@@ -39,7 +39,7 @@ internal sealed interface LibraryPage {
 private const val MAX_PAGES = 6
 /** The next episode is prepared this long after one starts, so its start has the line to itself. */
 private const val NEXT_WARM_MS = 15_000L
-/** What was played (or a followed show's episode aired) within this long leads the screen as Up next; older is a Continue watching row. */
+/** What was played (or a followed show's episode aired) within this long is Up next; older shows nowhere. */
 private const val RECENT_DAYS = 7L
 
 /** A show's episode on screen: the show, its episodes, and which one plays. */
@@ -139,17 +139,23 @@ internal class MoviesNavigator(
 
     /** The episode after the one playing, from its start; false when there is none. */
     fun nextEpisode(): Boolean {
-        val s = playing?.show?.takeIf { it.index < it.episodes.lastIndex } ?: return false
-        val next = s.episodes[s.index + 1]
-        // Continue watching moves on to the next episode even if it is left in its first minute.
-        shows.save(s.show, 0, 0, next.titleId, next.code)
+        val s = moveOn() ?: return false
         onScreen(episode(s.show, s.episodes, s.index + 1, 0))
         return true
     }
 
-    /** The end of a film or episode: the next episode, else back where it was played from. */
+    /** The end of a film or episode: back where it was played from; the next episode waits there, never plays on its own. */
     fun ended() {
-        if (!nextEpisode()) stop()
+        moveOn()
+        stop()
+    }
+
+    /** The show playing continues from its next episode (even one left in its first minute); null when there is none. */
+    private fun moveOn(): ShowPlay? {
+        val s = playing?.show?.takeIf { it.index < it.episodes.lastIndex } ?: return null
+        val next = s.episodes[s.index + 1]
+        shows.save(s.show, 0, 0, next.titleId, next.code)
+        return s
     }
 
     /** The player closed: back where it was played from. */
@@ -225,18 +231,17 @@ internal fun nextUpOf(history: History?, showPlaces: List<Resume>, watchedHere: 
     history?.next.orEmpty().filter { n -> showPlaces.none { it.title == n.show.titleId } && n.episode !in watchedHere && n.episode !in dismissed }
 
 /**
- * Up next, and what is part-way through but not recent (the Continue watching row). Each saved place ([resume], newest
+ * Up next: each saved place ([resume], newest
  * first) with its title as last played (its provider id, for its episodes and IPTV copy) and as the library has it now
  * (tier and score); one played only from a debrid from its own name and poster (R21). Then followed shows' next
  * episodes, latest aired first. Only what was played, or aired, in the last week is Up next.
  */
-internal fun upNextOf(library: Catalog?, resume: List<Resume>, nextUp: List<NextEpisode>, now: Long = System.currentTimeMillis()): Pair<List<Pair<Movie, Resume>>, List<Movie>> {
-    if (library == null) return emptyList<Pair<Movie, Resume>>() to emptyList()
+internal fun upNextOf(library: Catalog?, resume: List<Resume>, nextUp: List<NextEpisode>, now: Long = System.currentTimeMillis()): List<Pair<Movie, Resume>> {
+    if (library == null) return emptyList()
     val since = now - RECENT_DAYS * 86_400_000L
     val sinceDay = Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate().minusDays(RECENT_DAYS).toString()
-    val all = resume.map { r -> Triple(placeMovie(r, library), r, r.at >= since) } +
-        nextUp.map { n -> Triple(library.find(n.show.titleId) ?: n.show, n.place(), n.air >= sinceDay) }
-    return all.filter { it.third }.map { it.first to it.second } to all.filterNot { it.third }.map { it.first }
+    return resume.filter { it.at >= since }.map { placeMovie(it, library) to it } +
+        nextUp.filter { it.air >= sinceDay }.map { (library.find(it.show.titleId) ?: it.show) to it.place() }
 }
 
 /**

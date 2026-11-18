@@ -66,7 +66,7 @@ class MoviesNavigatorTest {
         assertEquals(LibraryPage.Cast(Person(7, "Actor")), nav.pages.single())
     }
 
-    @Test fun `a show resumes on its first unwatched episode, and each end plays the next until the last`() = runTest {
+    @Test fun `a show resumes on its first unwatched episode, an end moves it on without playing, Next plays it`() = runTest {
         val nav = nav()
         watched = setOf("tv:3:s1e1")
         nav.resume(show, fromStart = false)
@@ -74,16 +74,19 @@ class MoviesNavigatorTest {
         assertEquals(1, nav.playing?.show?.index)
         assertEquals("play:tv:3", screen)
         nav.ended()
+        assertNull(nav.playing)
+        assertEquals("tv:3:s1e3", shows.find("tv:3")?.episode) // the show moves on with it
+        nav.resume(show, fromStart = false)
+        runCurrent()
         assertEquals("tv:3:s1e3", nav.playing?.title)
         assertEquals(0L, nav.playing?.from)
-        assertEquals("tv:3:s1e3", shows.find("tv:3")?.episode) // Continue watching moves on with it
         assertFalse(nav.hasNext)
         nav.ended()
         assertNull(nav.playing)
         assertEquals("movies", screen)
     }
 
-    @Test fun `what was played or aired this week is Up next, older is Continue watching, a show in progress hides its next episode`() {
+    @Test fun `what was played or aired this week is Up next, older is not, a show in progress hides its next episode`() {
         val library = Catalog(emptyList(), listOf(film, other, show))
         val places = listOf(
             Resume(film.titleId, "Film", pos = 1, dur = 10, at = now - day),
@@ -93,9 +96,7 @@ class MoviesNavigatorTest {
             NextEpisode(show, "tv:3:s1e2", "S1 E2", new = true, air = "1970-04-08"),
             NextEpisode(Movie(id = 4, name = "Old", group = "s", titleId = "tv:4"), "tv:4:s1e2", "S1 E2", new = false, air = "1970-01-01"),
         )
-        val (upNext, older) = upNextOf(library, places, next, now)
-        assertEquals(listOf("movie:1", "tv:3"), upNext.map { it.first.titleId })
-        assertEquals(listOf("movie:2", "tv:4"), older.map { it.titleId })
+        assertEquals(listOf("movie:1", "tv:3"), upNextOf(library, places, next, now).map { it.first.titleId })
 
         val history = History(emptySet(), emptyList(), next)
         assertEquals(listOf("tv:4"), nextUpOf(history, listOf(Resume("tv:3", "Show", pos = 1, dur = 10, at = now)), emptySet(), emptySet()).map { it.show.titleId })
