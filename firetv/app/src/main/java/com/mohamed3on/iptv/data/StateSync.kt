@@ -94,7 +94,7 @@ class StateSync(
         private val PUSH_DELAY = 3.seconds
         private val json = Json { ignoreUnknownKeys = true }
         private val SHARED = setOf(
-            "lineup.favourites", "movies.rowOrder", "movies.hiddenRows", "movies.search.recent",
+            "lineup.favourites", "movies.rowOrder", "movies.noAutoplay", "movies.hiddenRows", "movies.search.recent",
             "titles.movies.resume", "titles.shows.resume", "titles.shows.followed", "titles.upnext.dismissed",
             "copies.pins", "copies.languages", "copies.lacking.v2", "copies.dubFirst",
         )

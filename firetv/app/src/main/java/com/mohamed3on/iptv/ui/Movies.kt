@@ -2581,7 +2581,8 @@ private fun ShowPage(
         episodes.orEmpty().filter { it.tr != null }.groupBy { it.season }.filterValues { it.size >= 2 }.mapValues { (_, e) -> e.sumOf { it.tr!! } / e.size }
     }
     val standout = remember(episodes, seen) { episodes?.let { standout(it, seen) } }
-    var lastPlayed by remember { mutableStateOf<Int?>(null) }
+    // The episode last picked here, until the show's place is saved again (any play that started saves it; its end moves it on).
+    var lastPlayed by remember(resume) { mutableStateOf<Int?>(null) }
     // Opened on an episode (the TrueScore episodes row), that one; else the one up next.
     val target = episodes?.takeIf { it.isNotEmpty() }?.let { lastPlayed ?: it.indexOfFirst { e -> e.titleId == episode }.takeIf { i -> i >= 0 } ?: upNextIndex(it, resume, seen) }
     val primary = remember { FocusRequester() }

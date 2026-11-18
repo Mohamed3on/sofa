@@ -40,6 +40,8 @@ private const val MAX_PAGES = 6
 /** The next episode is prepared this long after one starts, so its start has the line to itself. */
 private const val NEXT_WARM_MS = 15_000L
 /** What was played (or a followed show's episode aired) within this long is Up next; older shows nowhere. */
+/** Set when the owner turned Autoplay next episode off (Options); shared by their devices. */
+internal const val NO_AUTOPLAY = "movies.noAutoplay"
 private const val RECENT_DAYS = 7L
 
 /** A show's episode on screen: the show, its episodes, and which one plays. */
@@ -144,8 +146,9 @@ internal class MoviesNavigator(
         return true
     }
 
-    /** The end of a film or episode: back where it was played from; the next episode waits there, never plays on its own. */
+    /** The end of a film or episode: the next episode with Autoplay on, else back where it was played from, the show moved on to it. */
     fun ended() {
+        if (prefs.get(NO_AUTOPLAY) == null && nextEpisode()) return
         moveOn()
         stop()
     }

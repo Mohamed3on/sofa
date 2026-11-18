@@ -12,6 +12,7 @@ import com.mohamed3on.iptv.system.Check
 import com.mohamed3on.iptv.ui.LibraryPage
 import com.mohamed3on.iptv.ui.LiveLine
 import com.mohamed3on.iptv.ui.MoviesNavigator
+import com.mohamed3on.iptv.ui.NO_AUTOPLAY
 import com.mohamed3on.iptv.ui.nextUpOf
 import com.mohamed3on.iptv.ui.upNextOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -66,7 +67,7 @@ class MoviesNavigatorTest {
         assertEquals(LibraryPage.Cast(Person(7, "Actor")), nav.pages.single())
     }
 
-    @Test fun `a show resumes on its first unwatched episode, an end moves it on without playing, Next plays it`() = runTest {
+    @Test fun `a show resumes on its first unwatched episode, an end plays the next until the last, or with Autoplay off only moves it on`() = runTest {
         val nav = nav()
         watched = setOf("tv:3:s1e1")
         nav.resume(show, fromStart = false)
@@ -74,8 +75,22 @@ class MoviesNavigatorTest {
         assertEquals(1, nav.playing?.show?.index)
         assertEquals("play:tv:3", screen)
         nav.ended()
+        assertEquals("tv:3:s1e3", nav.playing?.title)
+        assertEquals(0L, nav.playing?.from)
+        assertEquals("tv:3:s1e3", shows.find("tv:3")?.episode) // Up next moves on with it
+        assertFalse(nav.hasNext)
+        nav.ended()
         assertNull(nav.playing)
-        assertEquals("tv:3:s1e3", shows.find("tv:3")?.episode) // the show moves on with it
+        assertEquals("movies", screen)
+
+        prefs.put(NO_AUTOPLAY, "1")
+        watched = setOf("tv:3:s1e1")
+        shows.remove("tv:3")
+        nav.resume(show, fromStart = false)
+        runCurrent()
+        nav.ended()
+        assertNull(nav.playing)
+        assertEquals("tv:3:s1e3", shows.find("tv:3")?.episode) // the show moves on, nothing plays
         nav.resume(show, fromStart = false)
         runCurrent()
         assertEquals("tv:3:s1e3", nav.playing?.title)

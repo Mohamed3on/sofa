@@ -290,13 +290,13 @@ internal fun MoviePlayback(
     val controlsLift = animateFloatAsState(if (controls && !error) controlsHeight.intValue.toFloat() else 0f, Motion.panel(reduced), label = "lift")
 
     // Post-play: an episode with one after it shows that one's card over its end credits (else its last 20 s);
-    // only OK plays it, Back keeps the credits. The 10 s countdown (only over known credits) is a cue, never a
-    // start: when it runs out, or the file ends, nothing plays on its own.
+    // OK plays it, Back keeps the credits. Its fill drains over the credits to the file's end, where the next
+    // episode plays with Autoplay on (Options).
     val nextUp = remember(of) { nextUpOf(graph.titles, of) }
     val credits by remember { opened.plan.state.map { it.answer?.copies?.credits }.distinctUntilChanged() }.collectAsState(null)
     var card by remember { mutableStateOf(false) }
     var dismissed by remember { mutableStateOf(false) }
-    var counts by remember { mutableStateOf(false) }
+    var creditsFrom by remember { mutableLongStateOf(0L) }
     val drain = remember { Animatable(0f) }
     LaunchedEffect(onNext != null && nextUp != null, credits, dismissed) {
         card = false
@@ -304,9 +304,8 @@ internal fun MoviePlayback(
         while (true) {
             val dur = exo.duration
             val at = exo.currentPosition
-            val known = knownCredits(credits, dur)
-            counts = known != null
-            card = dur > 0 && at >= (known ?: (dur - CREDITS_FALLBACK_MS)) && at < dur
+            creditsFrom = knownCredits(credits, dur) ?: (dur - CREDITS_FALLBACK_MS)
+            card = dur > 0 && at >= creditsFrom && at < dur
             delay(500)
         }
     }
@@ -338,15 +337,18 @@ internal fun MoviePlayback(
         dismissed = true
         onNext?.let { next -> play.next(next, done = true) }
     }
-    LaunchedEffect(card, counts, ui.playing) {
-        if (!card || !counts) return@LaunchedEffect drain.snapTo(0f)
+    LaunchedEffect(card, ui.playing) {
+        if (!card) return@LaunchedEffect drain.snapTo(0f)
+        val dur = exo.duration
+        fun elapsed() = ((exo.currentPosition - creditsFrom).toFloat() / (dur - creditsFrom)).coerceIn(0f, 1f)
+        drain.snapTo(elapsed())
         if (!ui.playing) return@LaunchedEffect
         // Reduced motion: the fill steps once a second instead of gliding.
         if (reduced) while (drain.value < 1f) {
             delay(1_000)
-            drain.snapTo((drain.value + 1_000f / COUNTDOWN_MS).coerceAtMost(1f))
+            drain.snapTo(elapsed())
         }
-        else drain.animateTo(1f, tween(((1f - drain.value) * COUNTDOWN_MS).toInt(), easing = LinearEasing))
+        else drain.animateTo(1f, tween((dur - exo.currentPosition).toInt().coerceAtLeast(0), easing = LinearEasing))
     }
     // While the controls show, the bar follows the player; elapsed and remaining recompose once a second.
     LaunchedEffect(controls) {
@@ -554,6 +556,7 @@ internal fun MoviePlayback(
             val filmState by session.state.collectAsState()
             val prepared by opened.plan.state.collectAsState()
             var dubFirst by remember { mutableStateOf(graph.copyChoices.dubFirst) }
+            var autoplay by remember { mutableStateOf(graph.prefs.get(NO_AUTOPLAY) == null) }
             MoviePanel(
                 audioState,
                 subtitleState,
@@ -581,8 +584,13 @@ internal fun MoviePlayback(
                     play.fromStart()
                     position.longValue = 0
                 },
-                // Its place is kept here; leaving then saves nothing, so Continue watching names the next episode.
+                // Its place is kept here; leaving then saves nothing, so Up next names the next episode.
                 onNext = onNext?.let { next -> { play.next(next) } },
+                autoplay = autoplay,
+                onAutoplay = {
+                    autoplay = !autoplay
+                    graph.prefs.put(NO_AUTOPLAY, if (autoplay) null else "1")
+                },
                 modifier = m,
             ) { first ->
                 Versions(
@@ -786,8 +794,6 @@ private fun headingOf(movie: Movie, of: PlayOf): Heading {
     return Heading(show.title, listOfNotNull(e.code, e.title.takeUnless { it.isEmpty() || GENERIC_EPISODE.matches(it) }).joinToString(" · "), show.badge)
 }
 
-/** The next episode's card counts down this long; it never plays it. */
-private const val COUNTDOWN_MS = 10_000L
 /** Without known credits, the card comes this long before the end. */
 private const val CREDITS_FALLBACK_MS = 20_000L
 private val CARD_WIDTH = 400.dp
@@ -899,15 +905,20 @@ private fun StateMark(paused: () -> Float, modifier: Modifier) {
 
 private enum class PanelPage { Main, Version, Audio, Subtitles }
 
+/** A hairline between the Options panel's groups. */
+@Composable
+private fun PanelRule() = Box(Modifier.padding(horizontal = Space.l, vertical = Space.s).fillMaxWidth().height(1.dp).background(Palette.edge))
+
 /**
- * Menu while a movie plays: the version playing ([versions], R11), audio track (when there is a choice),
- * subtitles (when there are any), Arabic dub first (the owner's setting, every title), a show's Next episode and Play from beginning.
+ * Menu while a movie plays, in three groups: what this play shows (the version playing ([versions], R11), audio track
+ * when there is a choice, subtitles when there are any); jumps (a show's Next episode, Play from beginning); and the
+ * owner's settings for every title (Arabic dub first, a show's Autoplay next episode).
  */
 @Composable
 private fun MoviePanel(
     audio: AudioState, subtitles: SubtitleState, fetched: SubtitleFetch.State, version: String?, onSubtitle: (SubtitleOption?) -> Unit,
     onFetched: (FoundSubtitle) -> Unit, onShift: (Long) -> Unit, open: Boolean,
-    onAudio: (com.mohamed3on.iptv.player.AudioOption) -> Unit, dubFirst: Boolean, onDubFirst: () -> Unit, onFromStart: () -> Unit, onNext: (() -> Unit)?, modifier: Modifier,
+    onAudio: (com.mohamed3on.iptv.player.AudioOption) -> Unit, dubFirst: Boolean, onDubFirst: () -> Unit, onFromStart: () -> Unit, onNext: (() -> Unit)?, autoplay: Boolean, onAutoplay: () -> Unit, modifier: Modifier,
     versions: @Composable ColumnScope.(first: FocusRequester) -> Unit,
 ) {
     val stay by rememberUpdatedState(open)
@@ -953,9 +964,12 @@ private fun MoviePanel(
                     fetched.selected?.let { "${fetchedName(it.lang)} · OpenSubtitles" } ?: subtitles.selected?.let(::subtitleName) ?: if (searching) "Searching…" else "Off",
                     focus = take(),
                 ) { page = PanelPage.Subtitles }
-                PanelRow("Arabic dub first", if (dubFirst) "On" else "Off", focus = take(), onClick = onDubFirst)
+                PanelRule()
                 if (onNext != null) PanelRow("Next episode", focus = take(), onClick = onNext)
                 PanelRow("Play from beginning", focus = take(), onClick = onFromStart)
+                PanelRule()
+                PanelRow("Arabic dub first", if (dubFirst) "On" else "Off", focus = take(), onClick = onDubFirst)
+                if (onNext != null) PanelRow("Autoplay next episode", if (autoplay) "On" else "Off", focus = take(), onClick = onAutoplay)
             }
             PanelPage.Version -> versions(first)
             PanelPage.Audio -> audio.options.forEachIndexed { i, option ->
