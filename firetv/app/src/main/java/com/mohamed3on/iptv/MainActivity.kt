@@ -1,10 +1,6 @@
 package com.mohamed3on.iptv
 
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
-import android.media.AudioManager
 import android.os.Bundle
 import com.mohamed3on.iptv.system.Check
 import com.mohamed3on.iptv.ui.MicButton
@@ -50,9 +46,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.tv.material3.Text
@@ -138,19 +132,6 @@ class MainActivity : ComponentActivity() {
         val reader = getSystemService(AccessibilityManager::class.java)
             .getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_SPOKEN or AccessibilityServiceInfo.FEEDBACK_BRAILLE).isNotEmpty()
         val semantics = if (reader) Modifier else Modifier.clearAndSetSemantics {}
-        // Volume up on a soundbar muted from elsewhere (Alexa on a Sonos) only steps its volume over HDMI-CEC and leaves it
-        // muted. The TV takes the volume keys itself, so what Sofa sees is the bar reporting a higher volume while the music
-        // stream mirrors its mute: then it unmutes the bar as the remote's Mute does.
-        val unmute = object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                if (intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1) != AudioManager.STREAM_MUSIC) return
-                val up = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", 0) > intent.getIntExtra("android.media.EXTRA_PREV_VOLUME_STREAM_VALUE", Int.MAX_VALUE)
-                val audio = getSystemService(AudioManager::class.java)
-                if (up && audio.isStreamMute(AudioManager.STREAM_MUSIC)) audio.adjustSuggestedStreamVolume(AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.USE_DEFAULT_STREAM_TYPE, AudioManager.FLAG_SHOW_UI)
-            }
-        }
-        ContextCompat.registerReceiver(this, unmute, IntentFilter("android.media.VOLUME_CHANGED_ACTION"), ContextCompat.RECEIVER_NOT_EXPORTED)
-        lifecycle.addObserver(LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_DESTROY) unregisterReceiver(unmute) })
         // A launch reopens Movies & Shows (or the title page) it was closed on; a check target wins.
         Check.request(intent.getStringExtra("open") ?: graph.prefs.get(Check.LAST_SCREEN))
         val sync = graph.sync

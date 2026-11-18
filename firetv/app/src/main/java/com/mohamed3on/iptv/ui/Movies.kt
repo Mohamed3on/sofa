@@ -1510,24 +1510,20 @@ private fun Rows(
     var opened by remember { mutableStateOf(tile?.let { GENRES_ROW to it.id }) }
     val lastFocused = remember { arrayOfNulls<Pair<String, Int>>(1) }
     LaunchedEffect(active) {
-        val target = opened?.takeIf { active && rows.isNotEmpty() } ?: return@LaunchedEffect
-        val found = rows.indexOfFirst { it.key == target.first }
-        // Its row gone (hidden from ☰, or all of it watched with watched titles hidden): the row now in its place.
-        val index = if (found >= 0) found else focusedRow.coerceIn(0, rows.lastIndex)
-        val row = rows[index]
-        // Its card gone (watched, with watched titles hidden): the row itself, which lands on the card now in its place.
-        val gone = found < 0 || row.movies.none { it.id == target.second }
-        if (gone) opened = null
-        // Up at the top, where a focused row sits; one only partly on screen would leave its card half below it.
-        list.scrollToItem(index)
-        // Landed only once the card takes focus again: it was the last focused before the page or panel took it.
-        lastFocused[0] = null
-        repeat(FOCUS_FRAMES) {
-            withFrameNanos {}
-            // A card the row no longer has can still take focus for a frame or two before it goes: only one it keeps counts.
-            val at = lastFocused[0]
-            if (at == target || (gone && at?.first == row.key && row.movies.any { it.id == at.second })) return@repeat
-            runCatching { (if (gone) rowFocus[row.key] else back)?.requestFocus() }
+        val target = opened?.takeIf { active } ?: return@LaunchedEffect
+        val index = rows.indexOfFirst { it.key == target.first }
+        // Its row gone (hidden from ☰), the rows' own first card.
+        if (index < 0) runCatching { focus.requestFocus() }
+        if (index >= 0) {
+            // Up at the top, where a focused row sits; one only partly on screen would leave its card half below it.
+            list.scrollToItem(index)
+            // Landed only once the card takes focus again: it was the last focused before the page or panel took it.
+            lastFocused[0] = null
+            repeat(FOCUS_FRAMES) {
+                withFrameNanos {}
+                if (lastFocused[0] == target) return@repeat
+                runCatching { back.requestFocus() }
+            }
         }
         opened = null
     }
