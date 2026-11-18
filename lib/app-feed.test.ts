@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, setSystemTime, spyOn, test } from 'bun:test'
 import { buildAppFeed, buildAppGuide, guideDescr } from './app-feed.js'
 import { buildM3U, forgetBuiltGuide, withBackupFeeds, withCompetitionGroups, type Channel } from './curation.js'
-import { BACKUP_ID, useProviderFetch, VPN_HOST } from './provider.js'
+import { BACKUP_ID, useProviderFetch } from './provider.js'
 import { Database } from 'bun:sqlite'
 import { rm } from 'node:fs/promises'
 import { guide as guideRoute } from '../api/app.js'
@@ -83,11 +83,11 @@ describe('app channel feed', () => {
     }
   })
 
-  test('buildM3U output for the same channels is unchanged by the VPN_HOST move', () => {
-    const m3u = buildM3U({ ...cfg, host: VPN_HOST }, [ch(1, 'UK: A', 'a.uk')], ['http://e'])
+  test('the playlist lists each channel with its guide id, name, logo and group, streamed from the account\'s host', () => {
+    const m3u = buildM3U(cfg, [ch(1, 'UK: A', 'a.uk')], ['http://e'])
     expect(m3u).toBe(
       '#EXTM3U url-tvg="http://e"\n#EXTINF:-1 tvg-id="a.uk" tvg-name="UK: A" tvg-logo="" group-title="🏴 Sky Sports & UK Sports",UK: A\n' +
-        'http://apps.g1ming-hub.sbs/live/u/p/1.ts\n',
+        'http://plain.example/live/u/p/1.ts\n',
     )
   })
 })

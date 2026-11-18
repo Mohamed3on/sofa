@@ -17,27 +17,10 @@ import java.io.IOException
 
 @RunWith(RobolectricTestRunner::class)
 class StreamErrorsTest {
-    private fun recovery(f: StreamFailure) = StreamErrors.recovery(f)
-    private fun http(status: Int) = recovery(StreamFailure.Http(status))
-
-    @Test fun http458MeansTheAccountIsBusy() = assertEquals(Recovery.Busy, http(458))
-
-    @Test fun http511And403MeanTheRouteIsWrong() {
-        assertEquals(Recovery.WrongRoute, http(511))
-        assertEquals(Recovery.WrongRoute, http(403))
-    }
-
-    @Test fun notFoundTimeoutsAndUnplayableBodiesMoveToTheNextFeed() {
-        assertEquals(Recovery.NextFeed, http(404))
-        assertEquals(Recovery.NextFeed, recovery(StreamFailure.Timeout))
-        assertEquals(Recovery.NextFeed, recovery(StreamFailure.Unplayable("")))
-    }
-
-    // An unreachable host is the network, not the channel: no other feed would do better.
-    @Test fun serverErrorsAndNoNetworkBackOff() {
-        assertEquals(Recovery.Backoff, http(500))
-        assertEquals(Recovery.Backoff, http(503))
-        assertEquals(Recovery.Backoff, recovery(StreamFailure.Unreachable))
+    // 458, 511/403, timeouts, 5xx and an unreachable host are played through in StreamSessionTest.
+    @Test fun notFoundAndUnplayableBodiesMoveToTheNextFeed() {
+        assertEquals(Recovery.NextFeed, StreamErrors.recovery(StreamFailure.Http(404)))
+        assertEquals(Recovery.NextFeed, StreamErrors.recovery(StreamFailure.Unplayable("")))
     }
 
     private fun source(e: IOException, code: Int) = ExoPlaybackException.createForSource(e, code)
