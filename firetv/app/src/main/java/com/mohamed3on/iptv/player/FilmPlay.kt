@@ -32,8 +32,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicLong
 
-/** What a play is of: a film, or a show's [episode] (then [title] is the show). */
-class PlayOf(val title: Movie, val episode: Episode? = null) {
+/** What a play is of: a film, or a show's [episode] (then [title] is the show, and [next] the episode after it). */
+class PlayOf(val title: Movie, val episode: Episode? = null, val next: Episode? = null) {
     /** The film's or the episode's title id: its copies, watched mark and Trakt entry. */
     val id: TitleId get() = episode?.titleId ?: title.titleId
 }
@@ -172,7 +172,13 @@ class FilmPlay(
             if (e != null && stores.followed.find(of.title.titleId)?.episode != e.titleId)
                 stores.followed.merge(listOf(of.title.resume(pos, dur, e.titleId, e.code, stores.now())))
         }
-        if (e == null) stores.films.save(of.title, pos, dur) else stores.shows.save(of.title, pos, dur, e.titleId, e.code)
+        val next = of.next?.takeIf { finished(pos, dur) }
+        when {
+            e == null -> stores.films.save(of.title, pos, dur)
+            // Finished, however it was left (its end, Back over the credits): the show moves on to the next episode.
+            next != null -> stores.shows.save(of.title, 0, 0, next.titleId, next.code)
+            else -> stores.shows.save(of.title, pos, dur, e.titleId, e.code)
+        }
     }
 
     companion object {

@@ -97,4 +97,13 @@ class FilmPlayTest {
         r.play.close() // the screen goes: nothing more is saved over it
         assertNull(r.stores.shows.find(show.titleId))
     }
+
+    @Test fun `an episode left over its credits moves its show on to the next one`() = runTest {
+        val second = Episode(id = 4, titleId = "tv:1396:s1e2", season = 1, episode = 2)
+        val r = rig(PlayOf(show, pilot, second))
+        r.player.seek(r.player.duration * 95 / 100)
+        r.play.leave()
+        assertEquals(second.titleId, r.stores.shows.find(show.titleId)?.episode)
+        assertEquals(0L, r.stores.shows.startAt(show.titleId, second.titleId))
+    }
 }

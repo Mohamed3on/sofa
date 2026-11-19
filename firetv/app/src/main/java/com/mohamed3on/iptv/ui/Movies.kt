@@ -482,7 +482,7 @@ fun MoviesLayer(
                     CompositionLocalProvider(LocalLibrary provides if (s != null) LibraryKind.Shows else LibraryKind.Movies) {
                         MoviePlayback(
                             movie = p.movie,
-                            of = if (s != null) PlayOf(s.show, s.episode) else PlayOf(p.movie),
+                            of = if (s != null) PlayOf(s.show, s.episode, s.episodes.getOrNull(s.index + 1)) else PlayOf(p.movie),
                             from = p.from,
                             fallback = p.fallback,
                             iptvUrl = iptvUrl(p),
